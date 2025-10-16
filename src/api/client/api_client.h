@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../common/transport.h"
-#include "../common/serialisation.h"
-#include "../protocol/colour_data_protocol.h"
+#include "transport.h"
+#include "serialisation.h"
+#include "colour_data_protocol.h"
 #include <memory>
 #include <atomic>
 #include <thread>

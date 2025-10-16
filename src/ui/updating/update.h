@@ -1,5 +1,4 @@
-#ifndef UPDATE_H
-#define UPDATE_H
+#pragma once
 
 #include <string>
 #include <functional>
@@ -43,5 +42,3 @@ private:
     
     void performHttpRequest(const std::string& url, std::function<void(const std::string&)> callback);
 };
-
-#endif

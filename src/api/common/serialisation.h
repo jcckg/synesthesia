@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../protocol/colour_data_protocol.h"
+#include "colour_data_protocol.h"
 #include <vector>
 #include <span>
 #include <optional>
@@ -11,15 +11,26 @@ class MessageSerialiser {
 public:
     static std::vector<uint8_t> serialiseColourData(
         const std::vector<ColourData>& colours,
+        const SpectralCharacteristics& spectral_characteristics,
         uint32_t sample_rate,
         uint32_t fft_size,
         uint64_t frame_timestamp,
         uint32_t sequence
     );
-    
+
     static void serialiseColourDataIntoBuffer(
         std::vector<uint8_t>& buffer,
         const std::vector<ColourData>& colours,
+        const SpectralCharacteristics& spectral_characteristics,
+        uint32_t sample_rate,
+        uint32_t fft_size,
+        uint64_t frame_timestamp,
+        uint32_t sequence
+    );
+
+    static void serialiseFullSpectrumDataIntoBuffer(
+        std::vector<uint8_t>& buffer,
+        const std::vector<SpectralBin>& bins,
         uint32_t sample_rate,
         uint32_t fft_size,
         uint64_t frame_timestamp,
@@ -69,6 +80,13 @@ public:
     static std::optional<DeserialisedMessage> deserialise(std::span<const uint8_t> data);
     
     static std::optional<std::vector<ColourData>> deserialiseColourData(
+        std::span<const uint8_t> payload,
+        uint32_t& sample_rate,
+        uint32_t& fft_size,
+        uint64_t& frame_timestamp
+    );
+
+    static std::optional<std::vector<SpectralBin>> deserialiseFullSpectrumData(
         std::span<const uint8_t> payload,
         uint32_t& sample_rate,
         uint32_t& fft_size,

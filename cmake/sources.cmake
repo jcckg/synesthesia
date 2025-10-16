@@ -1,17 +1,73 @@
 set(SOURCES
     ${SRC_DIR}/main.cpp
-    ${SRC_DIR}/zero_crossing/zero_crossing.cpp
-    ${SRC_DIR}/audio/audio_input.cpp
-    ${SRC_DIR}/audio/audio_processor.cpp
+    ${SRC_DIR}/audio/analysis/fft/fft_processor.cpp
+    ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
+    ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
+    ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp
+    ${SRC_DIR}/audio/input/audio_input.cpp
+    ${SRC_DIR}/audio/output/audio_output.cpp
+    ${SRC_DIR}/audio/processing/audio_processor.cpp
+    ${SRC_DIR}/audio/processing/dc_filter/dc_filter.cpp
+    ${SRC_DIR}/audio/processing/noise_gate/noise_gate.cpp
+    ${SRC_DIR}/resyne/encoding/spectral/colour_native_codec.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/phase_wrapping.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/transient_detection.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/damage_detection.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/phase_locking.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/phase_vocoder.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/pghi.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/phase_smoothing.cpp
+    ${SRC_DIR}/resyne/encoding/formats/exporter.cpp
+    ${SRC_DIR}/resyne/encoding/formats/format_tiff.cpp
+    ${SRC_DIR}/resyne/encoding/formats/format_resyne.cpp
+    ${SRC_DIR}/resyne/encoding/formats/format_wav.cpp
+    ${SRC_DIR}/resyne/encoding/formats/format_mp4.cpp
+    ${SRC_DIR}/resyne/conversions/colour_space.cpp
+    ${SRC_DIR}/resyne/encoding/audio/wav_encoder.cpp
+    ${SRC_DIR}/resyne/decoding/wav_decoder_impl.cpp
     ${SRC_DIR}/colour/colour_mapper.cpp
-    ${SRC_DIR}/fft/fft_processor.cpp
+    ${SRC_DIR}/ui/ui.cpp
+    ${SRC_DIR}/ui/handlers/import_handler.cpp
     ${SRC_DIR}/ui/controls/controls.cpp
     ${SRC_DIR}/ui/device_manager/device_manager.cpp
     ${SRC_DIR}/ui/updating/update.cpp
     ${SRC_DIR}/ui/smoothing/smoothing.cpp
     ${SRC_DIR}/ui/styling/styling.cpp
     ${SRC_DIR}/ui/spectrum_analyser/spectrum_analyser.cpp
-    ${SRC_DIR}/ui.cpp
+    ${SRC_DIR}/ui/sidebar/sidebar.cpp
+    ${SRC_DIR}/ui/dragdrop/file_drop_manager.cpp
+    ${SRC_DIR}/ui/input/trackpad_gestures.cpp
+    ${SRC_DIR}/utilities/midi/input/midi_input.cpp
+    ${SRC_DIR}/utilities/midi/processing/midi_processor.cpp
+    ${SRC_DIR}/utilities/midi/analysis/midi_analyser.cpp
+    ${SRC_DIR}/utilities/midi/device_manager/midi_device_manager.cpp
+    ${SRC_DIR}/utilities/video/ffmpeg_locator.cpp
+    ${SRC_DIR}/resyne/decoding/audio_decoder.cpp
+    ${SRC_DIR}/resyne/decoding/decoder_wav.cpp
+    ${SRC_DIR}/resyne/decoding/decoder_flac.cpp
+    ${SRC_DIR}/resyne/decoding/decoder_mp3.cpp
+    ${SRC_DIR}/resyne/decoding/decoder_ogg.cpp
+    ${SRC_DIR}/resyne/recorder/recording.cpp
+    ${SRC_DIR}/resyne/recorder/playback.cpp
+    ${SRC_DIR}/resyne/recorder/dialogs.cpp
+    ${SRC_DIR}/resyne/recorder/import.cpp
+    ${SRC_DIR}/resyne/recorder/import_helpers.cpp
+    ${SRC_DIR}/resyne/recorder/colour_cache_utils.cpp
+    ${SRC_DIR}/resyne/ui/recorder/bottom_panel.cpp
+    ${SRC_DIR}/resyne/ui/recorder/full_window.cpp
+    ${SRC_DIR}/resyne/ui/recorder/export_dialog.cpp
+    ${SRC_DIR}/resyne/ui/recorder/loading_dialog.cpp
+    ${SRC_DIR}/resyne/ui/recorder/exporting_dialog.cpp
+    ${SRC_DIR}/resyne/ui/recorder/utils.cpp
+    ${SRC_DIR}/resyne/ui/recorder/shared_components.cpp
+    ${SRC_DIR}/resyne/ui/toolbar/tool_state.cpp
+    ${SRC_DIR}/resyne/ui/toolbar/toolbar.cpp
+    ${SRC_DIR}/resyne/ui/timeline/timeline.cpp
+    ${SRC_DIR}/resyne/ui/timeline/timeline_labels.cpp
+    ${SRC_DIR}/resyne/ui/timeline/timeline_gradient.cpp
+    ${SRC_DIR}/resyne/ui/timeline/timeline_viewport.cpp
+    ${SRC_DIR}/resyne/ui/timeline/timeline_render.cpp
+    ${SRC_DIR}/resyne/controller/controller.cpp
 )
 
 function(add_api_sources)
@@ -27,16 +83,52 @@ function(add_api_sources)
     endif()
 endfunction()
 
+function(add_midi_sources)
+    if(ENABLE_MIDI)
+        list(APPEND SOURCES
+            ${SRC_DIR}/ui/handlers/midi_handler.cpp
+        )
+        set(SOURCES ${SOURCES} PARENT_SCOPE)
+        message(STATUS "Added MIDI handler sources to build")
+    endif()
+endfunction()
+
 function(configure_include_directories)
+    target_include_directories(${EXECUTABLE_NAME} SYSTEM PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/portable-file-dialogs
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lodepng
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/dr_libs
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng
+    )
+
     target_include_directories(${EXECUTABLE_NAME} PRIVATE
         ${IMGUI_DIR}
         ${IMGUI_DIR}/backends
         ${IMPLOT_DIR}
         ${KISSFFT_DIR}
+        ${RTMIDI_DIR}
         ${SRC_DIR}
         ${SRC_DIR}/audio
+        ${SRC_DIR}/audio/analysis
+        ${SRC_DIR}/audio/analysis/fft
+        ${SRC_DIR}/audio/analysis/spectral
+        ${SRC_DIR}/audio/analysis/eq
+        ${SRC_DIR}/audio/analysis/loudness
+        ${SRC_DIR}/audio/input
+        ${SRC_DIR}/audio/output
+        ${SRC_DIR}/audio/processing
+        ${SRC_DIR}/audio/processing/dc_filter
+        ${SRC_DIR}/audio/processing/noise_gate
+        ${SRC_DIR}/resyne/encoding
+        ${SRC_DIR}/resyne/encoding/spectral
+        ${SRC_DIR}/resyne/encoding/reconstruction
+        ${SRC_DIR}/resyne/encoding/formats
+        ${SRC_DIR}/resyne/encoding/audio
+        ${SRC_DIR}/resyne/conversions
         ${SRC_DIR}/colour
-        ${SRC_DIR}/fft
+        ${SRC_DIR}/ui
+        ${SRC_DIR}/ui/handlers
         ${SRC_DIR}/ui/controls
         ${SRC_DIR}/ui/device_manager
         ${SRC_DIR}/ui/updating
@@ -44,8 +136,24 @@ function(configure_include_directories)
         ${SRC_DIR}/ui/styling
         ${SRC_DIR}/ui/styling/system_theme
         ${SRC_DIR}/ui/spectrum_analyser
-        ${SRC_DIR}/zero_crossing
-        ${SRC_DIR}/cli
+        ${SRC_DIR}/ui/sidebar
+        ${SRC_DIR}/ui/dragdrop
+        ${SRC_DIR}/ui/input
+        ${SRC_DIR}/resyne
+        ${SRC_DIR}/resyne/controller
+        ${SRC_DIR}/resyne/decoding
+        ${SRC_DIR}/resyne/recorder
+        ${SRC_DIR}/resyne/ui
+        ${SRC_DIR}/resyne/ui/recorder
+        ${SRC_DIR}/resyne/ui/timeline
+        ${SRC_DIR}/resyne/ui/toolbar
+        ${SRC_DIR}/utilities/cli
+        ${SRC_DIR}/utilities/video
+        ${SRC_DIR}/utilities/midi
+        ${SRC_DIR}/utilities/midi/input
+        ${SRC_DIR}/utilities/midi/processing
+        ${SRC_DIR}/utilities/midi/analysis
+        ${SRC_DIR}/utilities/midi/device_manager
         ${CMAKE_BINARY_DIR}
         /opt/homebrew/include
     )

@@ -6,6 +6,7 @@ namespace Synesthesia::API {
 
 std::vector<uint8_t> MessageSerialiser::serialiseColourData(
     const std::vector<ColourData>& colours,
+    const SpectralCharacteristics& spectral_characteristics,
     uint32_t sample_rate,
     uint32_t fft_size,
     uint64_t frame_timestamp,
@@ -13,30 +14,32 @@ std::vector<uint8_t> MessageSerialiser::serialiseColourData(
 ) {
     size_t colour_count = std::min(colours.size(), MAX_COLOURS_PER_MESSAGE);
     size_t message_size = sizeof(ColourDataMessage) + colour_count * sizeof(ColourData);
-    
+
     std::vector<uint8_t> buffer(message_size);
     auto* msg = reinterpret_cast<ColourDataMessage*>(buffer.data());
-    
+
     msg->header.magic = 0x53594E45;
     msg->header.version = 1;
     msg->header.type = MessageType::COLOUR_DATA;
     msg->header.length = static_cast<uint16_t>(message_size - sizeof(MessageHeader));
     msg->header.sequence = sequence;
     msg->header.timestamp = MessageDeserialiser::getCurrentTimestamp();
-    
+
     msg->sample_rate = sample_rate;
     msg->fft_size = fft_size;
     msg->colour_count = static_cast<uint32_t>(colour_count);
     msg->frame_timestamp = frame_timestamp;
-    
+    msg->spectral_characteristics = spectral_characteristics;
+
     std::memcpy(msg->colours, colours.data(), colour_count * sizeof(ColourData));
-    
+
     return buffer;
 }
 
 void MessageSerialiser::serialiseColourDataIntoBuffer(
     std::vector<uint8_t>& buffer,
     const std::vector<ColourData>& colours,
+    const SpectralCharacteristics& spectral_characteristics,
     uint32_t sample_rate,
     uint32_t fft_size,
     uint64_t frame_timestamp,
@@ -44,24 +47,56 @@ void MessageSerialiser::serialiseColourDataIntoBuffer(
 ) {
     size_t colour_count = std::min(colours.size(), MAX_COLOURS_PER_MESSAGE);
     size_t message_size = sizeof(ColourDataMessage) + colour_count * sizeof(ColourData);
-    
+
     buffer.resize(message_size);
     auto* msg = reinterpret_cast<ColourDataMessage*>(buffer.data());
-    
+
     msg->header.magic = 0x53594E45;
     msg->header.version = 1;
     msg->header.type = MessageType::COLOUR_DATA;
     msg->header.length = static_cast<uint16_t>(message_size - sizeof(MessageHeader));
     msg->header.sequence = sequence;
     msg->header.timestamp = MessageDeserialiser::getCurrentTimestamp();
-    
+
     msg->sample_rate = sample_rate;
     msg->fft_size = fft_size;
     msg->colour_count = static_cast<uint32_t>(colour_count);
     msg->frame_timestamp = frame_timestamp;
-    
+    msg->spectral_characteristics = spectral_characteristics;
+
     if (colour_count > 0) {
         std::memcpy(msg->colours, colours.data(), colour_count * sizeof(ColourData));
+    }
+}
+
+void MessageSerialiser::serialiseFullSpectrumDataIntoBuffer(
+    std::vector<uint8_t>& buffer,
+    const std::vector<SpectralBin>& bins,
+    uint32_t sample_rate,
+    uint32_t fft_size,
+    uint64_t frame_timestamp,
+    uint32_t sequence
+) {
+    size_t bin_count = std::min(bins.size(), MAX_SPECTRUM_BINS_PER_MESSAGE);
+    size_t message_size = sizeof(FullSpectrumMessage) + bin_count * sizeof(SpectralBin);
+    
+    buffer.resize(message_size);
+    auto* msg = reinterpret_cast<FullSpectrumMessage*>(buffer.data());
+    
+    msg->header.magic = 0x53594E45;
+    msg->header.version = 1;
+    msg->header.type = MessageType::FULL_SPECTRUM_DATA;
+    msg->header.length = static_cast<uint16_t>(message_size - sizeof(MessageHeader));
+    msg->header.sequence = sequence;
+    msg->header.timestamp = MessageDeserialiser::getCurrentTimestamp();
+    
+    msg->sample_rate = sample_rate;
+    msg->fft_size = fft_size;
+    msg->bin_count = static_cast<uint32_t>(bin_count);
+    msg->frame_timestamp = frame_timestamp;
+    
+    if (bin_count > 0) {
+        std::memcpy(msg->bins, bins.data(), bin_count * sizeof(SpectralBin));
     }
 }
 
@@ -221,6 +256,35 @@ std::optional<std::vector<ColourData>> MessageDeserialiser::deserialiseColourDat
     std::memcpy(colours.data(), colour_data, colour_count * sizeof(ColourData));
     
     return colours;
+}
+
+std::optional<std::vector<SpectralBin>> MessageDeserialiser::deserialiseFullSpectrumData(
+    std::span<const uint8_t> payload,
+    uint32_t& sample_rate,
+    uint32_t& fft_size,
+    uint64_t& frame_timestamp
+) {
+    if (payload.size() < sizeof(FullSpectrumMessage) - sizeof(MessageHeader)) {
+        return std::nullopt;
+    }
+    
+    const auto* msg_data = reinterpret_cast<const uint8_t*>(payload.data());
+    
+    sample_rate = *reinterpret_cast<const uint32_t*>(msg_data);
+    fft_size = *reinterpret_cast<const uint32_t*>(msg_data + 4);
+    uint32_t bin_count = *reinterpret_cast<const uint32_t*>(msg_data + 8);
+    frame_timestamp = *reinterpret_cast<const uint64_t*>(msg_data + 12);
+    
+    size_t expected_size = 20 + bin_count * sizeof(SpectralBin);
+    if (payload.size() < expected_size) {
+        return std::nullopt;
+    }
+    
+    std::vector<SpectralBin> bins(bin_count);
+    const auto* bin_data = reinterpret_cast<const SpectralBin*>(msg_data + 20);
+    std::memcpy(bins.data(), bin_data, bin_count * sizeof(SpectralBin));
+    
+    return bins;
 }
 
 std::optional<DiscoveryRequest> MessageDeserialiser::deserialiseDiscoveryRequest(

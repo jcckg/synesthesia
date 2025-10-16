@@ -13,6 +13,7 @@ enum class MessageType : uint8_t {
     DISCOVERY_REQUEST = 0x01,
     DISCOVERY_RESPONSE = 0x02,
     COLOUR_DATA = 0x10,
+    FULL_SPECTRUM_DATA = 0x11,
     CONFIG_UPDATE = 0x20,
     PING = 0x30,
     PONG = 0x31,
@@ -26,6 +27,13 @@ struct MessageHeader {
     uint16_t length;
     uint32_t sequence;
     uint64_t timestamp;
+};
+
+struct SpectralCharacteristics {
+    float flatness;        // Spectral flatness (0-1): geometric mean / arithmetic mean
+    float centroid;        // Spectral centroid in Hz: weighted frequency center
+    float spread;          // Spectral spread in Hz: frequency bandwidth
+    float normalisedSpread; // Normalised spread (0-1)
 };
 
 struct ColourData {
@@ -42,7 +50,25 @@ struct ColourDataMessage {
     uint32_t fft_size;
     uint32_t colour_count;
     uint64_t frame_timestamp;
+    SpectralCharacteristics spectral_characteristics;
     ColourData colours[];
+};
+
+struct SpectralBin {
+    float frequency;
+    float magnitude;
+    float phase;
+};
+
+struct FullSpectrumMessage {
+    MessageHeader header;
+    uint32_t sample_rate;
+    uint32_t fft_size;
+    uint32_t bin_count;
+    uint32_t window_type;
+    float overlap_factor;
+    uint64_t frame_timestamp;
+    SpectralBin bins[];
 };
 
 struct DiscoveryRequest {
@@ -91,11 +117,13 @@ enum class Capabilities : uint32_t {
     CONFIG_UPDATES = 0x02,
     REAL_TIME_DISCOVERY = 0x04,
     LAB_COLOUR_SPACE = 0x08,
-    XYZ_COLOUR_SPACE = 0x10
+    XYZ_COLOUR_SPACE = 0x10,
+    FULL_SPECTRUM_STREAMING = 0x20
 };
 
 constexpr size_t MAX_MESSAGE_SIZE = 65536;
 constexpr size_t MAX_COLOURS_PER_MESSAGE = (MAX_MESSAGE_SIZE - sizeof(ColourDataMessage)) / sizeof(ColourData);
+constexpr size_t MAX_SPECTRUM_BINS_PER_MESSAGE = (MAX_MESSAGE_SIZE - sizeof(FullSpectrumMessage)) / sizeof(SpectralBin);
 constexpr uint16_t DEFAULT_UDP_PORT = 19851;
 constexpr const char* DEFAULT_PIPE_NAME = "/tmp/synesthesia_api";
 

@@ -1,5 +1,5 @@
 #include "transport.h"
-#include "../protocol/colour_data_protocol.h"
+#include "colour_data_protocol.h"
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -36,7 +36,8 @@ public:
             struct sockaddr_un addr{};
             addr.sun_family = AF_UNIX;
             strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
-            
+            addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
+
             if (bind(server_fd_, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
                 close(server_fd_);
                 return false;
@@ -50,7 +51,8 @@ public:
             struct sockaddr_un addr{};
             addr.sun_family = AF_UNIX;
             strncpy(addr.sun_path, socket_path_.c_str(), sizeof(addr.sun_path) - 1);
-            
+            addr.sun_path[sizeof(addr.sun_path) - 1] = '\0';
+
             if (connect(server_fd_, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
                 close(server_fd_);
                 return false;
@@ -137,30 +139,24 @@ private:
     
     void serverLoop() {
         while (running_.load()) {
-            // Build poll file descriptor array
             std::vector<pollfd> poll_fds;
             poll_fds.reserve(1 + client_sockets_.size());
 
-            // Add server socket
             poll_fds.push_back({server_fd_, POLLIN, 0});
 
-            // Add client sockets
             for (const auto& [id, fd] : client_sockets_) {
                 poll_fds.push_back({fd, POLLIN, 0});
             }
 
-            // Poll with 100ms timeout
-            int activity = poll(poll_fds.data(), poll_fds.size(), 100);
+            int activity = poll(poll_fds.data(), static_cast<nfds_t>(poll_fds.size()), 100);
 
             if (activity < 0) break;
             if (activity == 0) continue;
 
-            // Check server socket for new connections
             if (poll_fds[0].revents & POLLIN) {
                 acceptNewClient();
             }
 
-            // Check client sockets for data
             for (auto it = client_sockets_.begin(); it != client_sockets_.end();) {
                 bool found_activity = false;
                 for (size_t i = 1; i < poll_fds.size(); ++i) {
@@ -193,7 +189,6 @@ private:
         while (running_.load()) {
             pollfd poll_fd = {server_fd_, POLLIN, 0};
 
-            // Poll with 100ms timeout
             int activity = poll(&poll_fd, 1, 100);
 
             if (activity < 0) break;
@@ -230,7 +225,9 @@ private:
     }
     
     bool receiveMessage(int fd, std::vector<uint8_t>& buffer, const std::string& sender_id) {
-        constexpr size_t header_size = sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t) + sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t); // Full MessageHeader
+        constexpr size_t header_size = sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t) +
+                                       sizeof(uint16_t) + sizeof(uint32_t) + sizeof(uint64_t);
+        constexpr size_t length_offset = sizeof(uint32_t) + sizeof(uint8_t) + sizeof(uint8_t);
         uint8_t temp_buffer[4096];
         
         ssize_t bytes = recv(fd, temp_buffer, sizeof(temp_buffer), 0);
@@ -241,7 +238,6 @@ private:
         buffer.insert(buffer.end(), temp_buffer, temp_buffer + bytes);
         
         while (buffer.size() >= header_size) {
-            // Check magic number (first 4 bytes)
             uint32_t magic;
             std::memcpy(&magic, buffer.data(), sizeof(magic));
             if (magic != 0x53594E45) {
@@ -249,16 +245,14 @@ private:
                 return true;
             }
             
-            // Get message length (offset 6: magic(4) + version(1) + type(1))
             uint16_t length;
-            std::memcpy(&length, buffer.data() + 6, sizeof(length));
+            std::memcpy(&length, buffer.data() + length_offset, sizeof(length));
             
             size_t total_message_size = header_size + length;
             if (buffer.size() < total_message_size) {
                 break;
             }
             
-            // Validate message size to prevent excessive memory usage
             if (total_message_size > MAX_MESSAGE_SIZE) {
                 buffer.clear();
                 return true;

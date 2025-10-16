@@ -8,7 +8,7 @@ def main():
     
     client = SynesthesiaClient("Fetch Demo")
     
-    def on_colour_data(colours, sample_rate, fft_size, timestamp):
+    def on_colour_data(colours, sample_rate, fft_size, timestamp, spectral_characteristics=None):
         if colours:
             dominant = max(colours, key=lambda c: c.magnitude)
             rgb = (int(dominant.r * 255), int(dominant.g * 255), int(dominant.b * 255))

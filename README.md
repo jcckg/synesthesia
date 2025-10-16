@@ -4,7 +4,7 @@ Synesthesia is an application which provides a real-time visualisation of audio 
 
 ### Installation
 
-Synesthesia is automatically built by GitHub Actions, you can download the application from the [Releases](https://github.com/jxckgan/synesthesia/releases/) page.
+Synesthesia is automatically built by GitHub Actions, you can download the application from the [Releases](https://github.com/jcckg/synesthesia/releases/) page.
 
 ### Manual Building & Running
 
@@ -15,7 +15,7 @@ Synesthesia runs on Windows (DirectX 12) and macOS (Metal). To run this project,
 
 ```sh
 # Clone the repository with submodules
-git clone --recurse-submodules https://github.com/jxckgan/synesthesia
+git clone --recurse-submodules https://github.com/jcckg/synesthesia
 cd synesthesia
 
 # Create (and enter) the build directory

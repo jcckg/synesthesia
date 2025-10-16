@@ -13,6 +13,7 @@ import threading
 import time
 from typing import List, Dict, Set, Optional
 import sys
+import argparse
 
 try:
     import websockets
@@ -27,22 +28,22 @@ except ImportError:
         print("Warning: websockets not available. Install with: pip install websockets")
         WEBSOCKETS_AVAILABLE = False
 
-from synesthesia_client import SynesthesiaClient, ColourData, ConfigUpdate
+from synesthesia_client import (
+    SynesthesiaClient,
+    ColourData,
+    ConfigUpdate,
+    SpectralCharacteristics,
+)
 
 class WebSocketBridge:
     def __init__(self, host: str = "localhost", port: int = 8765):
         self.host = host
         self.port = port
         self.clients: Set[WebSocketServerProtocol] = set()
-        
-        # Synesthesia client
-        self.synesthesia_client: Optional[SynesthesiaClient] = None
+        self.synesthesia_client: Optional[SynesthesiaClient] = SynesthesiaClient("WebSocket Bridge v1.0")
         self.connected_to_synesthesia = False
-        
-        # Event loop for async operations
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         
-        # Statistics
         self.stats = {
             'messages_sent': 0,
             'colours_processed': 0,
@@ -50,7 +51,6 @@ class WebSocketBridge:
             'start_time': time.time()
         }
         
-        # Setup logging
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger(__name__)
     
@@ -66,8 +66,6 @@ class WebSocketBridge:
         self.clients.add(websocket)
         self.stats['websocket_clients'] = len(self.clients)
         self.logger.info(f"Client connected. Total clients: {len(self.clients)}")
-        
-        # Send welcome message
         welcome = {
             "type": "welcome",
             "message": "Connected to Synesthesia WebSocket Bridge",
@@ -103,7 +101,6 @@ class WebSocketBridge:
                 self.logger.error(f"Error sending to client: {e}")
                 disconnected_clients.add(client)
         
-        # Remove disconnected clients
         for client in disconnected_clients:
             await self.unregister_client(client)
     
@@ -168,10 +165,14 @@ class WebSocketBridge:
     
     def setup_synesthesia_client(self):
         """Setup Synesthesia client with callbacks"""
-        self.synesthesia_client = SynesthesiaClient("WebSocket Bridge v1.0")
         
-        def on_colour_data(colours: List[ColourData], sample_rate: int, fft_size: int, timestamp: int):
-            # Convert to JSON-serializable format
+        def on_colour_data(
+            colours: List[ColourData],
+            sample_rate: int,
+            fft_size: int,
+            timestamp: int,
+            spectral_characteristics: Optional[SpectralCharacteristics] = None
+        ):
             colour_data = []
             for colour in colours:
                 colour_data.append({
@@ -194,10 +195,16 @@ class WebSocketBridge:
                     "colour_count": len(colours)
                 }
             }
+
+            if spectral_characteristics is not None:
+                message["data"]["spectral_characteristics"] = {
+                    "flatness": spectral_characteristics.flatness,
+                    "centroid": spectral_characteristics.centroid,
+                    "spread": spectral_characteristics.spread,
+                    "normalised_spread": spectral_characteristics.normalised_spread,
+                }
             
             self.stats['colours_processed'] += len(colours)
-            
-            # Schedule broadcast to WebSocket clients
             self.schedule_async_task(self.broadcast_to_clients(message))
         
         def on_config_update(config: ConfigUpdate):
@@ -254,7 +261,6 @@ class WebSocketBridge:
             else:
                 self.logger.error("Failed to find Synesthesia server socket")
         
-        # Run in thread to avoid blocking
         threading.Thread(target=connect_thread, daemon=True).start()
     
     async def disconnect_from_synesthesia(self):
@@ -312,9 +318,18 @@ def main():
         print("This requires the websockets library to run!")
         print("(Install with: pip3 install websockets)")
         return 1
-    
-    bridge = WebSocketBridge()
-    
+
+    parser = argparse.ArgumentParser(description="Synesthesia API WebSocket Bridge")
+    parser.add_argument("--socket-path", type=str, help="Path to the Synesthesia API socket")
+    parser.add_argument("--host", type=str, default="localhost", help="Host for the WebSocket server")
+    parser.add_argument("--port", type=int, default=8765, help="Port for the WebSocket server")
+    args = parser.parse_args()
+
+    bridge = WebSocketBridge(host=args.host, port=args.port)
+
+    if args.socket_path:
+        bridge.synesthesia_client.set_socket_path(args.socket_path)
+
     try:
         asyncio.run(bridge.start_server())
     except KeyboardInterrupt:

@@ -1,5 +1,4 @@
-#ifndef SPECTRUM_ANALYSER_H
-#define SPECTRUM_ANALYSER_H
+#pragma once
 
 #include <imgui.h>
 #include <implot.h>
@@ -8,44 +7,47 @@
 
 class SpectrumAnalyser {
 public:
-    static void drawSpectrumWindow(
+    SpectrumAnalyser() = default;
+
+    void drawSpectrumWindow(
         const std::vector<float>& smoothedMagnitudes,
         const std::vector<AudioInput::DeviceInfo>& devices,
         int selectedDeviceIndex,
         const ImVec2& displaySize,
         float sidebarWidth,
-        bool sidebarOnLeft = false
+        bool sidebarOnLeft = false,
+        float bottomPanelHeight = 0.0f
     );
 
+    void resetTemporalBuffers();
+
 private:
-    static constexpr float SPECTRUM_HEIGHT = 210.0f;
+    static constexpr float SPECTRUM_HEIGHT = 180.0f;
     static constexpr int LINE_COUNT = 800;
     static constexpr int BASE_SMOOTHING_WINDOW_SIZE = 5;
     static constexpr float TEMPORAL_SMOOTHING_FACTOR = 0.62f;
     static constexpr float GAUSSIAN_SIGMA = 1.0f;
     static constexpr float CUBIC_TENSION = 0.5f;
 
-    static std::vector<float> previousFrameData;
-    static std::vector<float> smoothingBuffer1;
-    static std::vector<float> smoothingBuffer2;
-    static std::vector<float> gaussianWeights;
-    static std::vector<float> cachedFrequencies; // Pre-computed frequency values
-    static float lastCachedSampleRate; // Track sample rate for cache validity
-    static bool buffersInitialised;
-    
+    std::vector<float> previousFrameData;
+    std::vector<float> smoothingBuffer1;
+    std::vector<float> smoothingBuffer2;
+    std::vector<float> gaussianWeights;
+    std::vector<float> cachedFrequencies;
+    float lastCachedSampleRate = 0.0f;
+    bool buffersInitialised = false;
+
     static float getSampleRate(const std::vector<AudioInput::DeviceInfo>& devices, int selectedDeviceIndex);
-    static void prepareSpectrumData(std::vector<float>& xData, std::vector<float>& yData, 
-                                   const std::vector<float>& magnitudes, float sampleRate);
-    static void smoothData(std::vector<float>& yData);
-    static void applyTemporalSmoothing(std::vector<float>& yData);
-    static void applyGaussianSmoothing(std::vector<float>& yData);
+    void prepareSpectrumData(std::vector<float>& xData, std::vector<float>& yData,
+                            const std::vector<float>& magnitudes, float sampleRate);
+    void smoothData(std::vector<float>& yData);
+    void applyTemporalSmoothing(std::vector<float>& yData);
+    void applyGaussianSmoothing(std::vector<float>& yData);
+    void applyDynamicRangeCompensation(std::vector<float>& yData);
     static float cubicInterpolate(float y0, float y1, float y2, float y3, float t);
-    static float catmullRomSpline(const std::vector<float>& points, int index, float t);
     static int getFrequencyDependentWindowSize(int index);
-    static float gaussianWeight(int distance, float sigma);
-    static void initialiseBuffers();
-    static void precomputeGaussianWeights();
+    float gaussianWeight(int distance, float sigma);
+    void initialiseBuffers();
+    void precomputeGaussianWeights();
     static float calculateLocalVariance(const std::vector<float>& yData, int centre, int windowSize);
 };
-
-#endif

@@ -3,42 +3,62 @@
 #include <imgui.h>
 #include <vector>
 #include <algorithm>
+#include <mutex>
 
 #include "colour_mapper.h"
 #include "ui.h"
+#include "resyne/recorder/recorder.h"
 #ifdef ENABLE_API_SERVER
-#include "api/synesthesia_api_integration.h"
+#include "synesthesia_api_integration.h"
+#endif
+#ifdef ENABLE_MIDI
+#include "midi_device_manager.h"
 #endif
 
 namespace Controls {
 
-void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_color, const UIState& state) {
-    if (ImGui::CollapsingHeader("FREQUENCY INFO", ImGuiTreeNodeFlags_DefaultOpen)) {
+void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const UIState& state, ReSyne::RecorderState& recorderState) {
+    if (ImGui::CollapsingHeader("Output Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(10);
-        
-        auto peaks = audioInput.getFrequencyPeaks();
-        
-        std::vector<float> frequencies, magnitudes;
-        frequencies.reserve(peaks.size());
-        magnitudes.reserve(peaks.size());
-        for (const auto& peak : peaks) {
-            frequencies.push_back(peak.frequency);
-            magnitudes.push_back(peak.magnitude);
-        }
-        
-        auto currentColourResult = ColourMapper::frequenciesToColour(
-            frequencies, magnitudes, {}, UIConstants::DEFAULT_SAMPLE_RATE, UIConstants::DEFAULT_GAMMA, state.useP3ColourSpace);
 
-        if (!peaks.empty()) {
-            ImGui::Text("Dominant: %.1f Hz", static_cast<double>(peaks[0].frequency));
+        bool isPlaybackActive = recorderState.audioOutput && recorderState.audioOutput->isPlaying();
+        std::vector<float> magnitudes;
+        std::vector<float> phases;
+        float sampleRate;
+
+        if (isPlaybackActive && !recorderState.samples.empty()) {
+            std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
+            const float position = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f) *
+                                   (static_cast<float>(recorderState.samples.size()) - 1.0f);
+            const size_t sampleIndex = static_cast<size_t>(position);
+            const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
+
+            const auto& currentSample = recorderState.samples[clampedIndex];
+            magnitudes = currentSample.magnitudes;
+            phases = currentSample.phases;
+            sampleRate = currentSample.sampleRate;
+        } else {
+            magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
+            phases = audioInput.getFFTProcessor().getPhaseBuffer();
+            sampleRate = audioInput.getSampleRate();
+        }
+
+        auto currentColourResult = ColourMapper::spectrumToColour(
+            magnitudes,
+            phases,
+            sampleRate,
+            UIConstants::DEFAULT_GAMMA,
+            state.visualSettings.colourSpace,
+            state.visualSettings.gamutMappingEnabled);
+
+        if (currentColourResult.dominantFrequency > 0.0f) {
+            ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(currentColourResult.dominantFrequency));
             ImGui::Text("Wavelength: %.1f nm", static_cast<double>(currentColourResult.dominantWavelength));
-            ImGui::Text("Number of peaks detected: %d", static_cast<int>(peaks.size()));
+            ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]), static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
         } else {
             ImGui::TextDisabled("No significant frequencies");
         }
-        
-        ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_color[0]), static_cast<double>(clear_color[1]), static_cast<double>(clear_color[2]));
-        
+
         ImGui::Unindent(10);
         ImGui::Spacing();
     }
@@ -51,7 +71,7 @@ void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother,
                                  float labelWidth,
                                  float controlWidth,
                                  float buttonHeight) {
-    if (ImGui::CollapsingHeader("VISUALISER SETTINGS", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Visualiser Settings")) {
         ImGui::Indent(10);
 
         ImGui::AlignTextToFramePadding();
@@ -75,16 +95,17 @@ void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother,
 }
 
 void renderEQControlsPanel(float& lowGain,
-                          float& midGain, 
+                          float& midGain,
                           float& highGain,
                           bool& showSpectrumAnalyser,
+                          float& spectrumSmoothingFactor,
                           float sidebarWidth,
                           float sidebarPadding,
                           float labelWidth,
                           float controlWidth,
                           float buttonHeight,
                           float contentWidth) {
-    if (ImGui::CollapsingHeader("EQ CONTROLS", ImGuiTreeNodeFlags_DefaultOpen)) {
+    if (ImGui::CollapsingHeader("Gain Adjustment")) {
         ImGui::Indent(10);
 
         ImGui::AlignTextToFramePadding();
@@ -113,7 +134,7 @@ void renderEQControlsPanel(float& lowGain,
         if (ImGui::Button("Reset EQ", ImVec2(buttonWidth, buttonHeight))) {
             lowGain = midGain = highGain = 1.0f;
         }
-        
+
         ImGui::SameLine();
         ImGui::SetCursorPosX(sidebarPadding + buttonWidth + ImGui::GetStyle().ItemSpacing.x);
         if (ImGui::Button(showSpectrumAnalyser ? "Hide Spectrum" : "Show Spectrum",
@@ -121,31 +142,45 @@ void renderEQControlsPanel(float& lowGain,
             showSpectrumAnalyser = !showSpectrumAnalyser;
         }
 
+        if (showSpectrumAnalyser) {
+            ImGui::Spacing();
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Spectrum Smoothing");
+            ImGui::SameLine(sidebarPadding + labelWidth);
+            ImGui::SetCursorPosX(sidebarWidth - sidebarPadding - controlWidth);
+            ImGui::SetNextItemWidth(controlWidth);
+            ImGui::SliderFloat("##SpectrumSmoothing", &spectrumSmoothingFactor, 0.0f, 1.0f, "%.2f");
+        }
+
         ImGui::Unindent(10);
     }
 }
 
-void renderAdvancedSettingsPanel(UIState& state) {
-    static bool previousSmoothingState = state.smoothingEnabled;
+void renderAdvancedSettingsPanel(UIState& state, float contentWidth
+#ifdef ENABLE_MIDI
+                                  , MIDIInput* midiInput
+                                  , const std::vector<MIDIInput::DeviceInfo>* midiDevices
+#endif
+                                  ) {
+    static bool previousSmoothingState = state.visualSettings.smoothingEnabled;
     
-    ImGui::Spacing();
     if (ImGui::CollapsingHeader("Advanced Settings")) {
-        if (ImGui::CollapsingHeader("Program Appearance")) {
+        if (ImGui::CollapsingHeader("Appearance")) {
 			ImGui::Indent(10);
-            ImGui::Text("Sidebar: %s", state.sidebarOnLeft ? "Left" : "Right");
+            ImGui::Text("Sidebar: %s", state.visibility.sidebarOnLeft ? "Left" : "Right");
             if (ImGui::Button("Swap Sides")) {
-                state.sidebarOnLeft = !state.sidebarOnLeft;
+                state.visibility.sidebarOnLeft = !state.visibility.sidebarOnLeft;
             }
             
             ImGui::Spacing();
-            bool currentSmoothingState = state.smoothingEnabled;
+            bool currentSmoothingState = state.visualSettings.smoothingEnabled;
             if (ImGui::Checkbox("Enable Smoothing", &currentSmoothingState)) {
-                if (currentSmoothingState != state.smoothingEnabled) {
-                    if (!currentSmoothingState && state.smoothingEnabled) {
-                        previousSmoothingState = state.smoothingEnabled;
+                if (currentSmoothingState != state.visualSettings.smoothingEnabled) {
+                    if (!currentSmoothingState && state.visualSettings.smoothingEnabled) {
+                        previousSmoothingState = state.visualSettings.smoothingEnabled;
                         ImGui::OpenPopup("Photosensitivity Warning");
                     } else {
-                        state.smoothingEnabled = currentSmoothingState;
+                        state.visualSettings.smoothingEnabled = currentSmoothingState;
                     }
                 }
             }
@@ -154,7 +189,7 @@ void renderAdvancedSettingsPanel(UIState& state) {
             }
             
             if (ImGui::BeginPopupModal("Photosensitivity Warning", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-                ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + 350.0f);
+                ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
                 ImGui::TextWrapped("Warning: Disabling smoothing will cause rapidly flashing colours which can trigger photosensitive epilepsy in sensitive individuals.");
                 ImGui::Spacing();
                 ImGui::TextWrapped("Are you sure you want to disable smoothing?");
@@ -162,23 +197,54 @@ void renderAdvancedSettingsPanel(UIState& state) {
                 ImGui::Spacing();
                 
                 if (ImGui::Button("(Yes) Disable Smoothing")) {
-                    state.smoothingEnabled = false;
+                    state.visualSettings.smoothingEnabled = false;
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::SameLine();
                 if (ImGui::Button("(No) Keep Smoothing Enabled")) {
-                    state.smoothingEnabled = previousSmoothingState;
+                    state.visualSettings.smoothingEnabled = previousSmoothingState;
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::EndPopup();
             }
 
             ImGui::Spacing();
-            if (ImGui::Checkbox("Use P3 Wide Colour Gamut", &state.useP3ColourSpace)) {
-                // State change handled by checkbox
+            int colourSpaceIndex = 0;
+            switch (state.visualSettings.colourSpace) {
+                case ColourMapper::ColourSpace::Rec2020:
+                    colourSpaceIndex = 0;
+                    break;
+                case ColourMapper::ColourSpace::DisplayP3:
+                    colourSpaceIndex = 1;
+                    break;
+                case ColourMapper::ColourSpace::SRGB:
+                    colourSpaceIndex = 2;
+                    break;
+            }
+            const char* colourSpaceLabels[] = {"Rec.2020", "Display P3", "sRGB"};
+            ImGui::Text("Working Colour Space");
+            if (ImGui::Combo("##WorkingColourSpace", &colourSpaceIndex, colourSpaceLabels, IM_ARRAYSIZE(colourSpaceLabels))) {
+                switch (colourSpaceIndex) {
+                    case 0:
+                        state.visualSettings.colourSpace = ColourMapper::ColourSpace::Rec2020;
+                        break;
+                    case 1:
+                        state.visualSettings.colourSpace = ColourMapper::ColourSpace::DisplayP3;
+                        break;
+                    case 2:
+                    default:
+                        state.visualSettings.colourSpace = ColourMapper::ColourSpace::SRGB;
+                        break;
+                }
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Enables Display P3 colour space for wider colour gamut.\nProvides more vivid and accurate colours on supported displays.");
+                ImGui::SetTooltip("Selects the working colour space used for analysis, playback, and exports.");
+            }
+
+            ImGui::Checkbox("Apply Gamut Mapping", &state.visualSettings.gamutMappingEnabled);
+
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("When enabled, colours are compressed into the display gamut.\nDisable to preserve raw values for wide-gamut workflows.");
             }
 
 			ImGui::Unindent(10);
@@ -197,11 +263,13 @@ void renderAdvancedSettingsPanel(UIState& state) {
             if (!clients.empty()) {
                 ImGui::Indent();
                 for (size_t i = 0; i < clients.size() && i < 5; ++i) {
-                    std::string clientName = clients[i];
+                    const auto& clientName = clients[i];
                     if (clientName.length() > 25) {
-                        clientName = clientName.substr(0, 22) + "...";
+                        const std::string truncated = clientName.substr(0, 22) + "...";
+                        ImGui::Text("• %s", truncated.c_str());
+                    } else {
+                        ImGui::Text("• %s", clientName.c_str());
                     }
-                    ImGui::Text("• %s", clientName.c_str());
                 }
                 if (clients.size() > 5) {
                     ImGui::Text("... and %zu more", clients.size() - 5);
@@ -221,8 +289,8 @@ void renderAdvancedSettingsPanel(UIState& state) {
                 bool high_perf = api.isHighPerformanceMode();
                 float avg_frame_time = api.getAverageFrameTime();
                 
-                ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + 220.0f);
-                
+                ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
+
                 ImGui::Text("FPS: %u", current_fps);
                 ImGui::Text("Mode: %s", high_perf ? "High Perf" : "Standard");
                 if (avg_frame_time > 0) {
@@ -250,7 +318,8 @@ void renderAdvancedSettingsPanel(UIState& state) {
             ImGui::Spacing();
             bool serverRunning = api.isServerRunning();
             
-            float buttonWidth = (220.0f - ImGui::GetStyle().ItemSpacing.x) / 2;
+            float buttonWidth = (contentWidth - ImGui::GetStyle().ItemSpacing.x) / 2;
+            ImGui::PushItemWidth(buttonWidth);
             
             if (!serverRunning) {
                 if (ImGui::Button("Enable", ImVec2(buttonWidth, 0))) {
@@ -275,8 +344,22 @@ void renderAdvancedSettingsPanel(UIState& state) {
                 ImGui::Button("Disable", ImVec2(buttonWidth, 0));
                 ImGui::PopStyleColor();
             }
-			
+
+			ImGui::PopItemWidth();
+
 			ImGui::Unindent(10);
+        }
+#endif
+
+#ifdef ENABLE_MIDI
+        if (midiInput && midiDevices) {
+            if (ImGui::CollapsingHeader("MIDI")) {
+                ImGui::Indent(10);
+                ImGui::Text("MIDI INPUT DEVICE");
+                MIDIDeviceManager::renderMIDIDeviceSelection(state.midiDeviceState, *midiInput, *midiDevices);
+
+                ImGui::Unindent(10);
+            }
         }
 #endif
     }

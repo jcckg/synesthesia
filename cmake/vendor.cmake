@@ -55,6 +55,13 @@ add_vendor_library(
         ${KISSFFT_DIR}
 )
 
+add_vendor_library(
+    TARGET vendor_lodepng
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lodepng/lodepng.cpp
+    INCLUDE_DIRS
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lodepng
+)
 
 if(WIN32)
     add_vendor_library(

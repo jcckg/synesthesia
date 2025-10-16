@@ -80,6 +80,10 @@ void APIServer::setColourDataProvider(ColourDataProvider provider) {
     colour_data_provider_ = std::move(provider);
 }
 
+void APIServer::setFullSpectrumDataProvider(FullSpectrumDataProvider provider) {
+    full_spectrum_data_provider_ = std::move(provider);
+}
+
 void APIServer::setConfigUpdateCallback(ConfigUpdateCallback callback) {
     config_update_callback_ = std::move(callback);
 }
@@ -91,19 +95,47 @@ void APIServer::broadcastColourData() {
     
     uint32_t sample_rate, fft_size;
     uint64_t timestamp;
-    auto colours = colour_data_provider_(sample_rate, fft_size, timestamp);
-    
+    SpectralCharacteristics spectral_characteristics{};
+    auto colours = colour_data_provider_(sample_rate, fft_size, timestamp, spectral_characteristics);
+
     if (colours.empty()) {
         return;
     }
-    
+
     size_t colour_count = std::min(colours.size(), MAX_COLOURS_PER_MESSAGE);
     size_t message_size = sizeof(ColourDataMessage) + colour_count * sizeof(ColourData);
+
+    auto buffer = getBuffer(message_size);
+
+    MessageSerialiser::serialiseColourDataIntoBuffer(
+        buffer, colours, spectral_characteristics, sample_rate, fft_size, timestamp, sequence_counter_.fetch_add(1)
+    );
+    
+    ipc_transport_->broadcastMessage(std::span<const uint8_t>(buffer.data(), buffer.size()));
+    
+    returnBuffer(std::move(buffer));
+}
+
+void APIServer::broadcastFullSpectrumData() {
+    if (!full_spectrum_data_provider_ || !ipc_transport_) {
+        return;
+    }
+    
+    uint32_t sample_rate, fft_size;
+    uint64_t timestamp;
+    auto bins = full_spectrum_data_provider_(sample_rate, fft_size, timestamp);
+    
+    if (bins.empty()) {
+        return;
+    }
+    
+    size_t bin_count = std::min(bins.size(), MAX_SPECTRUM_BINS_PER_MESSAGE);
+    size_t message_size = sizeof(FullSpectrumMessage) + bin_count * sizeof(SpectralBin);
     
     auto buffer = getBuffer(message_size);
     
-    MessageSerialiser::serialiseColourDataIntoBuffer(
-        buffer, colours, sample_rate, fft_size, timestamp, sequence_counter_.fetch_add(1)
+    MessageSerialiser::serialiseFullSpectrumDataIntoBuffer(
+        buffer, bins, sample_rate, fft_size, timestamp, sequence_counter_.fetch_add(1)
     );
     
     ipc_transport_->broadcastMessage(std::span<const uint8_t>(buffer.data(), buffer.size()));
@@ -121,7 +153,6 @@ void APIServer::updatePerformanceMetrics(float frame_time) {
     
     recent_frame_times_.push_back(frame_time);
     
-    // Use efficient batch erase instead of expensive single element erase from front
     if (recent_frame_times_.size() > 300) {
         recent_frame_times_.erase(recent_frame_times_.begin(), recent_frame_times_.begin() + 50);
     }
@@ -140,7 +171,6 @@ uint32_t APIServer::calculateOptimalFPS(size_t client_count) const {
     } else if (client_count == 1) {
         return config_.max_fps;
     } else {
-        // Safely calculate scaled FPS with bounds checking
         uint32_t reduction = std::min(static_cast<uint32_t>((client_count - 1) * 30), config_.max_fps - config_.base_fps);
         uint32_t scaled_fps = config_.max_fps - reduction;
         return std::max(scaled_fps, config_.base_fps);
@@ -162,6 +192,10 @@ void APIServer::broadcastConfigUpdate(const ConfigUpdate& config) {
     );
     
     ipc_transport_->broadcastMessage(message);
+}
+
+void APIServer::enableFullSpectrumStream(bool enable) {
+    full_spectrum_stream_enabled_.store(enable);
 }
 
 std::vector<std::string> APIServer::getConnectedClients() const {
@@ -306,8 +340,12 @@ void APIServer::workerLoop() {
     auto target_frame_duration = std::chrono::microseconds(1000000 / current_target_fps);
     
     while (running_.load()) {
+        if (!running_.load()) {
+            break;
+        }
+
         auto frame_start = std::chrono::steady_clock::now();
-        
+
         if (frame_start - last_client_check_ >= client_check_interval) {
             auto clients = getConnectedClients();
             size_t client_count = clients.size();
@@ -325,8 +363,16 @@ void APIServer::workerLoop() {
         }
         
         bool has_clients = !getConnectedClients().empty();
-        if (has_clients && colour_data_provider_) {
-            broadcastColourData();
+        if (has_clients) {
+            if (full_spectrum_stream_enabled_.load()) {
+                if (full_spectrum_data_provider_) {
+                    broadcastFullSpectrumData();
+                }
+            } else {
+                if (colour_data_provider_) {
+                    broadcastColourData();
+                }
+            }
             frames_sent_.fetch_add(1);
         }
         
@@ -339,7 +385,6 @@ void APIServer::workerLoop() {
         auto sleep_time = target_frame_duration - processing_time;
         
         if (sleep_time > std::chrono::microseconds(0)) {
-            // Always use sleep_for to avoid CPU busy-wait
             std::this_thread::sleep_for(sleep_time);
         }
         

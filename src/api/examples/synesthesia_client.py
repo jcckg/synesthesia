@@ -37,6 +37,13 @@ class ColourData:
     phase: float
 
 @dataclass
+class SpectralCharacteristics:
+    flatness: float
+    centroid: float
+    spread: float
+    normalised_spread: float
+
+@dataclass
 class DiscoveryResponse:
     server_name: str
     server_version: int
@@ -81,25 +88,25 @@ class SynesthesiaClient:
         self.client_name = client_name
         self.client_version = 1
         self.sequence_counter = 0
-        
-        # Sockets
         self.unix_socket: Optional[socket.socket] = None
         
-        # Connection state
         self.connected = False
         self.socket_path = self.DEFAULT_SOCKET_PATH
         
-        # Callbacks
-        self.colour_data_callback: Optional[Callable[[List[ColourData], int, int, int], None]] = None
+        self.colour_data_callback: Optional[
+            Callable[[List[ColourData], int, int, int, Optional[SpectralCharacteristics]], None]
+        ] = None
         self.config_update_callback: Optional[Callable[[ConfigUpdate], None]] = None
         self.connection_callback: Optional[Callable[[bool, str], None]] = None
         self.error_callback: Optional[Callable[[str], None]] = None
         
-        # Threading
         self.running = False
         self.worker_thread: Optional[threading.Thread] = None
         
-    def set_colour_data_callback(self, callback: Callable[[List[ColourData], int, int, int], None]):
+    def set_colour_data_callback(
+        self,
+        callback: Callable[[List[ColourData], int, int, int, Optional[SpectralCharacteristics]], None]
+    ):
         """Set callback for colour data updates"""
         self.colour_data_callback = callback
         
@@ -157,8 +164,7 @@ class SynesthesiaClient:
             
             if self.connection_callback:
                 self.connection_callback(True, self.socket_path)
-            
-            # Start worker thread
+
             self.running = True
             self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.worker_thread.start()
@@ -250,14 +256,12 @@ class SynesthesiaClient:
         
         while self.running and self.connected:
             try:
-                # Receive data
                 data = self.unix_socket.recv(4096)
                 if not data:
                     break
                 
                 buffer += data
                 
-                # Process complete messages
                 while len(buffer) >= 20:  # Minimum header size
                     try:
                         header = MessageHeader.unpack(buffer[:20])
@@ -314,9 +318,21 @@ class SynesthesiaClient:
             return
         
         sample_rate, fft_size, colour_count, frame_timestamp = struct.unpack('<IIIQ', payload[:20])
+
+        spectral_characteristics: Optional[SpectralCharacteristics] = None
+        offset = 20
+
+        if len(payload) >= offset + 16:
+            flatness, centroid, spread, normalised_spread = struct.unpack('<4f', payload[offset:offset+16])
+            spectral_characteristics = SpectralCharacteristics(
+                flatness=flatness,
+                centroid=centroid,
+                spread=spread,
+                normalised_spread=normalised_spread
+            )
+            offset += 16
         
         colours = []
-        offset = 20
         
         for i in range(colour_count):
             if offset + 28 > len(payload):  # 7 floats * 4 bytes each
@@ -327,7 +343,10 @@ class SynesthesiaClient:
             offset += 28
         
         if self.colour_data_callback:
-            self.colour_data_callback(colours, sample_rate, fft_size, frame_timestamp)
+            try:
+                self.colour_data_callback(colours, sample_rate, fft_size, frame_timestamp, spectral_characteristics)
+            except TypeError:
+                self.colour_data_callback(colours, sample_rate, fft_size, frame_timestamp)
     
     def _handle_config_update(self, payload: bytes):
         """Handle configuration update message"""
@@ -362,7 +381,6 @@ def main():
     """Demo application showcasing all API functionality"""
     print("=== Synesthesia API Python Demo ===\n")
     
-    # Statistics tracking
     stats = {
         'messages_received': 0,
         'colours_received': 0,
@@ -372,13 +390,19 @@ def main():
         'start_time': time.time()
     }
     
-    def on_colour_data(colours: List[ColourData], sample_rate: int, fft_size: int, timestamp: int):
+    def on_colour_data(
+        colours: List[ColourData],
+        sample_rate: int,
+        fft_size: int,
+        timestamp: int,
+        spectral_characteristics: Optional[SpectralCharacteristics] = None
+    ):
         stats['messages_received'] += 1
         stats['colours_received'] += len(colours)
         stats['last_sample_rate'] = sample_rate
         stats['last_fft_size'] = fft_size
         
-        if stats['messages_received'] % 60 == 0:  # Print every 60 messages (~1 second)
+        if stats['messages_received'] % 60 == 0:
             elapsed = time.time() - stats['start_time']
             msg_rate = stats['messages_received'] / elapsed
             
@@ -387,6 +411,13 @@ def main():
             print(f"Total colours: {stats['colours_received']}")
             print(f"Sample rate: {sample_rate}Hz, FFT size: {fft_size}")
             print(f"Colours in this batch: {len(colours)}")
+
+            if spectral_characteristics is not None:
+                print("Spectral characteristics:")
+                print(f"  flatness: {spectral_characteristics.flatness:.4f}")
+                print(f"  centroid: {spectral_characteristics.centroid:.1f}Hz")
+                print(f"  spread: {spectral_characteristics.spread:.1f}Hz")
+                print(f"  normalised spread: {spectral_characteristics.normalised_spread:.4f}")
             
             if colours:
                 print("Sample colours:")
@@ -414,7 +445,6 @@ def main():
     def on_error(error: str):
         print(f"ERROR: {error}")
     
-    # Create client
     client = SynesthesiaClient("Python Demo v1.0")
     client.set_colour_data_callback(on_colour_data)
     client.set_config_update_callback(on_config_update)
@@ -422,38 +452,32 @@ def main():
     client.set_error_callback(on_error)
     
     try:
-        # Step 1: Find server socket
         print("Step 1: Looking for Synesthesia server...")
         if not client.find_server():
             print("Failed to find server socket. Is Synesthesia running with API enabled?")
             print(f"Expected socket path: {client.DEFAULT_SOCKET_PATH}")
             return 1
         
-        # Step 2: Connect to server
         print("\nStep 2: Connecting to server...")
         if not client.connect():
             print("Failed to connect to server")
             return 1
         
-        # Step 3: Send initial config
         print("\nStep 3: Sending initial configuration...")
         client.send_config_update(
             smoothing_enabled=True,
             smoothing_factor=0.7,
-            colour_space=0,  # RGB
+            colour_space=0,
             freq_min=50,
             freq_max=15000
         )
         
-        # Step 4: Send ping
         print("\nStep 4: Testing connection with ping...")
         client.send_ping()
         
-        # Step 5: Listen for data
         print("\nStep 5: Listening for real-time colour data...")
         print("(Receiving data... Press Ctrl+C to stop)\n")
-        
-        # Demonstrate config changes every 10 seconds
+
         config_demo_time = time.time()
         config_states = [
             (True, 0.9, 0, 20, 20000),    # High smoothing, full range
@@ -464,8 +488,7 @@ def main():
         
         while True:
             time.sleep(1)
-            
-            # Demonstrate config updates every 10 seconds
+
             if time.time() - config_demo_time > 10:
                 config_demo_time = time.time()
                 config_index = (config_index + 1) % len(config_states)
@@ -474,7 +497,6 @@ def main():
                 print(f"\n--- Demo: Changing configuration ---")
                 client.send_config_update(enabled, factor, space, fmin, fmax)
             
-            # Send ping every 30 seconds
             if int(time.time()) % 30 == 0:
                 client.send_ping()
     
@@ -483,8 +505,6 @@ def main():
     
     finally:
         client.disconnect()
-        
-        # Print final stats
         elapsed = time.time() - stats['start_time']
         print(f"\n=== Session Summary ===")
         print(f"Duration: {elapsed:.1f} seconds")

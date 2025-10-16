@@ -1,8 +1,8 @@
 #pragma once
 
-#include "../common/transport.h"
-#include "../common/serialisation.h"
-#include "../protocol/colour_data_protocol.h"
+#include "transport.h"
+#include "serialisation.h"
+#include "colour_data_protocol.h"
 #include <memory>
 #include <atomic>
 #include <thread>
@@ -33,7 +33,8 @@ struct ServerConfig {
     size_t buffer_pool_size = 128;
 };
 
-using ColourDataProvider = std::function<std::vector<ColourData>(uint32_t& sample_rate, uint32_t& fft_size, uint64_t& timestamp)>;
+using ColourDataProvider = std::function<std::vector<ColourData>(uint32_t& sample_rate, uint32_t& fft_size, uint64_t& timestamp, SpectralCharacteristics& spectral_characteristics)>;
+using FullSpectrumDataProvider = std::function<std::vector<SpectralBin>(uint32_t& sample_rate, uint32_t& fft_size, uint64_t& timestamp)>;
 using ConfigUpdateCallback = std::function<void(const ConfigUpdate& config)>;
 
 class APIServer {
@@ -46,10 +47,13 @@ public:
     bool isRunning() const;
     
     void setColourDataProvider(ColourDataProvider provider);
+    void setFullSpectrumDataProvider(FullSpectrumDataProvider provider);
     void setConfigUpdateCallback(ConfigUpdateCallback callback);
     
     void broadcastColourData();
+    void broadcastFullSpectrumData();
     void broadcastConfigUpdate(const ConfigUpdate& config);
+    void enableFullSpectrumStream(bool enable);
     
     std::vector<std::string> getConnectedClients() const;
     ServerConfig getConfig() const;
@@ -77,9 +81,11 @@ private:
     std::unique_ptr<ITransport> ipc_transport_;
     
     ColourDataProvider colour_data_provider_;
+    FullSpectrumDataProvider full_spectrum_data_provider_;
     ConfigUpdateCallback config_update_callback_;
     
     std::atomic<bool> running_{false};
+    std::atomic<bool> full_spectrum_stream_enabled_{false};
     std::atomic<uint32_t> sequence_counter_{0};
     
     mutable std::mutex clients_mutex_;

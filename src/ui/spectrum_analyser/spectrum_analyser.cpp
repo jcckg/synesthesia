@@ -3,14 +3,13 @@
 #include <portaudio.h>
 #include <algorithm>
 #include <cmath>
+#include <numeric>
 
-std::vector<float> SpectrumAnalyser::previousFrameData;
-std::vector<float> SpectrumAnalyser::smoothingBuffer1;
-std::vector<float> SpectrumAnalyser::smoothingBuffer2;
-std::vector<float> SpectrumAnalyser::gaussianWeights;
-std::vector<float> SpectrumAnalyser::cachedFrequencies;
-float SpectrumAnalyser::lastCachedSampleRate = 0.0f;
-bool SpectrumAnalyser::buffersInitialised = false;
+namespace {
+constexpr float SPECTRUM_INTENSITY_CLAMP = 0.7f;
+constexpr float SPECTRUM_INTENSITY_SCALE = 0.75f;
+constexpr float LOG_AMPLITUDE_GAIN = 4.0f;
+}
 
 void SpectrumAnalyser::drawSpectrumWindow(
     const std::vector<float>& smoothedMagnitudes,
@@ -18,10 +17,11 @@ void SpectrumAnalyser::drawSpectrumWindow(
     int selectedDeviceIndex,
     const ImVec2& displaySize,
     float sidebarWidth,
-    bool sidebarOnLeft
+    bool sidebarOnLeft,
+    float bottomPanelHeight
 ) {
     float spectrumX = sidebarOnLeft ? sidebarWidth : 0.0f;
-    auto spectrumPos = ImVec2(spectrumX, displaySize.y - SPECTRUM_HEIGHT);
+    auto spectrumPos = ImVec2(spectrumX, displaySize.y - SPECTRUM_HEIGHT - bottomPanelHeight);
     auto spectrumSize = ImVec2(displaySize.x - sidebarWidth, SPECTRUM_HEIGHT);
 
     ImGui::SetNextWindowPos(spectrumPos);
@@ -41,6 +41,7 @@ void SpectrumAnalyser::drawSpectrumWindow(
     prepareSpectrumData(xData, yData, smoothedMagnitudes, sampleRate);
     applyTemporalSmoothing(yData);
     smoothData(yData);
+    applyDynamicRangeCompensation(yData);
 
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));
     ImPlot::PushStyleVar(ImPlotStyleVar_FitPadding, ImVec2(0, 0));
@@ -65,8 +66,8 @@ void SpectrumAnalyser::drawSpectrumWindow(
                          ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoHighlight);
         ImPlot::SetupAxisLimits(ImAxis_X1, static_cast<double>(FFTProcessor::MIN_FREQ), static_cast<double>(FFTProcessor::MAX_FREQ));
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
-        
-        float plotYMax = 2.0f;
+
+        constexpr float plotYMax = SPECTRUM_INTENSITY_CLAMP + 0.05f;
         ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(plotYMax));
         
         ImPlot::SetNextFillStyle(ImVec4(1.0f, 1.0f, 1.0f, 0.1f));
@@ -109,7 +110,6 @@ void SpectrumAnalyser::prepareSpectrumData(std::vector<float>& xData, std::vecto
     const float logMaxFreq = std::log10(maxFreq);
     const float logFreqRange = logMaxFreq - logMinFreq;
 
-    // Cache frequency calculations if sample rate has changed
     if (sampleRate != lastCachedSampleRate) {
         lastCachedSampleRate = sampleRate;
         for (size_t i = 0; i < LINE_COUNT; ++i) {
@@ -132,21 +132,29 @@ void SpectrumAnalyser::prepareSpectrumData(std::vector<float>& xData, std::vecto
                                static_cast<int>(magnitudes.size()) - 1);
             int idx1 = std::min(idx0 + 1, static_cast<int>(magnitudes.size()) - 1);
 
-            // Use cubic interpolation for smoother curves between FFT bins
-            int idx_m1 = std::max(idx0 - 1, 0);
-            int idx2 = std::min(idx1 + 1, static_cast<int>(magnitudes.size()) - 1);
+            float magnitude;
+
+            if (idx0 > 0 && idx1 < static_cast<int>(magnitudes.size()) - 1) {
+                int idx_m1 = idx0 - 1;
+                int idx2 = idx1 + 1;
+
+                magnitude = cubicInterpolate(
+                    magnitudes[static_cast<size_t>(idx_m1)], magnitudes[static_cast<size_t>(idx0)],
+                    magnitudes[static_cast<size_t>(idx1)], magnitudes[static_cast<size_t>(idx2)], t);
+            } else {
+                magnitude = magnitudes[static_cast<size_t>(idx0)] * (1.0f - t) +
+                           magnitudes[static_cast<size_t>(idx1)] * t;
+            }
             
-            float magnitude = cubicInterpolate(
-                magnitudes[static_cast<size_t>(idx_m1)], magnitudes[static_cast<size_t>(idx0)],
-                magnitudes[static_cast<size_t>(idx1)], magnitudes[static_cast<size_t>(idx2)], t);
-            
-            float normalisedMagnitude = magnitude;
-            
+            float normalisedMagnitude = std::max(0.0f, magnitude);
+
             if (normalisedMagnitude > 0.001f) {
-                normalisedMagnitude = std::log10(1.0f + normalisedMagnitude * 6.0f);
+                normalisedMagnitude = std::log10(1.0f + normalisedMagnitude * LOG_AMPLITUDE_GAIN);
             }
 
-            yData[i] = std::clamp(normalisedMagnitude, 0.0f, 0.85f);
+            normalisedMagnitude *= SPECTRUM_INTENSITY_SCALE;
+
+            yData[i] = std::clamp(normalisedMagnitude, 0.0f, SPECTRUM_INTENSITY_CLAMP);
         }
     } else {
         for (size_t i = 0; i < LINE_COUNT; ++i) {
@@ -177,7 +185,6 @@ void SpectrumAnalyser::smoothData(std::vector<float>& yData) {
 }
 
 void SpectrumAnalyser::applyGaussianSmoothing(std::vector<float>& yData) {
-    // Reuse pre-allocated buffer instead of creating new vector
     std::fill(smoothingBuffer1.begin(), smoothingBuffer1.end(), 0.0f);
     
     for (size_t i = 0; i < LINE_COUNT; ++i) {
@@ -189,7 +196,6 @@ void SpectrumAnalyser::applyGaussianSmoothing(std::vector<float>& yData) {
         
         for (int j = std::max(0, static_cast<int>(i) - halfWindow);
              j <= std::min(LINE_COUNT - 1, static_cast<int>(i) + halfWindow); ++j) {
-            // Lighter smoothing - reduced sigma for maintaining definition
             float weight = gaussianWeight(std::abs(static_cast<int>(i) - j), GAUSSIAN_SIGMA * 0.7f);
             weightedSum += yData[static_cast<size_t>(j)] * weight;
             totalWeight += weight;
@@ -198,25 +204,21 @@ void SpectrumAnalyser::applyGaussianSmoothing(std::vector<float>& yData) {
         smoothingBuffer1[i] = totalWeight > 0.0f ? weightedSum / totalWeight : yData[i];
     }
     
-    // Swap data back to yData (no allocation)
     yData.swap(smoothingBuffer1);
 }
 
 int SpectrumAnalyser::getFrequencyDependentWindowSize(int index) {
     float normalisedIndex = static_cast<float>(index) / (LINE_COUNT - 1);
-    // Smaller base window for better definition, with more moderate scaling
     return BASE_SMOOTHING_WINDOW_SIZE + static_cast<int>(normalisedIndex * 3.0f);
 }
 
 float SpectrumAnalyser::gaussianWeight(int distance, float sigma) {
     if (distance == 0) return 1.0f;
     
-    // Use precomputed weights for standard sigma, compute for others
     if (std::abs(sigma - GAUSSIAN_SIGMA) < 0.01f && distance < static_cast<int>(gaussianWeights.size())) {
         return gaussianWeights[static_cast<size_t>(distance)];
     }
-    
-    // Fallback to computation for non-standard sigma values
+
     float d = static_cast<float>(distance);
     return std::exp(-(d * d) / (2.0f * sigma * sigma));
 }
@@ -261,10 +263,9 @@ void SpectrumAnalyser::initialiseBuffers() {
 }
 
 void SpectrumAnalyser::precomputeGaussianWeights() {
-    // Pre-compute Gaussian weights up to a reasonable distance
     constexpr int maxDistance = 20;
     gaussianWeights.resize(maxDistance + 1);
-    
+
     for (int d = 0; d <= maxDistance; ++d) {
         if (d == 0) {
             gaussianWeights[static_cast<size_t>(d)] = 1.0f;
@@ -272,5 +273,48 @@ void SpectrumAnalyser::precomputeGaussianWeights() {
             float distance = static_cast<float>(d);
             gaussianWeights[static_cast<size_t>(d)] = std::exp(-(distance * distance) / (2.0f * GAUSSIAN_SIGMA * GAUSSIAN_SIGMA));
         }
+    }
+}
+
+void SpectrumAnalyser::resetTemporalBuffers() {
+    std::fill(previousFrameData.begin(), previousFrameData.end(), 0.0f);
+}
+
+void SpectrumAnalyser::applyDynamicRangeCompensation(std::vector<float>& yData) {
+    if (yData.empty()) {
+        return;
+    }
+
+    const float maxValue = *std::max_element(yData.begin(), yData.end());
+    if (maxValue <= 1e-4f) {
+        return;
+    }
+
+    const float meanValue = std::accumulate(yData.begin(), yData.end(), 0.0f) /
+                            static_cast<float>(yData.size());
+    const float occupancy = meanValue / maxValue;
+
+    constexpr float occupancyThreshold = 0.5f;
+    if (occupancy <= occupancyThreshold) {
+        return;
+    }
+
+    const float intensity = std::clamp(
+        (occupancy - occupancyThreshold) / (1.0f - occupancyThreshold),
+        0.0f,
+        1.0f);
+
+    constexpr float maxGamma = 1.3f;
+    const float gamma = 1.0f + intensity * (maxGamma - 1.0f);
+    const float inverseMax = 1.0f / maxValue;
+
+    for (float& value : yData) {
+        float normalised = value * inverseMax;
+        normalised = std::clamp(normalised, 0.0f, 1.0f);
+        if (normalised <= 0.0f) {
+            value = 0.0f;
+            continue;
+        }
+        value = std::min(SPECTRUM_INTENSITY_CLAMP, maxValue * std::pow(normalised, gamma));
     }
 }

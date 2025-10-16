@@ -70,7 +70,7 @@ if (api.startServer(config)) {
 Connect to the API server and handle colour data:
 
 ```cpp
-#include "api/client/api_client.h"
+#include "api_client.h"
 
 using namespace Synesthesia::API;
 

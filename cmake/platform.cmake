@@ -1,37 +1,38 @@
 if(WIN32)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/meta/icon/app.ico
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app.ico
         ${CMAKE_BINARY_DIR}/app.ico COPYONLY)
-    configure_file(${SRC_DIR}/renderers/dx12/resource.h
+    configure_file(${SRC_DIR}/platforms/dx12/resource.h
         ${CMAKE_BINARY_DIR}/resource.h COPYONLY)
 endif()
 
 if(WIN32)
     message(STATUS "Configuring for Windows (DirectX 12)")
     list(APPEND SOURCES
-        ${SRC_DIR}/renderers/dx12/main.cpp
-        ${SRC_DIR}/renderers/dx12/app.rc
+        ${SRC_DIR}/platforms/dx12/main.cpp
+        ${SRC_DIR}/platforms/dx12/app.rc
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
     )
     set(DX12_LIBS d3d12 dxgi d3dcompiler)
 elseif(APPLE)
     message(STATUS "Configuring for macOS (Metal)")
     list(APPEND SOURCES
-        ${SRC_DIR}/renderers/metal/main.mm
+        ${SRC_DIR}/platforms/metal/main.mm
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm
+        ${SRC_DIR}/ui/input/trackpad_gestures_mac.mm
     )
     set(OBJC_FLAGS "-ObjC++ -fobjc-arc -fobjc-weak")
 else()
     message(STATUS "Configuring for Linux (Vulkan)")
     list(APPEND SOURCES
-        ${SRC_DIR}/renderers/vulkan/main.cpp
+        ${SRC_DIR}/platforms/vulkan/main.cpp
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
     )
 endif()
 
 if(APPLE OR UNIX)
     list(APPEND SOURCES
-        ${SRC_DIR}/cli/cli.cpp
-        ${SRC_DIR}/cli/headless.cpp
+        ${SRC_DIR}/utilities/cli/cli.cpp
+        ${SRC_DIR}/utilities/cli/headless.cpp
     )
     if(APPLE)
         message(STATUS "Added CLI sources to build for macOS")
@@ -61,6 +62,16 @@ if(WIN32)
         $<$<CONFIG:Release>:/LTCG>
         $<$<CONFIG:Release>:/SUBSYSTEM:WINDOWS>
         $<$<CONFIG:Release>:/ENTRY:mainCRTStartup>
+        $<$<CONFIG:Debug>:/SUBSYSTEM:CONSOLE>
+        $<$<CONFIG:Debug>:/ENTRY:mainCRTStartup>
+    )
+
+    # Copy assets directory to build directory so fonts and icons can be found
+    add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "${CMAKE_BINARY_DIR}/assets"
+        COMMENT "Copying assets directory to build folder"
     )
 elseif(APPLE)
     target_compile_options(${EXECUTABLE_NAME} PRIVATE
@@ -73,17 +84,19 @@ elseif(APPLE)
         "-O3" "-ffast-math" "-march=native"
     )
 
-    set_source_files_properties(${SRC_DIR}/renderers/metal/main.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/platforms/metal/main.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/ui/input/trackpad_gestures_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/updating/update.cpp PROPERTIES COMPILE_FLAGS "-Wno-nan-infinity-disabled")
+    set_source_files_properties(${SRC_DIR}/ui/gradient_recorder/gradient_recorder.cpp PROPERTIES COMPILE_FLAGS "-w")
 
+    set_property(SOURCE ${SRC_DIR}/ui/ui.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/ui/controls/controls.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
-    set_property(SOURCE ${SRC_DIR}/ui.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/api/common/serialisation.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/api/common/transport.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/api/server/api_server.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/api/synesthesia_api_integration.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
-    set_property(SOURCE ${SRC_DIR}/cli/headless.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
+    set_property(SOURCE ${SRC_DIR}/utilities/cli/headless.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
 else()
     target_compile_options(${EXECUTABLE_NAME} PRIVATE
         "-Wall" "-Wextra" "-Wformat" "-Wpedantic"
@@ -98,6 +111,7 @@ if(APPLE)
     find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
     find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
     find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
+    find_library(COREMIDI_FRAMEWORK CoreMIDI REQUIRED)
 
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE
         ${METAL_FRAMEWORK}
@@ -106,15 +120,21 @@ if(APPLE)
         ${IOKIT_FRAMEWORK}
         ${COREVIDEO_FRAMEWORK}
         ${QUARTZCORE_FRAMEWORK}
+        ${COREMIDI_FRAMEWORK}
         ${GLFW_TARGET}
         ${PORTAUDIO_TARGET}
         nlohmann_json::nlohmann_json
         vendor_imgui
         vendor_implot
         vendor_kissfft
+        vendor_lodepng
         vendor_imgui_backends
         m
     )
+
+    if(ENABLE_MIDI AND RTMIDI_TARGET)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})
+    endif()
 elseif(WIN32)
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE
         ${GLFW_TARGET}
@@ -124,9 +144,14 @@ elseif(WIN32)
         vendor_imgui
         vendor_implot
         vendor_kissfft
+        vendor_lodepng
         vendor_imgui_backends
         windowsapp
     )
+
+    if(ENABLE_MIDI AND RTMIDI_TARGET)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})
+    endif()
 else()
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE
         ${GLFW_TARGET}
@@ -137,11 +162,16 @@ else()
         vendor_imgui
         vendor_implot
         vendor_kissfft
+        vendor_lodepng
         vendor_imgui_backends
         dl
         pthread
         m
     )
+
+    if(ENABLE_MIDI AND RTMIDI_TARGET)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})
+    endif()
 endif()
 
 if(APPLE AND BUILD_MACOS_BUNDLE)
@@ -158,16 +188,23 @@ if(APPLE AND BUILD_MACOS_BUNDLE)
         RESOURCE "${ICON_SRC}"
     )
 
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/meta/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/meta/entitlements.plist ${CMAKE_BINARY_DIR}/entitlements.plist COPYONLY)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/assets/mac/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/assets/mac/entitlements.plist ${CMAKE_BINARY_DIR}/entitlements.plist COPYONLY)
 
-    set(ICON_SRC "${CMAKE_CURRENT_SOURCE_DIR}/meta/icon/app.icns")
+    set(ICON_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app.icns")
     set(ICON_DEST "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources/app.icns")
 
     add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources"
         COMMAND ${CMAKE_COMMAND} -E copy "${ICON_SRC}" "${ICON_DEST}"
         COMMENT "Copying app icon to bundle resources"
+    )
+
+    add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
+        "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources/assets"
+        COMMENT "Copying assets directory to bundle resources"
     )
 endif()
 

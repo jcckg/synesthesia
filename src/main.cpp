@@ -1,6 +1,6 @@
 #if defined(__APPLE__) || defined(__linux__)
-#include "cli/cli.h"
-#include "cli/headless.h"
+#include "cli.h"
+#include "headless.h"
 #endif
 
 #include <iostream>

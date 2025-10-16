@@ -1,6 +1,8 @@
 #include "synesthesia_api_integration.h"
 #include <chrono>
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 
 namespace Synesthesia {
 
@@ -21,12 +23,21 @@ bool SynesthesiaAPIIntegration::startServer(const API::ServerConfig& config) {
     }
     
     api_server_ = std::make_unique<API::APIServer>(config);
-    api_server_->setColourDataProvider([this](uint32_t& sample_rate, uint32_t& fft_size, uint64_t& timestamp) -> std::vector<API::ColourData> {
+    api_server_->setColourDataProvider([this](uint32_t& sample_rate, uint32_t& fft_size, uint64_t& timestamp, API::SpectralCharacteristics& spectral_characteristics) -> std::vector<API::ColourData> {
         std::lock_guard<std::mutex> lock(data_mutex_);
         sample_rate = last_sample_rate_;
         fft_size = last_fft_size_;
         timestamp = last_timestamp_;
+        spectral_characteristics = last_spectral_characteristics_;
         return last_colour_data_;
+    });
+
+    api_server_->setFullSpectrumDataProvider([this](uint32_t& sample_rate, uint32_t& fft_size, uint64_t& timestamp) -> std::vector<API::SpectralBin> {
+        std::lock_guard<std::mutex> lock(spectral_data_mutex_);
+        sample_rate = last_sample_rate_;
+        fft_size = last_fft_size_;
+        timestamp = last_timestamp_;
+        return last_spectral_data_;
     });
     
     api_server_->setConfigUpdateCallback([this](const API::ConfigUpdate& config) {
@@ -57,77 +68,107 @@ bool SynesthesiaAPIIntegration::isServerRunning() const {
 }
 
 
-void SynesthesiaAPIIntegration::updateFinalColour(float r, float g, float b,
-                                                const std::vector<float>& frequencies, 
-                                                const std::vector<float>& magnitudes,
-                                                uint32_t sample_rate,
-                                                uint32_t fft_size) {
+void SynesthesiaAPIIntegration::updateColourData(const std::vector<float>& magnitudes, const std::vector<float>& phases, float spectralCentroid, float sampleRate, float r, float g, float b, float L, float a, float b_comp) {
     if (!api_server_ || !api_server_->isRunning()) {
         return;
     }
-    
+
+    auto spectralChars = ColourMapper::calculateSpectralCharacteristics(magnitudes, sampleRate);
+
     std::vector<API::ColourData> colour_data;
-    
-    size_t data_size = std::min(frequencies.size(), magnitudes.size());
-    colour_data.reserve(data_size);
-    
-    for (size_t i = 0; i < data_size; ++i) {
-        float frequency = frequencies[i];
-        float magnitude = magnitudes[i];
-        
-        if (frequency < frequency_range_min_ || frequency > frequency_range_max_) {
-            continue;
-        }
-        
-        if (magnitude < 0.001f) {
-            continue;
-        }
-        
-        API::ColourData data{};
-        data.frequency = frequency;
-        data.magnitude = magnitude;
-        data.phase = 0.0f;
-        data.wavelength = ColourMapper::logFrequencyToWavelength(frequency);
-        
-        float scale = std::min(magnitude * 2.0f, 1.0f);
+    colour_data.reserve(1);
 
-        switch (current_colour_space_) {
-            case ColourSpace::RGB:
-                data.r = r * scale;
-                data.g = g * scale;
-                data.b = b * scale;
-                break;
+    API::ColourData data{};
+    data.frequency = spectralCentroid;
 
-            case ColourSpace::LAB: {
-                float L, a, b_comp;
-                ColourMapper::RGBtoLab(r * scale, g * scale, b * scale, L, a, b_comp);
-                data.r = L;
-                data.g = a;
-                data.b = b_comp;
-                break;
+    if (!magnitudes.empty() && phases.size() == magnitudes.size() &&
+        spectralCentroid > 0.0f && magnitudes.size() > 1 && sampleRate > 0.0f) {
+        const float fftSize = 2.0f * static_cast<float>(magnitudes.size() - 1);
+        const float bin_freq = sampleRate / fftSize;
+        const float float_index = spectralCentroid / bin_freq;
+        size_t index_floor = static_cast<size_t>(float_index);
+        size_t index_ceil = index_floor + 1;
+
+        if (index_ceil < magnitudes.size()) {
+            const float fraction = float_index - static_cast<float>(index_floor);
+
+            const float mag1 = magnitudes[index_floor];
+            const float mag2 = magnitudes[index_ceil];
+            data.magnitude = (1.0f - fraction) * mag1 + fraction * mag2;
+
+            const float phase1 = phases[index_floor];
+            const float phase2 = phases[index_ceil];
+            float phase_diff = phase2 - phase1;
+
+            constexpr float TWO_PI = 2.0f * std::numbers::pi_v<float>;
+            if (phase_diff > std::numbers::pi_v<float>) {
+                phase_diff -= TWO_PI;
+            } else if (phase_diff < -std::numbers::pi_v<float>) {
+                phase_diff += TWO_PI;
             }
+
+            float interpolated_phase = phase1 + fraction * phase_diff;
+            data.phase = fmodf(interpolated_phase + std::numbers::pi_v<float>, TWO_PI) - std::numbers::pi_v<float>;
+        }
+    }
+
+    data.wavelength = ColourMapper::logFrequencyToWavelength(spectralCentroid);
+
+    switch (current_colour_space_) {
+        case ColourSpace::RGB:
+            data.r = r;
+            data.g = g;
+            data.b = b;
+            break;
+
+        case ColourSpace::LAB:
+            data.r = L;
+            data.g = a;
+            data.b = b_comp;
+            break;
 
             case ColourSpace::XYZ: {
                 // Fall back to RGB for now
-                data.r = r * scale;
-                data.g = g * scale;
-                data.b = b * scale;
+                data.r = r;
+                data.g = g;
+                data.b = b;
                 break;
             }
         }
-        
+
         colour_data.push_back(data);
-    }
-    
+
     {
         std::lock_guard<std::mutex> lock(data_mutex_);
         last_colour_data_ = std::move(colour_data);
-        last_sample_rate_ = sample_rate;
-        last_fft_size_ = fft_size;
+
+        last_spectral_characteristics_.flatness = spectralChars.flatness;
+        last_spectral_characteristics_.centroid = spectralChars.centroid;
+        last_spectral_characteristics_.spread = spectralChars.spread;
+        last_spectral_characteristics_.normalisedSpread = spectralChars.normalisedSpread;
+
+        last_sample_rate_ = static_cast<uint32_t>(sampleRate);
+        const uint32_t derivedFftSize = (magnitudes.size() > 1)
+            ? static_cast<uint32_t>((magnitudes.size() - 1) * 2)
+            : static_cast<uint32_t>(magnitudes.size() * 2);
+        last_fft_size_ = std::max<uint32_t>(1u, derivedFftSize);
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(
             std::chrono::steady_clock::now().time_since_epoch()
         ).count();
         last_timestamp_ = static_cast<uint64_t>(std::max(duration, static_cast<decltype(duration)>(0)));
+    }
+
+    if (full_spectrum_stream_enabled_) {
+        std::lock_guard<std::mutex> lock(spectral_data_mutex_);
+        last_spectral_data_.clear();
+        last_spectral_data_.reserve(magnitudes.size());
+        for (size_t i = 0; i < magnitudes.size(); ++i) {
+            API::SpectralBin bin{};
+            bin.frequency = (static_cast<float>(i) * static_cast<float>(last_sample_rate_)) / static_cast<float>(last_fft_size_);
+            bin.magnitude = magnitudes[i];
+            bin.phase = phases[i];
+            last_spectral_data_.push_back(bin);
+        }
     }
 }
 
@@ -154,6 +195,13 @@ void SynesthesiaAPIIntegration::updateFrequencyRange(uint32_t min_freq, uint32_t
 
 void SynesthesiaAPIIntegration::updateColourSpace(ColourSpace colour_space) {
     current_colour_space_ = colour_space;
+}
+
+void SynesthesiaAPIIntegration::enableFullSpectrumStream(bool enable) {
+    full_spectrum_stream_enabled_ = enable;
+    if (api_server_) {
+        api_server_->enableFullSpectrumStream(enable);
+    }
 }
 
 std::vector<std::string> SynesthesiaAPIIntegration::getConnectedClients() const {

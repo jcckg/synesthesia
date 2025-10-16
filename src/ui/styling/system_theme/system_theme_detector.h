@@ -1,5 +1,4 @@
-#ifndef SYSTEM_THEME_DETECTOR_H
-#define SYSTEM_THEME_DETECTOR_H
+#pragma once
 
 enum class SystemTheme {
     Light,
@@ -12,5 +11,3 @@ public:
     static SystemTheme detectSystemTheme();
     static bool isSystemInDarkMode();
 };
-
-#endif

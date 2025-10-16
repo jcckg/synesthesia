@@ -1,5 +1,4 @@
-#ifndef STYLING_H
-#define STYLING_H
+#pragma once
 
 #include <imgui.h>
 
@@ -24,5 +23,3 @@ private:
     static void setColors(ImGuiStyle& style, UITheme theme);
     static void setDimensions(ImGuiStyle& style);
 };
-
-#endif

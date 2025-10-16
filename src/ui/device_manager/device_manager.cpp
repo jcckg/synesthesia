@@ -1,9 +1,10 @@
 #include "device_manager.h"
 #include <imgui.h>
+#include <portaudio.h>
 #include <algorithm>
 #include <string>
 
-void DeviceManager::populateDeviceNames(DeviceState& deviceState, 
+void DeviceManager::populateDeviceNames(DeviceState& deviceState,
                                         const std::vector<AudioInput::DeviceInfo>& devices) {
     if (!deviceState.deviceNamesPopulated && !devices.empty()) {
         deviceState.deviceNames.reserve(devices.size());
@@ -11,6 +12,28 @@ void DeviceManager::populateDeviceNames(DeviceState& deviceState,
             deviceState.deviceNames.push_back(dev.name.c_str());
         }
         deviceState.deviceNamesPopulated = true;
+    }
+}
+
+void DeviceManager::populateOutputDeviceNames(DeviceState& deviceState,
+                                              const std::vector<AudioOutput::DeviceInfo>& outputDevices) {
+    if (!deviceState.outputDeviceNamesPopulated && !outputDevices.empty()) {
+        deviceState.outputDeviceNames.reserve(outputDevices.size());
+        for (const auto& dev : outputDevices) {
+            deviceState.outputDeviceNames.push_back(dev.name.c_str());
+        }
+        deviceState.outputDeviceNamesPopulated = true;
+        if (deviceState.selectedOutputDeviceIndex < 0) {
+            PaDeviceIndex defaultDevice = Pa_GetDefaultOutputDevice();
+            if (defaultDevice != paNoDevice) {
+                for (size_t i = 0; i < outputDevices.size(); ++i) {
+                    if (outputDevices[i].paIndex == defaultDevice) {
+                        deviceState.selectedOutputDeviceIndex = static_cast<int>(i);
+                        break;
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -66,14 +89,33 @@ void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
     ImGui::Spacing();
 }
 
+void DeviceManager::renderOutputDeviceSelection(DeviceState& deviceState,
+                                               const std::vector<AudioOutput::DeviceInfo>&) {
+    ImGui::Text("OUTPUT DEVICE");
+    ImGui::SetNextItemWidth(-FLT_MIN);
+
+    if (!deviceState.outputDeviceNames.empty()) {
+        ImGui::Combo("##outputdevice", &deviceState.selectedOutputDeviceIndex,
+                     deviceState.outputDeviceNames.data(),
+                     static_cast<int>(deviceState.outputDeviceNames.size()));
+
+        if (deviceState.selectedOutputDeviceIndex < 0) {
+            ImGui::TextDisabled("Select an audio output device");
+        }
+    } else {
+        ImGui::TextDisabled("No audio output devices found.");
+    }
+    ImGui::Spacing();
+}
+
 void DeviceManager::renderChannelSelection(DeviceState& deviceState,
                                           AudioInput& audioInput,
                                           const std::vector<AudioInput::DeviceInfo>& devices) {
-    if (deviceState.selectedDeviceIndex >= 0 && 
+    if (deviceState.selectedDeviceIndex >= 0 &&
         !deviceState.streamError &&
-        !deviceState.channelNames.empty() && 
+        !deviceState.channelNames.empty() &&
         devices[static_cast<size_t>(deviceState.selectedDeviceIndex)].maxChannels > 2) {
-        
+
         ImGui::Text("CHANNEL");
         ImGui::SetNextItemWidth(-FLT_MIN);
         if (ImGui::Combo("##channel", &deviceState.selectedChannelIndex,

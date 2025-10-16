@@ -43,7 +43,7 @@ jobs:
 
       - name: Create ad-hoc signature for Synesthesia
         run: |
-          codesign --force --deep --sign - --entitlements meta/entitlements.plist --options runtime build/Synesthesia.app
+          codesign --force --deep --sign - --entitlements assets/mac/entitlements.plist --options runtime build/Synesthesia.app
           codesign -vvv --deep --strict build/Synesthesia.app
 
       - name: Package for macOS (Apple Silicon)

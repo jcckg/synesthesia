@@ -5,7 +5,7 @@
 #include <cmath>
 
 SpringSmoother::SpringSmoother(const float stiffness, const float damping, const float mass)
-    : m_stiffness(stiffness), m_damping(damping), m_mass(mass), m_rgbCacheDirty(true) {
+    : m_stiffness(stiffness), m_baseStiffness(stiffness), m_damping(damping), m_mass(mass), m_rgbCacheDirty(true) {
     initialiseToDefaults();
 }
 
@@ -19,7 +19,7 @@ void SpringSmoother::initialiseToDefaults() {
 
 void SpringSmoother::reset(const float r, const float g, const float b) {
     float L, a, b_comp;
-    ColourMapper::RGBtoLab(r, g, b, L, a, b_comp);
+    ColourMapper::RGBtoOklab(r, g, b, L, a, b_comp);
 
     m_channels[0] = {L, 0.0f, L};
     m_channels[1] = {a, 0.0f, a};
@@ -33,7 +33,7 @@ void SpringSmoother::reset(const float r, const float g, const float b) {
 
 void SpringSmoother::setTargetColour(const float r, const float g, const float b) {
     float L, a, b_comp;
-    ColourMapper::RGBtoLab(r, g, b, L, a, b_comp);
+    ColourMapper::RGBtoOklab(r, g, b, L, a, b_comp);
 
     m_channels[0].targetPosition = L;
     m_channels[1].targetPosition = a;
@@ -81,7 +81,7 @@ bool SpringSmoother::update(float deltaTime) {
 
 void SpringSmoother::updateRGBCache() const {
     float r, g, b;
-    ColourMapper::LabtoRGB(m_channels[0].position, m_channels[1].position, 
+    ColourMapper::OklabtoRGB(m_channels[0].position, m_channels[1].position,
                           m_channels[2].position, r, g, b);
 
     m_currentRGB[0] = std::clamp(r, 0.0f, 1.0f);
@@ -103,12 +103,42 @@ void SpringSmoother::getCurrentColour(float& r, float& g, float& b) const {
 void SpringSmoother::setSmoothingAmount(float smoothingAmount) {
     smoothingAmount = std::clamp(smoothingAmount, 0.0f, 1.0f);
 
-    m_stiffness = MIN_STIFFNESS * std::pow(MAX_STIFFNESS / MIN_STIFFNESS, smoothingAmount);
+    m_baseStiffness = MIN_STIFFNESS * std::pow(MAX_STIFFNESS / MIN_STIFFNESS, smoothingAmount);
+    m_stiffness = m_baseStiffness;
     m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * 0.5f;
 }
 
 float SpringSmoother::getSmoothingAmount() const {
-    const float logRatio = std::log(m_stiffness / MIN_STIFFNESS) / 
+    const float logRatio = std::log(m_baseStiffness / MIN_STIFFNESS) /
                           std::log(MAX_STIFFNESS / MIN_STIFFNESS);
     return std::clamp(logRatio, 0.0f, 1.0f);
+}
+
+// Stowell & Plumbley (2007) - adaptive whitening for improved onset detection
+// Adaptive smoothing: reduce during onsets, scale by flux, increase for noise
+bool SpringSmoother::update(const float deltaTime, const bool onsetDetected,
+                            const float spectralFlux, const float spectralFlatness) {
+    float adaptiveStiffness = m_baseStiffness;
+
+    constexpr float ONSET_STIFFNESS_REDUCTION = 0.3f;
+    if (onsetDetected) {
+        adaptiveStiffness *= (1.0f - ONSET_STIFFNESS_REDUCTION);
+    }
+
+    constexpr float FLUX_SENSITIVITY = 2.0f;
+    const float clampedFlux = std::clamp(spectralFlux * 10.0f, 0.0f, 1.0f);
+    const float fluxScale = 1.0f - (clampedFlux * FLUX_SENSITIVITY * 0.5f);
+    adaptiveStiffness *= std::max(fluxScale, 0.1f);
+
+    constexpr float FLATNESS_SMOOTHING_BOOST = 1.5f;
+    const float clampedFlatness = std::clamp(spectralFlatness, 0.0f, 1.0f);
+    const float flatnessScale = 1.0f + (clampedFlatness * FLATNESS_SMOOTHING_BOOST);
+    adaptiveStiffness *= flatnessScale;
+
+    adaptiveStiffness = std::clamp(adaptiveStiffness, MIN_STIFFNESS * 0.5f, MAX_STIFFNESS * 2.0f);
+
+    m_stiffness = adaptiveStiffness;
+    m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * 0.5f;
+
+    return update(deltaTime);
 }
