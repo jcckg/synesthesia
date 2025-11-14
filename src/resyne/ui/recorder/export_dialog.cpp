@@ -43,7 +43,7 @@ void Recorder::drawExportDialog(RecorderState& state) {
             ImGui::CloseCurrentPopup();
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Export as RGB Float32 TIFF (colour-graded audio!)");
+            ImGui::SetTooltip("Export as TIFF");
         }
 
         ImGui::SameLine();

@@ -16,6 +16,7 @@
 #include "resyne/ui/toolbar/tool_state.h"
 
 class FFTProcessor;
+class AudioInput;
 
 namespace ReSyne {
 
@@ -129,6 +130,7 @@ public:
                                 float panelHeight);
 
     static void drawFullWindow(RecorderState& state,
+                               AudioInput& audioInput,
                                FFTProcessor& fftProcessor,
                                float windowX,
                                float windowY,

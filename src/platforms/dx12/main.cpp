@@ -116,19 +116,21 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 int app_main(int, char**)
 {
-    WNDCLASSEXW wc = { 
-        sizeof(wc), 
-        CS_CLASSDC, 
-        WndProc, 
-        0L, 
-        0L, 
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+
+    WNDCLASSEXW wc = {
+        sizeof(wc),
+        CS_CLASSDC,
+        WndProc,
+        0L,
+        0L,
         GetModuleHandle(nullptr),
         LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_ICON1)),
         LoadIcon(GetModuleHandle(nullptr), MAKEINTRESOURCE(IDI_ICON1)),
-        nullptr, 
-        nullptr, 
-        L"Synesthesia", 
-        nullptr 
+        nullptr,
+        nullptr,
+        L"Synesthesia",
+        nullptr
     };
     ::RegisterClassExW(&wc);
     HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Synesthesia", WS_OVERLAPPEDWINDOW, 100, 100, 1480, 750, nullptr, nullptr, wc.hInstance, nullptr);
@@ -158,24 +160,23 @@ int app_main(int, char**)
         return 1;
     }
 
-    ::ShowWindow(hwnd, SW_SHOWDEFAULT);
-    ::UpdateWindow(hwnd);
-
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImPlot::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
-    io.IniFilename = nullptr;  // Disable automatic .ini file creation
+    io.IniFilename = nullptr;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
-    // Load fonts
+    const float rawDpiScale = GetDpiForWindow(hwnd) / 96.0f;
+    const float dpiScale = 1.0f + (rawDpiScale - 1.0f) * 0.65f;
+
     io.Fonts->AddFontDefault();
 
     const char* textFontPaths[] = {
-        "../assets/fonts/IBMPlexMono-Medium.ttf",  // From build directory
-        "assets/fonts/IBMPlexMono-Medium.ttf",     // From project root
-        "IBMPlexMono-Medium.ttf"                   // Same directory as executable
+        "../assets/fonts/IBMPlexMono-Medium.ttf",
+        "assets/fonts/IBMPlexMono-Medium.ttf",
+        "IBMPlexMono-Medium.ttf"
     };
 
     ImFont* mainFont = nullptr;
@@ -183,7 +184,7 @@ int app_main(int, char**)
         FILE* fontFile = fopen(fontPath, "rb");
         if (fontFile != nullptr) {
             fclose(fontFile);
-            mainFont = io.Fonts->AddFontFromFileTTF(fontPath, 15.0f); // adjust size as needed
+            mainFont = io.Fonts->AddFontFromFileTTF(fontPath, 15.0f * dpiScale);
             if (mainFont != nullptr) break;
         }
     }
@@ -193,12 +194,11 @@ int app_main(int, char**)
         mainFont = io.Fonts->AddFontDefault();
     }
 
-    // Now merge in Font Awesome icons
     static const ImWchar icons_ranges[] = { ICON_MIN_FA, ICON_MAX_16_FA, 0 };
     ImFontConfig icons_config;
     icons_config.MergeMode = true;
     icons_config.PixelSnapH = true;
-    icons_config.GlyphMinAdvanceX = 16.0f;
+    icons_config.GlyphMinAdvanceX = 16.0f * dpiScale;
 
     const char* iconFontPaths[] = {
         "../assets/fonts/icons/" FONT_ICON_FILE_NAME_FAS,
@@ -211,7 +211,7 @@ int app_main(int, char**)
         FILE* fontFile = fopen(fontPath, "rb");
         if (fontFile != nullptr) {
             fclose(fontFile);
-            ImFont* iconFont = io.Fonts->AddFontFromFileTTF(fontPath, 16.0f, &icons_config, icons_ranges);
+            ImFont* iconFont = io.Fonts->AddFontFromFileTTF(fontPath, 16.0f * dpiScale, &icons_config, icons_ranges);
             if (iconFont != nullptr) {
                 iconFontLoaded = true;
                 break;
@@ -223,10 +223,10 @@ int app_main(int, char**)
         fprintf(stderr, "Warning: Could not load Font Awesome icons. Icon buttons will not display correctly.\n");
     }
 
-    // Optionally, you can keep a handle to both for later use:
     io.FontDefault = mainFont;
 
     ImGui::StyleColorsDark();
+    ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
     ImGui_ImplWin32_Init(hwnd);
 
@@ -257,6 +257,9 @@ int app_main(int, char**)
     std::vector<AudioOutput::DeviceInfo> outputDevices = AudioOutput::getOutputDevices();
 
     UIState uiState;
+
+    ::ShowWindow(hwnd, SW_SHOWDEFAULT);
+    ::UpdateWindow(hwnd);
 
     constexpr auto target_frame_duration = std::chrono::microseconds(8333);
 

@@ -29,6 +29,7 @@ void updateFromFFT(State& state,
 }
 
 void renderMainView(State& state,
+                    AudioInput& audioInput,
                     FFTProcessor& fftProcessor,
                     float windowX,
                     float windowY,
@@ -36,6 +37,7 @@ void renderMainView(State& state,
                     float windowHeight) {
     Recorder::drawFullWindow(
         state.recorderState,
+        audioInput,
         fftProcessor,
         windowX,
         windowY,

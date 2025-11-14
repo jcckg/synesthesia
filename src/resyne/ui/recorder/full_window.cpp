@@ -6,6 +6,7 @@
 #include <limits>
 
 #include "audio/analysis/fft/fft_processor.h"
+#include "audio/input/audio_input.h"
 #include "imgui.h"
 #include "ui/icons.h"
 #include "resyne/ui/recorder/utils.h"
@@ -16,6 +17,7 @@
 namespace ReSyne {
 
 void Recorder::drawFullWindow(RecorderState& state,
+                              AudioInput& audioInput,
                               FFTProcessor& fftProcessor,
                               float windowX,
                               float windowY,
@@ -164,23 +166,26 @@ void Recorder::drawFullWindow(RecorderState& state,
                                      ImGui::ColorConvertFloat4ToU32(ImVec4(0.7f, 0.7f, 0.7f, combinedAlpha)));
         }
 
-        constexpr const char* loadMessage = "Load or Drag a supported file into the timeline.";
-        ImFont* font = ImGui::GetFont();
-        const float smallFontSize = ImGui::GetFontSize() * 0.9f;
-        const ImVec2 textSize = font->CalcTextSizeA(
-            smallFontSize,
-            std::numeric_limits<float>::max(),
-            0.0f,
-            loadMessage);
-        const ImVec2 textPos(
-            cursorPos.x + (gradientSize.x - textSize.x) * 0.5f,
-            cursorPos.y + (gradientSize.y - textSize.y) * 0.5f);
-        drawList->AddText(
-            font,
-            smallFontSize,
-            textPos,
-            IM_COL32(160, 160, 160, 255),
-            loadMessage);
+        const bool audioActive = audioInput.isStreamActive();
+        if (!audioActive) {
+            constexpr const char* loadMessage = "Load or drag a supported file into the timeline, or load an active input via the sidebar.";
+            ImFont* font = ImGui::GetFont();
+            const float smallFontSize = ImGui::GetFontSize() * 0.9f;
+            const ImVec2 textSize = font->CalcTextSizeA(
+                smallFontSize,
+                std::numeric_limits<float>::max(),
+                0.0f,
+                loadMessage);
+            const ImVec2 textPos(
+                cursorPos.x + (gradientSize.x - textSize.x) * 0.5f,
+                cursorPos.y + (gradientSize.y - textSize.y) * 0.5f);
+            drawList->AddText(
+                font,
+                smallFontSize,
+                textPos,
+                IM_COL32(160, 160, 160, 255),
+                loadMessage);
+        }
     }
 
     const bool windowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);

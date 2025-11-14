@@ -216,6 +216,9 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
         $<TARGET_RUNTIME_DLLS:${EXECUTABLE_NAME}>
         DESTINATION bin
     )
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets
+        DESTINATION bin
+    )
 elseif(APPLE)
     install(TARGETS ${EXECUTABLE_NAME} BUNDLE DESTINATION ".")
 else()

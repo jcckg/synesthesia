@@ -714,6 +714,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
 			ReSyne::renderMainView(
 				state.resyneState,
+				audioInput,
 				audioInput.getFFTProcessor(),
 				windowX,
 				windowY,
