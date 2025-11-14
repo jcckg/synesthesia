@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.13)
 
 set(SYNESTHESIA_VERSION_MAJOR 2025)
 set(SYNESTHESIA_VERSION_MINOR 11)
-set(SYNESTHESIA_VERSION_PATCH 14)
+set(SYNESTHESIA_VERSION_PATCH 15)
 set(SYNESTHESIA_VERSION "${SYNESTHESIA_VERSION_MAJOR}.${SYNESTHESIA_VERSION_MINOR}.${SYNESTHESIA_VERSION_PATCH}")
 
 project(Synesthesia VERSION ${SYNESTHESIA_VERSION})
@@ -52,6 +52,7 @@ add_neon_sources()
 add_sse_sources()
 
 include(cmake/platform.cmake)
+include(cmake/ffmpeg.cmake)
 
 configure_include_directories()
 apply_neon_optimisations()

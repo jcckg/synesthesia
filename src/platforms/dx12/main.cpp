@@ -4,6 +4,7 @@
 #include "fft_processor.h"
 #include "ui.h"
 #include "resource.h"
+#include "resource_loader.h"
 #include "system_theme_detector.h"
 #include "ui/dragdrop/file_drop_manager.h"
 #include "utilities/video/ffmpeg_locator.h"
@@ -173,19 +174,34 @@ int app_main(int, char**)
 
     io.Fonts->AddFontDefault();
 
-    const char* textFontPaths[] = {
-        "../assets/fonts/IBMPlexMono-Medium.ttf",
-        "assets/fonts/IBMPlexMono-Medium.ttf",
-        "IBMPlexMono-Medium.ttf"
-    };
-
     ImFont* mainFont = nullptr;
-    for (const char* fontPath : textFontPaths) {
-        FILE* fontFile = fopen(fontPath, "rb");
-        if (fontFile != nullptr) {
-            fclose(fontFile);
-            mainFont = io.Fonts->AddFontFromFileTTF(fontPath, 15.0f * dpiScale);
-            if (mainFont != nullptr) break;
+
+    try {
+        static std::vector<unsigned char> textFontData = ResourceLoader::loadResourceAsVector(IDR_FONT_IBM_PLEX_MONO_MEDIUM);
+        ImFontConfig font_config;
+        font_config.FontDataOwnedByAtlas = false;
+        mainFont = io.Fonts->AddFontFromMemoryTTF(
+            textFontData.data(),
+            static_cast<int>(textFontData.size()),
+            15.0f * dpiScale,
+            &font_config
+        );
+    } catch (const std::exception& e) {
+        fprintf(stderr, "Warning: Failed to load text font from embedded resources: %s\n", e.what());
+        fprintf(stderr, "Attempting to load from file system...\n");
+        const char* textFontPaths[] = {
+            "../assets/fonts/IBMPlexMono-Medium.ttf",
+            "assets/fonts/IBMPlexMono-Medium.ttf",
+            "IBMPlexMono-Medium.ttf"
+        };
+
+        for (const char* fontPath : textFontPaths) {
+            FILE* fontFile = fopen(fontPath, "rb");
+            if (fontFile != nullptr) {
+                fclose(fontFile);
+                mainFont = io.Fonts->AddFontFromFileTTF(fontPath, 15.0f * dpiScale);
+                if (mainFont != nullptr) break;
+            }
         }
     }
 
@@ -199,22 +215,41 @@ int app_main(int, char**)
     icons_config.MergeMode = true;
     icons_config.PixelSnapH = true;
     icons_config.GlyphMinAdvanceX = 16.0f * dpiScale;
-
-    const char* iconFontPaths[] = {
-        "../assets/fonts/icons/" FONT_ICON_FILE_NAME_FAS,
-        "assets/fonts/icons/" FONT_ICON_FILE_NAME_FAS,
-        FONT_ICON_FILE_NAME_FAS
-    };
+    icons_config.FontDataOwnedByAtlas = false;
 
     bool iconFontLoaded = false;
-    for (const char* fontPath : iconFontPaths) {
-        FILE* fontFile = fopen(fontPath, "rb");
-        if (fontFile != nullptr) {
-            fclose(fontFile);
-            ImFont* iconFont = io.Fonts->AddFontFromFileTTF(fontPath, 16.0f * dpiScale, &icons_config, icons_ranges);
-            if (iconFont != nullptr) {
-                iconFontLoaded = true;
-                break;
+
+    try {
+        static std::vector<unsigned char> iconFontData = ResourceLoader::loadResourceAsVector(IDR_FONT_AWESOME_SOLID);
+        ImFont* iconFont = io.Fonts->AddFontFromMemoryTTF(
+            iconFontData.data(),
+            static_cast<int>(iconFontData.size()),
+            16.0f * dpiScale,
+            &icons_config,
+            icons_ranges
+        );
+        if (iconFont != nullptr) {
+            iconFontLoaded = true;
+        }
+    } catch (const std::exception& e) {
+        fprintf(stderr, "Warning: Failed to load icon font from embedded resources: %s\n", e.what());
+        fprintf(stderr, "Attempting to load from file system...\n");
+        const char* iconFontPaths[] = {
+            "../assets/fonts/icons/" FONT_ICON_FILE_NAME_FAS,
+            "assets/fonts/icons/" FONT_ICON_FILE_NAME_FAS,
+            FONT_ICON_FILE_NAME_FAS
+        };
+
+        for (const char* fontPath : iconFontPaths) {
+            FILE* fontFile = fopen(fontPath, "rb");
+            if (fontFile != nullptr) {
+                fclose(fontFile);
+                icons_config.FontDataOwnedByAtlas = true;
+                ImFont* iconFont = io.Fonts->AddFontFromFileTTF(fontPath, 16.0f * dpiScale, &icons_config, icons_ranges);
+                if (iconFont != nullptr) {
+                    iconFontLoaded = true;
+                    break;
+                }
             }
         }
     }

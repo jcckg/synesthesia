@@ -9,7 +9,7 @@ if(WIN32)
     message(STATUS "Configuring for Windows (DirectX 12)")
     list(APPEND SOURCES
         ${SRC_DIR}/platforms/dx12/main.cpp
-        ${SRC_DIR}/platforms/dx12/app.rc
+        ${CMAKE_BINARY_DIR}/app.rc
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
     )
     set(DX12_LIBS d3d12 dxgi d3dcompiler)
@@ -64,14 +64,6 @@ if(WIN32)
         $<$<CONFIG:Release>:/ENTRY:mainCRTStartup>
         $<$<CONFIG:Debug>:/SUBSYSTEM:CONSOLE>
         $<$<CONFIG:Debug>:/ENTRY:mainCRTStartup>
-    )
-
-    # Copy assets directory to build directory so fonts and icons can be found
-    add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_CURRENT_SOURCE_DIR}/assets"
-        "${CMAKE_BINARY_DIR}/assets"
-        COMMENT "Copying assets directory to build folder"
     )
 elseif(APPLE)
     target_compile_options(${EXECUTABLE_NAME} PRIVATE
@@ -214,9 +206,6 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
     )
     install(FILES
         $<TARGET_RUNTIME_DLLS:${EXECUTABLE_NAME}>
-        DESTINATION bin
-    )
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets
         DESTINATION bin
     )
 elseif(APPLE)

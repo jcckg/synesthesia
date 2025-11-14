@@ -297,69 +297,63 @@ bool UpdateChecker::shouldShowUpdateBanner(const UpdateState& state) const {
     return state.shouldShowBanner && state.updatePromptVisible && state.updateAvailable;
 }
 
-void UpdateChecker::drawUpdateBanner(UpdateState& state, float windowWidth, float sidebarWidth) {
+void UpdateChecker::drawUpdateBanner(UpdateState& state, float, float) {
     if (!shouldShowUpdateBanner(state)) {
         return;
     }
-    
-    float bannerWidth = windowWidth - sidebarWidth;
-    
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2(bannerWidth, state.bannerHeight));
-    
+
+    const float popupWidth = 280.0f;
+    const float popupHeight = 70.0f;
+    const float marginRight = 20.0f;
+    const float marginBottom = 53.0f;
+
+    ImVec2 windowSize = ImGui::GetIO().DisplaySize;
+    float posX = windowSize.x - popupWidth - marginRight;
+    float posY = windowSize.y - popupHeight - marginBottom;
+
+    ImGui::SetNextWindowPos(ImVec2(posX, posY));
+    ImGui::SetNextWindowSize(ImVec2(popupWidth, popupHeight));
+
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 4));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.00f, 0.00f, 0.00f, 0.0f));
-    
-    ImGui::Begin("##UpdateBanner", nullptr, 
-                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | 
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.15f, 0.25f, 0.45f, 0.95f));
+
+    ImGui::Begin("##UpdateBanner", nullptr,
+                ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                 ImGuiWindowFlags_NoCollapse);
 
-    float textHeight = ImGui::GetTextLineHeight();
-    float centreY = (state.bannerHeight - textHeight) * 0.5f;
+    ImGui::SetCursorPosY(8.0f);
+    ImGui::Text("Update Available");
 
-    #ifdef __APPLE__
-        float leftPadding = 80.0f;
-        ImGui::SetCursorPosX(leftPadding);
-    #endif
-
-    ImGui::SetCursorPosY(centreY);
-    ImGui::Text("There's an update available,");
-    ImGui::SameLine();
-
-    ImGui::SetCursorPosY(centreY - (ImGui::GetFrameHeight() - textHeight) * 0.5f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.8f, 1.0f, 1.0f));
-    if (ImGui::Button("download it?")) {
-        openDownloadUrl(state.downloadUrl);
-    }
+    ImGui::SetCursorPosY(26.0f);
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.85f, 0.9f, 1.0f));
+    ImGui::TextWrapped("Version %s is available", state.latestVersion.c_str());
     ImGui::PopStyleColor();
 
-    ImVec2 buttonMin = ImGui::GetItemRectMin();
-    ImVec2 buttonMax = ImGui::GetItemRectMax();
-    ImGui::GetWindowDrawList()->AddLine(
-        ImVec2(buttonMin.x, buttonMax.y - 1), 
-        ImVec2(buttonMax.x, buttonMax.y - 1),
-        ImGui::ColorConvertFloat4ToU32(ImVec4(0.6f, 0.8f, 1.0f, 1.0f)), 
-        1.0f
-    );
-    
+    ImGui::SetCursorPosY(popupHeight - 28.0f);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.4f, 0.6f, 0.9f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.4f, 0.7f, 1.0f));
+
+    if (ImGui::Button("Download", ImVec2(100, 20))) {
+        openDownloadUrl(state.downloadUrl);
+    }
+    ImGui::PopStyleColor(3);
+
     ImGui::SameLine();
-    float closeButtonX = bannerWidth - 20 - ImGui::GetStyle().WindowPadding.x;
-    ImGui::SetCursorPosX(closeButtonX);
-    
-    float buttonCentreY = (state.bannerHeight - 16) * 0.5f;
-    ImGui::SetCursorPosY(buttonCentreY);
-    
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-    
-    if (ImGui::Button("X##close", ImVec2(16, 16))) {
+    ImGui::SetCursorPosX(popupWidth - 70);
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.3f, 0.4f, 0.6f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.4f, 0.5f, 0.8f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.25f, 0.35f, 1.0f));
+
+    if (ImGui::Button("Dismiss", ImVec2(60, 20))) {
         state.updatePromptVisible = false;
         state.shouldShowBanner = false;
     }
-    
-    ImGui::PopStyleVar();
+    ImGui::PopStyleColor(3);
+
     ImGui::End();
 
     ImGui::PopStyleColor();

@@ -34,3 +34,6 @@
 [submodule "vendor/rtmidi"]
 	path = vendor/rtmidi
 	url = https://github.com/thestk/rtmidi.git
+[submodule "vendor/ffmpeg"]
+	path = vendor/ffmpeg
+	url = https://github.com/FFmpeg/FFmpeg.git
