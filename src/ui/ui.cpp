@@ -72,6 +72,19 @@ bool spectrumIsSilent(const std::vector<float>& magnitudes) {
 	return true;
 }
 
+bool dropEventsContainSupportedImport(const std::vector<FileDropManager::FileDropEvent>& events) {
+	for (const auto& event : events) {
+		bool anySupported = std::any_of(
+			event.paths.begin(),
+			event.paths.end(),
+			ReSyne::Recorder::isSupportedImportFile);
+		if (anySupported) {
+			return true;
+		}
+	}
+	return false;
+}
+
 void sanitiseMagnitudes(std::vector<float>& magnitudes) {
 	for (float& value : magnitudes) {
 		if (!std::isfinite(value) || value < 0.0f) {
@@ -471,6 +484,11 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 #endif
 
 	auto dropEvents = FileDropManager::consume();
+	if (!dropEvents.empty() &&
+	    state.visualSettings.activeView == UIState::View::Visualisation &&
+	    dropEventsContainSupportedImport(dropEvents)) {
+		state.visualSettings.activeView = UIState::View::ReSyne;
+	}
 	ReSyne::Timeline::TrackpadGestureInput trackpadInput;
 	{
 		auto gestures = TrackpadGestures::consume();
@@ -522,7 +540,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		                       : UIState::View::ReSyne;
 	};
 
-	if (ImGui::IsKeyPressed(ImGuiKey_Tab, false) && io.KeyShift) {
+	if (state.visibility.showUI && ImGui::IsKeyPressed(ImGuiKey_Tab, false) && io.KeyShift) {
 		toggleActiveView();
 	}
 
