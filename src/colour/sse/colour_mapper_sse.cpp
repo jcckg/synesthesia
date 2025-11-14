@@ -1240,20 +1240,6 @@ void vectorSqrt(std::span<float> result, std::span<const float> input, size_t co
     }
 }
 
-void enhanceColourWithAudioParams(
-    float& r, float& g, float& b,
-    const float loudness, const float spectralFlatness, const float spectralCentroid,
-    const float spectralSpread, const float totalEnergy, const float spectralRolloff,
-    const float spectralCrestFactor, const float spectralFlux, const bool onsetDetected,
-    const ColourSpace colourSpace) {
-
-    ColourMapper::enhanceColourWithAudioParams(
-        r, g, b, loudness, spectralFlatness, spectralCentroid,
-        spectralSpread, totalEnergy, spectralRolloff,
-        spectralCrestFactor, spectralFlux, onsetDetected, colourSpace
-    );
-}
-
 }
 
 #endif

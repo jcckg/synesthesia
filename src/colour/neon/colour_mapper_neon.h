@@ -46,14 +46,6 @@ using ColourSpace = ::ColourSpace;
     
     void vectorSqrt(std::span<float> result, std::span<const float> input, size_t count);
 
-    void enhanceColourWithAudioParams(float& r, float& g, float& b,
-                                      float loudness, float spectralFlatness,
-                                      float spectralCentroid, float spectralSpread,
-                                      float totalEnergy, float spectralRolloff,
-                                      float spectralCrestFactor, float spectralFlux,
-                                      bool onsetDetected,
-                                      ColourSpace colourSpace = ColourSpace::Rec2020);
-
     bool isNEONAvailable();
 }
 

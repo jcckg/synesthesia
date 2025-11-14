@@ -47,25 +47,6 @@ public:
 
 	static constexpr float SUB_AUDIO_BRIGHTNESS_BOOST = 3.0f;
 	static constexpr float SPREAD_NORMALISATION = 5000.0f;
-	static constexpr float LOUDNESS_MIN_BRIGHTNESS = 0.2f;
-	static constexpr float LOUDNESS_BRIGHTNESS_RANGE = 0.8f;
-	static constexpr float ENERGY_NORMALISATION = 100.0f;
-	static constexpr float ENERGY_BRIGHTNESS_BOOST = 0.15f;
-	static constexpr float CREST_MIN = 1.0f;
-	static constexpr float CREST_MAX = 20.0f;
-	static constexpr float CREST_BRIGHTNESS_BOOST = 0.2f;
-	static constexpr float FLUX_NORMALISATION = 0.1f;
-	static constexpr float FLUX_BRIGHTNESS_BOOST = 0.1f;
-	static constexpr float ONSET_BRIGHTNESS_FLASH = 0.2f;
-	static constexpr float FLATNESS_SATURATION_REDUCTION = 0.7f;
-	static constexpr float SPREAD_SATURATION_REDUCTION = 0.3f;
-	static constexpr float CENTROID_MIN_FREQ = 200.0f;
-	static constexpr float CENTROID_MAX_FREQ = 8000.0f;
-	static constexpr float CENTROID_HUE_SHIFT_DEGREES = 15.0f;
-	static constexpr float ROLLOFF_MIN_FREQ = 200.0f;
-	static constexpr float ROLLOFF_MAX_FREQ = 12000.0f;
-	static constexpr float ROLLOFF_HUE_SHIFT_DEGREES = 5.0f;
-
 	static constexpr float EPSILON_SMALL = 1e-6f;
 	static constexpr float EPSILON_TINY = 1e-10f;
 	static constexpr float SRGB_GAMMA_ENCODE_THRESHOLD = 0.0031308f;
@@ -106,14 +87,6 @@ public:
 
 	static SpectralCharacteristics calculateSpectralCharacteristics(
 		const std::vector<float>& spectrum, float sampleRate);
-
-	static void enhanceColourWithAudioParams(float& r, float& g, float& b,
-											 float loudness, float spectralFlatness,
-											 float spectralCentroid, float spectralSpread,
-											 float totalEnergy, float spectralRolloff,
-											 float spectralCrestFactor, float spectralFlux,
-											 bool onsetDetected,
-											 ColourSpace colourSpace = ColourSpace::Rec2020);
 
 	static void interpolateCIE(float wavelength, float& X, float& Y, float& Z);
 

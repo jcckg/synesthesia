@@ -325,32 +325,9 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 		state.visualSettings.colourSpace,
 		state.visualSettings.gamutMappingEnabled);
 
-	float enhancedR = colourResult.r;
-	float enhancedG = colourResult.g;
-	float enhancedB = colourResult.b;
-
-	const auto& fftProcessor = audioInput.getFFTProcessor();
-	const float loudness = fftProcessor.getCurrentLoudness();
-	const float totalEnergy = fftProcessor.getTotalEnergy();
-	const float spectralFlux = fftProcessor.getSpectralFlux();
-	const bool onsetDetected = fftProcessor.getOnsetDetected();
-
-	ColourMapper::enhanceColourWithAudioParams(
-		enhancedR, enhancedG, enhancedB,
-		loudness,
-		colourResult.spectralFlatness,
-		colourResult.spectralCentroid,
-		colourResult.spectralSpread,
-		totalEnergy,
-		colourResult.spectralRolloff,
-		colourResult.spectralCrestFactor,
-		spectralFlux,
-		onsetDetected,
-		state.visualSettings.colourSpace);
-
-	const float adjustedR = enhancedR * (1.0f - whiteMix) + whiteMix;
-	const float adjustedG = enhancedG * (1.0f - whiteMix) + whiteMix;
-	const float adjustedB = enhancedB * (1.0f - whiteMix) + whiteMix;
+	const float adjustedR = colourResult.r * (1.0f - whiteMix) + whiteMix;
+	const float adjustedG = colourResult.g * (1.0f - whiteMix) + whiteMix;
+	const float adjustedB = colourResult.b * (1.0f - whiteMix) + whiteMix;
 
 	const float displayR = std::clamp(adjustedR, 0.0f, 1.0f);
 	const float displayG = std::clamp(adjustedG, 0.0f, 1.0f);
