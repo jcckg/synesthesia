@@ -52,6 +52,7 @@ add_neon_sources()
 add_sse_sources()
 
 include(cmake/platform.cmake)
+include(cmake/ffmpeg.cmake)
 
 configure_include_directories()
 apply_neon_optimisations()

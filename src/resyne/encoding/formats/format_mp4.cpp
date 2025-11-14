@@ -16,6 +16,7 @@
 
 #include "colour/colour_mapper.h"
 #include "ui/smoothing/smoothing.h"
+#include "utilities/video/ffmpeg_locator.h"
 
 namespace ReSyne::Encoding::Video {
 
@@ -225,6 +226,39 @@ double computeDuration(const std::vector<AudioColourSample>& samples,
     return std::max(0.1, static_cast<double>(samples.size()));
 }
 
+std::string determineVideoEncoder() {
+    if (const char* overrideCodec = std::getenv("RESYNE_FFMPEG_VIDEO_CODEC"); overrideCodec && *overrideCodec) {
+        return overrideCodec;
+    }
+
+    const auto& locator = Utilities::Video::FFmpegLocator::instance();
+    if (locator.supportsEncoder("libx264")) {
+        return "libx264";
+    }
+
+#if defined(__APPLE__)
+    if (locator.supportsEncoder("h264_videotoolbox")) {
+        return "h264_videotoolbox";
+    }
+#endif
+
+    if (locator.supportsEncoder("mpeg4")) {
+        return "mpeg4";
+    }
+
+    return "mpeg4";
+}
+
+void appendEncoderParameters(std::ostringstream& stream, const std::string& encoder) {
+    if (encoder == "libx264") {
+        stream << " -pix_fmt yuv420p -preset medium -crf 18";
+    } else if (encoder == "h264_videotoolbox") {
+        stream << " -pix_fmt yuv420p -b:v 12M -maxrate 12M -bufsize 24M -allow_sw 1";
+    } else {
+        stream << " -pix_fmt yuv420p -q:v 3";
+    }
+}
+
 std::string buildFFmpegCommand(const std::string& ffmpegPath,
                                const fs::path& audioPath,
                                const std::string& outputPath,
@@ -232,6 +266,8 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
                                int width,
                                int height,
                                int fps) {
+    const std::string videoEncoder = determineVideoEncoder();
+
     std::ostringstream oss;
     oss << '"' << ffmpegPath << '"'
         << " -y -loglevel error"
@@ -241,8 +277,11 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
         << " -i -"
         << " -i " << '"' << audioPath.string() << '"'
         << " -map 0:v:0 -map 1:a:0"
-        << " -c:v libx264 -pix_fmt yuv420p -preset medium -crf 18"
-        << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts make_zero"
+        << " -c:v " << videoEncoder;
+
+    appendEncoderParameters(oss, videoEncoder);
+
+    oss << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts make_zero"
         << " \"" << outputPath << "\"";
 
 #ifdef _WIN32

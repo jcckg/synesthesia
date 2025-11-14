@@ -30,8 +30,23 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Determine FFmpeg revision
+        id: ffmpeg-rev
+        shell: bash
+        run: echo "hash=$(cd vendor/ffmpeg && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore FFmpeg cache
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}
+
       - name: Create build directory
         run: mkdir build
+
+      - name: Build FFmpeg (if needed)
+        shell: bash
+        run: ./src/utilities/ffmpeg/build_ffmpeg.sh
 
       - name: Configure CMake
         working-directory: ./build
@@ -66,6 +81,20 @@ jobs:
           name: synesthesia-mac-arm
           path: build/synesthesia-mac-arm.dmg
 
+      - name: Archive FFmpeg build
+        run: |
+          if [ ! -d build/ffmpeg/install ]; then
+            echo "Bundled FFmpeg output missing" >&2
+            exit 1
+          fi
+          tar -czf build/ffmpeg-macos.tar.gz -C build/ffmpeg install
+
+      - name: Upload FFmpeg macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-macos
+          path: build/ffmpeg-macos.tar.gz
+
   build-windows:
     needs: check-release-flag
     if: needs.check-release-flag.outputs.should_release == 'true'
@@ -77,11 +106,26 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Determine FFmpeg revision
+        id: ffmpeg-rev
+        shell: bash
+        run: echo "hash=$(cd vendor/ffmpeg && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore FFmpeg cache
+        uses: actions/cache@v4
+        with:
+          path: build/ffmpeg
+          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}
+
       - name: Setup MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
       - name: Create build directory
         run: mkdir build
+
+      - name: Build FFmpeg (if needed)
+        shell: cmd
+        run: src\utilities\ffmpeg\build_ffmpeg.bat
 
       - name: Configure CMake
         working-directory: ./build
@@ -94,8 +138,8 @@ jobs:
       - name: Package for Windows (x64)
         run: |
           cd build\Release
-          # Copy any necessary DLLs
-          Compress-Archive -Path *.exe, *.dll -DestinationPath ..\synesthesia-win-x64.zip
+          # Copy any necessary DLLs and bundle assets (FFmpeg lives under assets/bin)
+          Compress-Archive -Path Synesthesia.exe, *.dll, ..\assets -DestinationPath ..\synesthesia-win-x64.zip
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
@@ -103,6 +147,20 @@ jobs:
           name: synesthesia-win-x64
           path: build/synesthesia-win-x64.zip
 
+      - name: Archive FFmpeg build
+        shell: pwsh
+        run: |
+          if (-not (Test-Path -Path "build/ffmpeg/install/bin")) {
+            Write-Error "Bundled FFmpeg output missing"
+          }
+          if (Test-Path build/ffmpeg-windows.zip) { Remove-Item build/ffmpeg-windows.zip }
+          Compress-Archive -Path build/ffmpeg/install/* -DestinationPath build/ffmpeg-windows.zip
+
+      - name: Upload FFmpeg Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-windows
+          path: build/ffmpeg-windows.zip
   create-release:
     needs: [check-release-flag, build-macos, build-windows]
     if: needs.check-release-flag.outputs.should_release == 'true'

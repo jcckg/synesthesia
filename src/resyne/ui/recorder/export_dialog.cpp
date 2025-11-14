@@ -75,7 +75,7 @@ void Recorder::drawExportDialog(RecorderState& state) {
                 ImGui::CloseCurrentPopup();
             }
             if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Export as video (requires FFmpeg)");
+                ImGui::SetTooltip("Export as video");
             }
 
             ImGui::SameLine();
