@@ -148,6 +148,7 @@ jobs:
             base-devel
             gawk
             diffutils
+            git
 
       - name: Checkout code with submodules
         uses: actions/checkout@v4
