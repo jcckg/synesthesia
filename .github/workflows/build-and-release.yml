@@ -139,11 +139,15 @@ jobs:
     if: needs.check-release-flag.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
+      - name: Setup MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
           msystem: MINGW64
           update: true
+          path-type: inherit
           install: >-
             base-devel
             gawk
@@ -190,9 +194,6 @@ jobs:
             echo "FFmpeg binary or signature file missing"
             echo "valid=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
 
       - name: Create build directory
         shell: pwsh
