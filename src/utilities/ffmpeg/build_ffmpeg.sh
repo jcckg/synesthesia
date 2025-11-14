@@ -22,18 +22,18 @@ case "${UNAME_OUTPUT}" in
     ;;
   MINGW*|MSYS*|CYGWIN*)
     PLATFORM="windows"
-    MAKE_CMD="nmake"
     ;;
   *)
     PLATFORM="${UNAME_OUTPUT}"
     ;;
 esac
 
+if ! command -v "${MAKE_CMD}" >/dev/null 2>&1; then
+  echo "${MAKE_CMD} not found in PATH. Install a GNU make compatible toolchain (e.g. MSYS2 make or Git for Windows) before running this script." >&2
+  exit 1
+fi
+
 if [[ "${PLATFORM}" == "windows" ]]; then
-  if ! command -v nmake >/dev/null 2>&1; then
-    echo "nmake not found. Please run this script from an MSVC-enabled terminal (e.g. Developer Command Prompt)." >&2
-    exit 1
-  fi
   export CC=cl
   export CXX=cl
   export LD=link
@@ -162,13 +162,8 @@ fi
 
 ./configure "${CONFIGURE_FLAGS[@]}"
 
-if [[ "${MAKE_CMD}" == "nmake" ]]; then
-  ${MAKE_CMD}
-  ${MAKE_CMD} install
-else
-  ${MAKE_CMD} -j"$(detect_cpu_count)"
-  ${MAKE_CMD} install
-fi
+${MAKE_CMD} -j"$(detect_cpu_count)"
+${MAKE_CMD} install
 
 licence_dir="${FFMPEG_INSTALL_PREFIX}/licenses"
 mkdir -p "${licence_dir}"
