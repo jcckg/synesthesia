@@ -9,7 +9,7 @@
 #include "imgui.h"
 #include "ui/icons.h"
 #include "resyne/ui/recorder/utils.h"
-#include "resyne/ui/recorder/constants.h"
+#include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
 #include "resyne/ui/toolbar/toolbar.h"
 

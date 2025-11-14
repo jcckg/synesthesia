@@ -90,7 +90,7 @@ function(apply_sse_optimisations)
                 ${SRC_DIR}/audio/analysis/fft/sse/fft_processor_sse.cpp
                 ${SRC_DIR}/colour/sse/colour_mapper_sse.cpp
                 ${SRC_DIR}/audio/analysis/spectral/sse/spectral_processor_sse.cpp
-                PROPERTIES COMPILE_FLAGS "/O2 /fp:fast /arch:AVX2"
+                PROPERTIES COMPILE_FLAGS "$<$<CONFIG:Release>:/O2> /fp:fast /arch:AVX2"
             )
         else()
             target_compile_options(${EXECUTABLE_NAME} PRIVATE -msse4.2 -mavx2)
