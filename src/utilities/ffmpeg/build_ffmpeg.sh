@@ -148,8 +148,6 @@ case "${PLATFORM}" in
       "--toolchain=msvc"
       "--arch=x86_64"
       "--target-os=win64"
-      "--enable-yasm"
-      "--enable-asm"
       "--enable-w32threads"
       "--extra-cflags=-MD"
     )
