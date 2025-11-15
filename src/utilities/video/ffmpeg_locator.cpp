@@ -279,15 +279,15 @@ void FFmpegLocator::refresh() {
     }
 #endif
 
+    const auto bundled = bundledCandidates();
+    candidates.insert(candidates.end(), bundled.begin(), bundled.end());
+
     const char* overrideVars[] = {"RESYNE_FFMPEG_PATH", "FFMPEG_PATH"};
     for (const char* var : overrideVars) {
         if (const char* value = std::getenv(var); value && *value) {
             candidates.emplace_back(value);
         }
     }
-
-    const auto bundled = bundledCandidates();
-    candidates.insert(candidates.end(), bundled.begin(), bundled.end());
 
     const auto names = defaultExecutableNames();
     candidates.reserve(candidates.size() + names.size());

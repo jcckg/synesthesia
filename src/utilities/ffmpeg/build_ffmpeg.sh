@@ -34,11 +34,8 @@ if ! command -v "${MAKE_CMD}" >/dev/null 2>&1; then
 fi
 
 if [[ "${PLATFORM}" == "windows" ]]; then
-  export CC=cl
-  export CXX=cl
-  export LD=link
-  export AR=lib
-  export STRIP=:
+  export CC=gcc
+  export CXX=g++
 fi
 
 normalise_path() {
@@ -98,7 +95,18 @@ if [[ "${PLATFORM}" == "windows" ]]; then
   FFMPEG_BINARY_PATH="${FFMPEG_BINARY_PATH}.exe"
 fi
 
-current_signature="$(cd "${FFMPEG_SOURCE_DIR}" && git rev-parse HEAD)-${PLATFORM}"
+SCRIPT_HASH=""
+if command -v git >/dev/null 2>&1; then
+  SCRIPT_HASH="$(git -C "${ROOT_DIR}" hash-object src/utilities/ffmpeg/build_ffmpeg.sh 2>/dev/null || true)"
+fi
+if [[ -z "${SCRIPT_HASH}" ]]; then
+  if command -v shasum >/dev/null 2>&1; then
+    SCRIPT_HASH="$(shasum "${SCRIPT_DIR}/build_ffmpeg.sh" | awk '{print $1}')"
+  elif command -v sha1sum >/dev/null 2>&1; then
+    SCRIPT_HASH="$(sha1sum "${SCRIPT_DIR}/build_ffmpeg.sh" | awk '{print $1}')"
+  fi
+fi
+current_signature="$(cd "${FFMPEG_SOURCE_DIR}" && git rev-parse HEAD)-${PLATFORM}-${SCRIPT_HASH}"
 
 if [[ -f "${configure_signature_file}" && -x "${FFMPEG_BINARY_PATH}" ]]; then
   previous_signature="$(< "${configure_signature_file}")"
@@ -145,11 +153,10 @@ case "${PLATFORM}" in
     ;;
   windows)
     CONFIGURE_FLAGS+=(
-      "--toolchain=msvc"
       "--arch=x86_64"
-      "--target-os=win64"
+      "--target-os=mingw32"
       "--enable-w32threads"
-      "--extra-cflags=-MD"
+      "--extra-ldflags=-static"
     )
     ;;
 esac

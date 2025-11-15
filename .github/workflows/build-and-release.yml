@@ -34,13 +34,17 @@ jobs:
         id: ffmpeg-rev
         shell: bash
         run: echo "hash=$(cd vendor/ffmpeg && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Determine FFmpeg script hash
+        id: ffmpeg-script-hash
+        shell: bash
+        run: echo "hash=$(git hash-object src/utilities/ffmpeg/build_ffmpeg.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Restore FFmpeg cache
         id: ffmpeg-cache
         uses: actions/cache/restore@v4
         with:
           path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}
+          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Verify FFmpeg cache
         id: ffmpeg-verify
@@ -51,7 +55,7 @@ jobs:
           if [[ -f "build/ffmpeg/install/bin/ffmpeg" && -f "build/ffmpeg/.configure-signature" ]]; then
             echo "FFmpeg binary exists"
             CACHED_SIG=$(cat build/ffmpeg/.configure-signature)
-            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-macOS"
+            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-macOS-${{ steps.ffmpeg-script-hash.outputs.hash }}"
 
             if [[ "$CACHED_SIG" == "$EXPECTED_SIG" ]]; then
               echo "Signature matches: $CACHED_SIG"
@@ -85,7 +89,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}
+          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Configure CMake
         working-directory: ./build
@@ -139,13 +143,10 @@ jobs:
     if: needs.check-release-flag.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
-      - name: Setup MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: MINGW64
+          msystem: UCRT64
           update: true
           path-type: inherit
           install: >-
@@ -153,6 +154,10 @@ jobs:
             gawk
             diffutils
             git
+            make
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-pkg-config
 
       - name: Checkout code with submodules
         uses: actions/checkout@v4
@@ -164,13 +169,17 @@ jobs:
         id: ffmpeg-rev
         shell: bash
         run: echo "hash=$(cd vendor/ffmpeg && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Determine FFmpeg script hash
+        id: ffmpeg-script-hash
+        shell: bash
+        run: echo "hash=$(git hash-object src/utilities/ffmpeg/build_ffmpeg.sh)" >> "$GITHUB_OUTPUT"
 
       - name: Restore FFmpeg cache
         id: ffmpeg-cache
         uses: actions/cache/restore@v4
         with:
           path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}
+          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Verify FFmpeg cache
         id: ffmpeg-verify
@@ -181,7 +190,7 @@ jobs:
           if [[ -f "build/ffmpeg/install/bin/ffmpeg.exe" && -f "build/ffmpeg/.configure-signature" ]]; then
             echo "FFmpeg binary exists"
             CACHED_SIG=$(cat build/ffmpeg/.configure-signature)
-            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-windows"
+            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-windows-${{ steps.ffmpeg-script-hash.outputs.hash }}"
 
             if [[ "$CACHED_SIG" == "$EXPECTED_SIG" ]]; then
               echo "Signature matches: $CACHED_SIG"
@@ -216,7 +225,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}
+          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Configure CMake
         working-directory: ./build

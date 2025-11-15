@@ -335,7 +335,7 @@ bool renderVideo(const std::string& ffmpegCommand,
         return false;
     }
 
-    constexpr size_t kPipeBufferSize = 4 * 1024 * 1024;
+    constexpr size_t kPipeBufferSize = 8 * 1024 * 1024;
     std::vector<char> pipeBuffer(kPipeBufferSize);
     setvbuf(pipe, pipeBuffer.data(), _IOFBF, kPipeBufferSize);
 
@@ -522,7 +522,7 @@ bool exportToMP4(const std::string& outputPath,
             return false;
         }
 
-        constexpr size_t kPipeBufferSize = 4 * 1024 * 1024;
+        constexpr size_t kPipeBufferSize = 8 * 1024 * 1024;
         std::vector<char> pipeBuffer(kPipeBufferSize);
         setvbuf(pipe, pipeBuffer.data(), _IOFBF, kPipeBufferSize);
 
