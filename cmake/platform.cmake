@@ -3,6 +3,33 @@ if(WIN32)
         ${CMAKE_BINARY_DIR}/app.ico COPYONLY)
     configure_file(${SRC_DIR}/platforms/dx12/resource.h
         ${CMAKE_BINARY_DIR}/resource.h COPYONLY)
+
+    set(SYN_EMBED_ASSET_OUTPUTS "")
+    function(syn_register_embedded_asset source relative output_var)
+        set(dest "${CMAKE_BINARY_DIR}/${relative}")
+        get_filename_component(dest_dir "${dest}" DIRECTORY)
+        add_custom_command(OUTPUT "${dest}"
+            COMMAND ${CMAKE_COMMAND} -E make_directory "${dest_dir}"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${source}" "${dest}"
+            DEPENDS "${source}"
+            COMMENT "Staging ${relative} for embedding" VERBATIM)
+        set(SYN_EMBED_ASSET_OUTPUTS "${SYN_EMBED_ASSET_OUTPUTS};${dest}" PARENT_SCOPE)
+        string(REPLACE "\\" "/" dest_normalized "${dest}")
+        set(${output_var} "${dest_normalized}" PARENT_SCOPE)
+    endfunction()
+
+    syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/IBMPlexMono-Medium.ttf" "embedded_assets/fonts/IBMPlexMono-Medium.ttf" SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM)
+    syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/IBMPlexMono-Light.ttf" "embedded_assets/fonts/IBMPlexMono-Light.ttf" SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT)
+    syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/icons/fa-solid-900.ttf" "embedded_assets/fonts/icons/fa-solid-900.ttf" SYN_ASSET_FONT_AWESOME_SOLID)
+    syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/luts/ReSyne_Display_v1.cube" "embedded_assets/luts/ReSyne_Display_v1.cube" SYN_ASSET_RESYNE_DISPLAY_LUT)
+
+    file(READ ${CMAKE_SOURCE_DIR}/src/platforms/dx12/app.rc.in APP_RC_TEMPLATE)
+    string(REPLACE "@SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM@" "${SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM}" APP_RC_CONTENT "${APP_RC_TEMPLATE}")
+    string(REPLACE "@SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT@" "${SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT}" APP_RC_CONTENT "${APP_RC_CONTENT}")
+    string(REPLACE "@SYN_ASSET_FONT_AWESOME_SOLID@" "${SYN_ASSET_FONT_AWESOME_SOLID}" APP_RC_CONTENT "${APP_RC_CONTENT}")
+    string(REPLACE "@SYN_ASSET_RESYNE_DISPLAY_LUT@" "${SYN_ASSET_RESYNE_DISPLAY_LUT}" APP_RC_CONTENT "${APP_RC_CONTENT}")
+
+    file(WRITE ${CMAKE_BINARY_DIR}/app.rc "${APP_RC_CONTENT}")
 endif()
 
 if(WIN32)
@@ -51,6 +78,12 @@ elseif(APPLE)
     endif()
 else()
     add_executable(${EXECUTABLE_NAME} ${SOURCES})
+endif()
+
+if(WIN32 AND SYN_EMBED_ASSET_OUTPUTS)
+    list(REMOVE_DUPLICATES SYN_EMBED_ASSET_OUTPUTS)
+    add_custom_target(syn_embed_assets DEPENDS ${SYN_EMBED_ASSET_OUTPUTS})
+    add_dependencies(${EXECUTABLE_NAME} syn_embed_assets)
 endif()
 
 if(WIN32)
