@@ -29,8 +29,6 @@
 
 #if defined(_WIN32)
 #include <windows.h>
-#include "platforms/dx12/resource.h"
-#include "platforms/dx12/resource_loader.h"
 #endif
 
 namespace Utilities::Video {
@@ -261,6 +259,14 @@ FFmpegLocator& FFmpegLocator::instance() {
 }
 
 void FFmpegLocator::refresh() {
+#if defined(_WIN32)
+    attempted_ = true;
+    available_ = false;
+    executablePath_.clear();
+    versionString_.clear();
+    encoderNames_.clear();
+    return;
+#else
     attempted_ = true;
     available_ = false;
     executablePath_.clear();
@@ -268,16 +274,6 @@ void FFmpegLocator::refresh() {
     encoderNames_.clear();
 
     std::vector<fs::path> candidates;
-
-#if defined(_WIN32)
-    try {
-        std::string extractedPath = ResourceLoader::extractResourceToTemp(IDR_FFMPEG_BINARY, "ffmpeg.exe");
-        candidates.emplace_back(extractedPath);
-    } catch (const std::exception& e) {
-        fprintf(stderr, "Warning: Failed to extract FFmpeg from embedded resources: %s\n", e.what());
-        fprintf(stderr, "Will attempt to locate FFmpeg from system paths or environment variables.\n");
-    }
-#endif
 
     const auto bundled = bundledCandidates();
     candidates.insert(candidates.end(), bundled.begin(), bundled.end());
@@ -319,6 +315,7 @@ void FFmpegLocator::refresh() {
             return;
         }
     }
+#endif
 }
 
 bool FFmpegLocator::supportsEncoder(std::string_view name) const {

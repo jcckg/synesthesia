@@ -165,67 +165,9 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - name: Determine FFmpeg revision
-        id: ffmpeg-rev
-        shell: bash
-        run: echo "hash=$(cd vendor/ffmpeg && git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-      - name: Determine FFmpeg script hash
-        id: ffmpeg-script-hash
-        shell: bash
-        run: echo "hash=$(git hash-object src/utilities/ffmpeg/build_ffmpeg.sh)" >> "$GITHUB_OUTPUT"
-
-      - name: Restore FFmpeg cache
-        id: ffmpeg-cache
-        uses: actions/cache/restore@v4
-        with:
-          path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
-
-      - name: Verify FFmpeg cache
-        id: ffmpeg-verify
-        shell: bash
-        run: |
-          echo "Cache hit: ${{ steps.ffmpeg-cache.outputs.cache-hit }}"
-
-          if [[ -f "build/ffmpeg/install/bin/ffmpeg.exe" && -f "build/ffmpeg/.configure-signature" ]]; then
-            echo "FFmpeg binary exists"
-            CACHED_SIG=$(cat build/ffmpeg/.configure-signature)
-            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-windows-${{ steps.ffmpeg-script-hash.outputs.hash }}"
-
-            if [[ "$CACHED_SIG" == "$EXPECTED_SIG" ]]; then
-              echo "Signature matches: $CACHED_SIG"
-              echo "valid=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "Signature mismatch. Cached: $CACHED_SIG, Expected: $EXPECTED_SIG"
-              echo "valid=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "FFmpeg binary or signature file missing"
-            echo "valid=false" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Create build directory
         shell: pwsh
         run: cmake -E make_directory build
-
-      - name: Build FFmpeg
-        if: steps.ffmpeg-verify.outputs.valid != 'true'
-        shell: msys2 {0}
-        run: |
-          echo "Building FFmpeg from source..."
-          ./src/utilities/ffmpeg/build_ffmpeg.sh
-
-      - name: Skip FFmpeg build
-        if: steps.ffmpeg-verify.outputs.valid == 'true'
-        shell: bash
-        run: echo "FFmpeg build skipped - using cached version"
-
-      - name: Save FFmpeg cache
-        if: steps.ffmpeg-verify.outputs.valid != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Configure CMake
         working-directory: ./build
@@ -245,21 +187,6 @@ jobs:
         with:
           name: synesthesia-win-x64
           path: build/synesthesia-win-x64.zip
-
-      - name: Archive FFmpeg build
-        shell: pwsh
-        run: |
-          if (-not (Test-Path -Path "build/ffmpeg/install/bin")) {
-            Write-Error "Bundled FFmpeg output missing"
-          }
-          if (Test-Path build/ffmpeg-windows.zip) { Remove-Item build/ffmpeg-windows.zip }
-          Compress-Archive -Path build/ffmpeg/install/* -DestinationPath build/ffmpeg-windows.zip
-
-      - name: Upload FFmpeg Windows artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ffmpeg-windows
-          path: build/ffmpeg-windows.zip
   create-release:
     needs: [check-release-flag, build-macos, build-windows]
     if: needs.check-release-flag.outputs.should_release == 'true'
