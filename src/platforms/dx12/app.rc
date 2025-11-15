@@ -2,6 +2,14 @@
 
 IDI_ICON1               ICON                    "app.ico"
 
+IDR_FONT_IBM_PLEX_MONO_MEDIUM RCDATA "../../../assets/fonts/IBMPlexMono-Medium.ttf"
+IDR_FONT_IBM_PLEX_MONO_LIGHT  RCDATA "../../../assets/fonts/IBMPlexMono-Light.ttf"
+IDR_FONT_AWESOME_SOLID        RCDATA "../../../assets/fonts/icons/fa-solid-900.ttf"
+
+IDR_LUT_RESYNE_DISPLAY_V1     RCDATA "../../../assets/luts/ReSyne_Display_v1.cube"
+
+IDR_FFMPEG_BINARY             RCDATA "ffmpeg/install/bin/ffmpeg.exe"
+
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 1,0,0,0
  PRODUCTVERSION 1,0,0,0

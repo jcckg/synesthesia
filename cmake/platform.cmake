@@ -66,7 +66,6 @@ if(WIN32)
         $<$<CONFIG:Debug>:/ENTRY:mainCRTStartup>
     )
 
-    # Copy assets directory to build directory so fonts and icons can be found
     add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/assets"
@@ -214,9 +213,6 @@ if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
     )
     install(FILES
         $<TARGET_RUNTIME_DLLS:${EXECUTABLE_NAME}>
-        DESTINATION bin
-    )
-    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets
         DESTINATION bin
     )
 elseif(APPLE)

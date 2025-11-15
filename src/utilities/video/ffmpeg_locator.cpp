@@ -29,6 +29,8 @@
 
 #if defined(_WIN32)
 #include <windows.h>
+#include "platforms/dx12/resource.h"
+#include "platforms/dx12/resource_loader.h"
 #endif
 
 namespace Utilities::Video {
@@ -266,6 +268,15 @@ void FFmpegLocator::refresh() {
     encoderNames_.clear();
 
     std::vector<fs::path> candidates;
+
+#if defined(_WIN32)
+    try {
+        std::string extractedPath = ResourceLoader::extractResourceToTemp(IDR_FFMPEG_BINARY, "ffmpeg.exe");
+        candidates.emplace_back(extractedPath);
+    } catch (...) {
+    }
+#endif
+
     const char* overrideVars[] = {"RESYNE_FFMPEG_PATH", "FFMPEG_PATH"};
     for (const char* var : overrideVars) {
         if (const char* value = std::getenv(var); value && *value) {
