@@ -35,6 +35,7 @@ enum class RecorderExportFormat {
 };
 
 struct RecorderState {
+    ~RecorderState();
     bool isRecording = false;
     bool windowOpen = false;
     std::vector<AudioColourSample> samples;

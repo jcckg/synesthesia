@@ -5,6 +5,15 @@
 
 namespace ReSyne {
 
+RecorderState::~RecorderState() {
+    if (importThread.joinable()) {
+        importThread.join();
+    }
+    if (exportThread.joinable()) {
+        exportThread.join();
+    }
+}
+
 void Recorder::updateFromFFTProcessor(RecorderState& state,
                                                 FFTProcessor& fftProcessor,
                                                 float r,
