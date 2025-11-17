@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <iterator>
@@ -58,6 +59,14 @@ struct ColourUpdateContext {
 	UIState::View activeView;
 };
 
+struct PlaybackSmoothingState {
+	std::vector<float> previousMagnitudes;
+	std::array<float, 12> fluxHistory{};
+	size_t fluxHistoryIndex = 0;
+};
+
+PlaybackSmoothingState playbackSmoothingState;
+
 constexpr float SILENCE_MAGNITUDE_THRESHOLD = 1e-5f;
 
 bool spectrumIsSilent(const std::vector<float>& magnitudes) {
@@ -106,10 +115,15 @@ void resetAnalyserState(UIState& state, size_t binCount) {
 
 void applyColourSmoothing(float displayR, float displayG, float displayB,
 						  float& outR, float& outG, float& outB,
-						  const ColourUpdateContext& ctx) {
+						  const ColourUpdateContext& ctx,
+						  const SmoothingSignalFeatures* signalFeatures) {
 	if (ctx.smoothingEnabled) {
 		ctx.colourSmoother.setTargetColour(displayR, displayG, displayB);
-		ctx.colourSmoother.update(ctx.deltaTime * UIConstants::COLOUR_SMOOTH_UPDATE_FACTOR);
+		if (signalFeatures) {
+			ctx.colourSmoother.update(ctx.deltaTime * UIConstants::COLOUR_SMOOTH_UPDATE_FACTOR, *signalFeatures);
+		} else {
+			ctx.colourSmoother.update(ctx.deltaTime * UIConstants::COLOUR_SMOOTH_UPDATE_FACTOR);
+		}
 
 		if (ctx.activeView == UIState::View::ReSyne) {
 			ctx.colourSmoother.getCurrentColour(outR, outG, outB);
@@ -146,6 +160,8 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 	}
 
 	ImVec4 playbackColour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+	SmoothingSignalFeatures playbackSignalFeatures{};
+	bool playbackSignalFeaturesValid = false;
 
 	if (!recorderState.samples.empty()) {
 		const float scrubberPos = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f);
@@ -178,22 +194,70 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 
 		const auto& currentSample = recorderState.samples[clampedIndex];
 
+		if (!currentSample.magnitudes.empty()) {
+			const float sampleLoudness = std::isfinite(currentSample.loudnessLUFS)
+				? currentSample.loudnessLUFS
+				: ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+			auto playbackColourResult = ColourMapper::spectrumToColour(
+				currentSample.magnitudes,
+				currentSample.phases,
+				currentSample.sampleRate,
+				UIConstants::DEFAULT_GAMMA,
+				state.visualSettings.colourSpace,
+				state.visualSettings.gamutMappingEnabled,
+				sampleLoudness);
+
+			playbackSignalFeaturesValid = true;
+			playbackSignalFeatures.spectralFlatness = playbackColourResult.spectralFlatness;
+			playbackSignalFeatures.loudnessNormalised =
+				std::clamp(playbackColourResult.loudnessNormalised, 0.0f, 1.0f);
+			playbackSignalFeatures.brightnessNormalised =
+				std::clamp(playbackColourResult.brightnessNormalised, 0.0f, 1.0f);
+
 #ifdef ENABLE_API_SERVER
-		auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-		auto colourResult = ColourMapper::spectrumToColour(
-			currentSample.magnitudes,
-			currentSample.phases,
-			currentSample.sampleRate,
-			UIConstants::DEFAULT_GAMMA,
-			state.visualSettings.colourSpace,
-			state.visualSettings.gamutMappingEnabled);
-		api.updateColourData(currentSample.magnitudes, currentSample.phases, colourResult.dominantFrequency,
-							 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB,
-							 colourResult.L, colourResult.a, colourResult.b_comp);
+			auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
+			api.updateColourData(currentSample.magnitudes, currentSample.phases, playbackColourResult.dominantFrequency,
+								 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB,
+								 playbackColourResult.L, playbackColourResult.a, playbackColourResult.b_comp);
 #endif
+		}
 		if (currentSample.magnitudes.empty()) {
 			resetAnalyserState(state, 0);
 		} else {
+			float playbackFlux = 0.0f;
+			bool fluxComputed = false;
+			if (playbackSmoothingState.previousMagnitudes.size() == currentSample.magnitudes.size()) {
+				for (size_t i = 0; i < currentSample.magnitudes.size(); ++i) {
+					const float diff = currentSample.magnitudes[i] - playbackSmoothingState.previousMagnitudes[i];
+					playbackFlux += std::max(diff, 0.0f);
+				}
+				playbackFlux /= static_cast<float>(currentSample.magnitudes.size());
+				fluxComputed = true;
+			}
+			playbackSmoothingState.previousMagnitudes = currentSample.magnitudes;
+
+			if (fluxComputed) {
+				playbackSmoothingState.fluxHistory[playbackSmoothingState.fluxHistoryIndex] = playbackFlux;
+				playbackSmoothingState.fluxHistoryIndex =
+					(playbackSmoothingState.fluxHistoryIndex + 1) % playbackSmoothingState.fluxHistory.size();
+			}
+
+			float maxFlux = 0.0f;
+			for (float flux : playbackSmoothingState.fluxHistory) {
+				maxFlux = std::max(maxFlux, flux);
+			}
+
+			constexpr float PLAYBACK_ONSET_THRESHOLD_MULTIPLIER = 1.3f;
+			const bool playbackOnset = fluxComputed &&
+				maxFlux > 0.0f &&
+				playbackFlux > maxFlux * PLAYBACK_ONSET_THRESHOLD_MULTIPLIER &&
+				playbackFlux > 0.001f;
+
+			if (playbackSignalFeaturesValid) {
+				playbackSignalFeatures.spectralFlux = fluxComputed ? playbackFlux : 0.0f;
+				playbackSignalFeatures.onsetDetected = playbackOnset;
+			}
+
 			const size_t binCount = currentSample.magnitudes.size();
 
 			if (spectrumIsSilent(currentSample.magnitudes)) {
@@ -272,7 +336,8 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 	}
 
 	applyColourSmoothing(playbackColour.x, playbackColour.y, playbackColour.z,
-						 currentDisplayR, currentDisplayG, currentDisplayB, ctx);
+						 currentDisplayR, currentDisplayG, currentDisplayB, ctx,
+						 playbackSignalFeaturesValid ? &playbackSignalFeatures : nullptr);
 
 	ctx.clearColour[0] = currentDisplayR;
 	ctx.clearColour[1] = currentDisplayG;
@@ -297,14 +362,11 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 	constexpr float whiteMix = 0.0f;
 	constexpr float gamma = 0.8f;
 
-	recorderState.importGamma = gamma;
-	recorderState.importColourSpace = state.visualSettings.colourSpace;
-	recorderState.importGamutMapping = state.visualSettings.gamutMappingEnabled;
-	ReSyne::RecorderColourCache::markSettingsIfChanged(
-		recorderState,
-		recorderState.importGamma,
-		recorderState.importColourSpace,
-		recorderState.importGamutMapping);
+	if (recorderState.isRecording || recorderState.samples.empty()) {
+		recorderState.importGamma = gamma;
+		recorderState.importColourSpace = state.visualSettings.colourSpace;
+		recorderState.importGamutMapping = state.visualSettings.gamutMappingEnabled;
+	}
 	recorderState.importLowGain = state.audioSettings.lowGain;
 	recorderState.importMidGain = state.audioSettings.midGain;
 	recorderState.importHighGain = state.audioSettings.highGain;
@@ -313,6 +375,7 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 
 	auto magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
 	auto phases = audioInput.getFFTProcessor().getPhaseBuffer();
+	const float liveLoudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
 
 	const bool silentMagnitudeFrame = spectrumIsSilent(magnitudes);
 	sanitiseMagnitudes(magnitudes);
@@ -323,7 +386,8 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 		audioInput.getSampleRate(),
 		gamma,
 		state.visualSettings.colourSpace,
-		state.visualSettings.gamutMappingEnabled);
+		state.visualSettings.gamutMappingEnabled,
+		liveLoudnessDb);
 
 	const float adjustedR = colourResult.r * (1.0f - whiteMix) + whiteMix;
 	const float adjustedG = colourResult.g * (1.0f - whiteMix) + whiteMix;
@@ -343,8 +407,15 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 	}
 
 	if (newValid) {
+		SmoothingSignalFeatures liveFeatures{};
+		liveFeatures.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
+		liveFeatures.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
+		liveFeatures.spectralFlatness = colourResult.spectralFlatness;
+		liveFeatures.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
+		liveFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
+
 		applyColourSmoothing(displayR, displayG, displayB,
-							currentDisplayR, currentDisplayG, currentDisplayB, ctx);
+							currentDisplayR, currentDisplayG, currentDisplayB, ctx, &liveFeatures);
 	}
 
 #ifdef ENABLE_API_SERVER

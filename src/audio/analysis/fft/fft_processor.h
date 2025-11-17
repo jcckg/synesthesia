@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <deque>
 #include <span>
 #include <vector>
 
@@ -59,8 +60,10 @@ public:
 		std::vector<float> phases;
 		uint64_t frameCounter;
 		float sampleRate;
+		float loudnessLUFS;
+		bool loudnessAssigned;
 
-		FFTFrame() : frameCounter(0), sampleRate(0.0f) {}
+		FFTFrame() : frameCounter(0), sampleRate(0.0f), loudnessLUFS(-200.0f), loudnessAssigned(false) {}
 	};
 
 	FFTProcessor();
@@ -84,6 +87,7 @@ public:
 	std::vector<FFTFrame> getBufferedFrames();
 	uint64_t getDroppedFrameCount() const { return droppedFrameCount.load(std::memory_order_relaxed); }
 	float getCurrentLoudness() const { return currentLoudness; }
+	float getMomentaryLoudnessLUFS() const { return momentaryLoudnessLUFS; }
 	float getTotalEnergy() const { return totalEnergy; }
 	float getMaxMagnitude() const { return maxMagnitude; }
 	float getSpectralFlux() const { return spectralFlux; }
@@ -121,6 +125,7 @@ private:
 	LoudnessMeter loudnessMeter;
 
 	float currentLoudness;
+	float momentaryLoudnessLUFS;
 	float totalEnergy;
 	float maxMagnitude;
 	float spectralFlux;
@@ -148,9 +153,11 @@ private:
 	void processOverlappingWindow(float sampleRate);
 
 	void normalizeFFTOutput();
-	float updateLoudnessMetrics(float sampleRate);
+	float updateLoudnessMetrics();
 	void updateSpectralData(const std::vector<float>& rawMagnitudes, float sampleRate,
 							float frameMaxMagnitude, float frameTotalEnergy, float normalisedLoudness);
+	void handleLoudnessBlocks();
+	void assignBlockLoudness(float blockValue, size_t samplesForBlock);
 
 	void calculateMagnitudes(std::vector<float>& rawMagnitudes, float sampleRate,
 							 float& outMaxMagnitude, float& outTotalEnergy) const;
@@ -158,6 +165,11 @@ private:
 	void processMagnitudes(std::vector<float>& magnitudes, float sampleRate, float referenceMaxMagnitude);
 	void calculateSpectralFluxAndOnset(const std::vector<float>& currentMagnitudes);
 	void pushFrameToBuffer(const std::vector<float>& mags, const std::vector<float>& phases, float sampleRate);
+
+	std::deque<FFTFrame*> pendingLoudnessFrames;
+	uint64_t lastProcessedLoudnessBlock{0};
+	size_t samplesAwaitingLoudnessAssignment{0};
+	bool firstLoudnessBlockHandled{false};
 
 	void initialiseCriticalBands(float sampleRate);
 	void applyCriticalBandSmoothing(std::vector<float>& magnitudes);

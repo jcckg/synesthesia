@@ -696,10 +696,11 @@ const std::vector<float>& phases,
 const float sampleRate,
 const float gamma,
 const ColourSpace colourSpace,
-const bool applyGamutMapping
+const bool applyGamutMapping,
+const float overrideLoudnessDb
 ) {
 	const auto spectralResult = SpectralProcessor::spectrumToColour(
-		magnitudes, phases, sampleRate, gamma, colourSpace, applyGamutMapping
+		magnitudes, phases, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb
 	);
 
 	ColourResult result{};
@@ -717,6 +718,11 @@ const bool applyGamutMapping
 	result.spectralSpread = spectralResult.spectralSpread;
 	result.spectralRolloff = spectralResult.spectralRolloff;
 	result.spectralCrestFactor = spectralResult.spectralCrestFactor;
+	result.loudnessDb = spectralResult.loudnessDb;
+	result.loudnessNormalised = spectralResult.loudnessNormalised;
+	result.brightnessNormalised = spectralResult.brightnessNormalised;
+	result.estimatedSPL = spectralResult.estimatedSPL;
+	result.luminanceCdM2 = spectralResult.luminanceCdM2;
 
 	return result;
 }

@@ -4,6 +4,7 @@
 #include <vector>
 #include <algorithm>
 #include <mutex>
+#include <cmath>
 
 #include "colour_mapper.h"
 #include "ui.h"
@@ -14,6 +15,18 @@
 #ifdef ENABLE_MIDI
 #include "midi_device_manager.h"
 #endif
+
+namespace {
+
+void sanitiseMagnitudes(std::vector<float>& magnitudes) {
+	for (float& value : magnitudes) {
+		if (!std::isfinite(value) || value < 0.0f) {
+			value = 0.0f;
+		}
+	}
+}
+
+}
 
 namespace Controls {
 
@@ -26,7 +39,8 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
         std::vector<float> phases;
         float sampleRate;
 
-        if (isPlaybackActive && !recorderState.samples.empty()) {
+		float storedLoudness = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+	        if (isPlaybackActive && !recorderState.samples.empty()) {
             std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
             const float position = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f) *
                                    (static_cast<float>(recorderState.samples.size()) - 1.0f);
@@ -37,27 +51,44 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
             magnitudes = currentSample.magnitudes;
             phases = currentSample.phases;
             sampleRate = currentSample.sampleRate;
+			if (std::isfinite(currentSample.loudnessLUFS)) {
+				storedLoudness = currentSample.loudnessLUFS;
+			}
         } else {
             magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
             phases = audioInput.getFFTProcessor().getPhaseBuffer();
             sampleRate = audioInput.getSampleRate();
         }
 
-        auto currentColourResult = ColourMapper::spectrumToColour(
-            magnitudes,
-            phases,
-            sampleRate,
-            UIConstants::DEFAULT_GAMMA,
-            state.visualSettings.colourSpace,
-            state.visualSettings.gamutMappingEnabled);
+		sanitiseMagnitudes(magnitudes);
 
-        if (currentColourResult.dominantFrequency > 0.0f) {
-            ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(currentColourResult.dominantFrequency));
-            ImGui::Text("Wavelength: %.1f nm", static_cast<double>(currentColourResult.dominantWavelength));
-            ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]), static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
-        } else {
-            ImGui::TextDisabled("No significant frequencies");
-        }
+		float loudnessOverride = storedLoudness;
+		if (!isPlaybackActive) {
+			loudnessOverride = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
+		}
+
+		auto currentColourResult = ColourMapper::spectrumToColour(
+			magnitudes,
+			phases,
+			sampleRate,
+			UIConstants::DEFAULT_GAMMA,
+			state.visualSettings.colourSpace,
+			state.visualSettings.gamutMappingEnabled,
+			loudnessOverride);
+
+		const bool hasFiniteLoudness = std::isfinite(currentColourResult.loudnessDb);
+		if (currentColourResult.dominantFrequency > 0.0f) {
+			ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(currentColourResult.dominantFrequency));
+			ImGui::Text("Wavelength: %.1f nm", static_cast<double>(currentColourResult.dominantWavelength));
+			ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]), static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
+			if (hasFiniteLoudness) {
+				ImGui::Text("Loudness: %.1f LUFS", static_cast<double>(currentColourResult.loudnessDb));
+			} else {
+				ImGui::TextDisabled("Loudness: -- LUFS");
+			}
+		} else {
+			ImGui::TextDisabled("No significant frequencies");
+		}
 
         ImGui::Unindent(10);
         ImGui::Spacing();

@@ -103,13 +103,17 @@ public:
     RGB colourAt(double timeSeconds) {
         timeSeconds = std::max(timeSeconds, 0.0);
         const AudioColourSample& sample = sampleForTime(timeSeconds);
+        const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
+            ? sample.loudnessLUFS
+            : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
         const auto colour = ColourMapper::spectrumToColour(
             sample.magnitudes,
             sample.phases,
             sample.sampleRate,
             gamma_,
             colourSpace_,
-            gamut_);
+            gamut_,
+            loudnessOverride);
 
         RGB rgb{std::clamp(colour.r, 0.0f, 1.0f),
                 std::clamp(colour.g, 0.0f, 1.0f),

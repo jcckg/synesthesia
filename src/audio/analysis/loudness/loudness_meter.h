@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <deque>
 #include <span>
 #include <vector>
+#include <cstdint>
 
 class LoudnessMeter {
 public:
@@ -11,6 +13,10 @@ public:
 	void processSamples(std::span<const float> samples, float sampleRate);
 	float getIntegratedLoudness() const;
 	float getMomentaryLoudness() const;
+	uint64_t getProcessedBlockCount() const { return processedBlockCount; }
+	size_t getBlockSizeSamples() const { return blockSize; }
+	size_t getBlockHopSamples() const { return hopSize; }
+	bool getBlockLoudness(uint64_t index, float& out) const;
 
 	void reset();
 
@@ -33,6 +39,7 @@ private:
 
 	std::vector<float> filteredSamples;
 	std::vector<float> blockLoudness;
+	std::deque<std::pair<uint64_t, float>> blockHistory;
 
 	// ITU-R BS.1770-4 gating thresholds for integrated loudness measurement
 	// Absolute gate: -70 LUFS (removes silent/very quiet blocks)
@@ -47,4 +54,7 @@ private:
 	size_t hopSize;
 	std::vector<float> audioBuffer;
 	size_t bufferPosition;
+	uint64_t processedBlockCount{0};
+	bool bufferInitialised{false};
+	size_t samplesSinceLastBlock{0};
 };

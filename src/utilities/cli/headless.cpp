@@ -158,27 +158,32 @@ void HeadlessInterface::displayDeviceSelection() {
 }
 
 void HeadlessInterface::displayFrequencyInfo() {
-    const auto& magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
-    const auto& phases = audioInput.getFFTProcessor().getPhaseBuffer();
+	const auto& magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
+	const auto& phases = audioInput.getFFTProcessor().getPhaseBuffer();
+	const float loudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
 
     float currentDominantFreq = 0.0f;
     float currentR = 0.0f, currentG = 0.0f, currentB = 0.0f;
 
-    if (!magnitudes.empty() && !phases.empty()) {
-        auto colourResult = ColourMapper::spectrumToColour(
-            magnitudes, phases, audioInput.getSampleRate(), 2.2f,
-            ColourMapper::ColourSpace::Rec2020, true);
+	float currentLoudnessDb = loudnessDb;
+	if (!magnitudes.empty() && !phases.empty()) {
+		auto colourResult = ColourMapper::spectrumToColour(
+			magnitudes, phases, audioInput.getSampleRate(), 2.2f,
+			ColourMapper::ColourSpace::Rec2020, true,
+			loudnessDb);
 
-        currentDominantFreq = colourResult.dominantFrequency;
-        currentR = colourResult.r;
-        currentG = colourResult.g;
-        currentB = colourResult.b;
-    }
+		currentDominantFreq = colourResult.dominantFrequency;
+		currentR = colourResult.r;
+		currentG = colourResult.g;
+		currentB = colourResult.b;
+		currentLoudnessDb = colourResult.loudnessDb;
+	}
 
-    bool needsRedraw = (abs(currentDominantFreq - lastDominantFreq) > 0.1f) ||
-                       (abs(currentR - lastR) > 0.001f) ||
-                       (abs(currentG - lastG) > 0.001f) ||
-                       (abs(currentB - lastB) > 0.001f);
+	bool needsRedraw = (abs(currentDominantFreq - lastDominantFreq) > 0.1f) ||
+					   (abs(currentR - lastR) > 0.001f) ||
+					   (abs(currentG - lastG) > 0.001f) ||
+					   (abs(currentB - lastB) > 0.001f) ||
+					   (abs(currentLoudnessDb - lastLoudnessDb) > 0.1f);
     
     if (needsRedraw) {
         std::cout << "\033[2J\033[H";
@@ -186,12 +191,14 @@ void HeadlessInterface::displayFrequencyInfo() {
         std::cout << "=== SYNESTHESIA - FREQUENCY ANALYSIS ===\n\n";
         std::cout << "Device: " << devices[static_cast<size_t>(selectedDeviceIndex)].name << "\n\n";
 
-        if (currentDominantFreq > 0.0f) {
-            std::cout << std::fixed << std::setprecision(1);
-            std::cout << "Spectral Centroid: " << currentDominantFreq << " Hz\n";
-            std::cout << std::setprecision(3);
-            std::cout << "RGB: (" << currentR << ", " << currentG << ", " << currentB << ")\n";
-        } else {
+		if (currentDominantFreq > 0.0f) {
+			std::cout << std::fixed << std::setprecision(1);
+			std::cout << "Spectral Centroid: " << currentDominantFreq << " Hz\n";
+			std::cout << std::setprecision(3);
+			std::cout << "RGB: (" << currentR << ", " << currentG << ", " << currentB << ")\n";
+			std::cout << std::setprecision(1);
+			std::cout << "Loudness: " << currentLoudnessDb << " LUFS\n";
+		} else {
             std::cout << "Spectral Centroid: -- Hz\n";
             std::cout << "RGB: (0.000, 0.000, 0.000)\n";
             std::cout << "\n(No significant frequencies detected)\n";
@@ -214,11 +221,12 @@ void HeadlessInterface::displayFrequencyInfo() {
         
         std::cout.flush();
         
-        lastDominantFreq = currentDominantFreq;
-        lastR = currentR;
-        lastG = currentG;
-        lastB = currentB;
-    }
+		lastDominantFreq = currentDominantFreq;
+		lastR = currentR;
+		lastG = currentG;
+		lastB = currentB;
+		lastLoudnessDb = currentLoudnessDb;
+	}
 }
 
 void HeadlessInterface::handleKeypress() {

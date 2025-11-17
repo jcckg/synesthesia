@@ -2,6 +2,8 @@
 
 #include "colour/colour_mapper.h"
 
+#include <cmath>
+
 namespace ReSyne::RecorderColourCache {
 
 namespace {
@@ -19,13 +21,17 @@ SampleColourEntry computeEntryInternal(const AudioColourSample& sample,
 	float gamma,
 	ColourMapper::ColourSpace colourSpace,
 	bool gamutMapping) {
+	const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
+		? sample.loudnessLUFS
+		: ColourMapper::LOUDNESS_DB_UNSPECIFIED;
 	const auto colour = ColourMapper::spectrumToColour(
 		sample.magnitudes,
 		sample.phases,
 		sample.sampleRate,
 		gamma,
 		colourSpace,
-		gamutMapping);
+		gamutMapping,
+		loudnessOverride);
 
 	SampleColourEntry entry{};
 	entry.rgb = ImVec4(colour.r, colour.g, colour.b, 1.0f);

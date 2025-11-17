@@ -1,6 +1,7 @@
 #include "resyne/recorder/recorder.h"
 
 #include "audio/analysis/fft/fft_processor.h"
+#include "constants.h"
 #include "resyne/recorder/colour_cache_utils.h"
 
 namespace ReSyne {
@@ -45,16 +46,18 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
             state.metadata.sampleRate = frame.sampleRate;
         }
 
-        AudioColourSample sample;
-        sample.magnitudes = frame.magnitudes;
-        sample.phases = frame.phases;
-        sample.sampleRate = frame.sampleRate;
+		AudioColourSample sample;
+		sample.magnitudes = frame.magnitudes;
+		sample.phases = frame.phases;
+		sample.sampleRate = frame.sampleRate;
+		sample.loudnessLUFS = frame.loudnessLUFS;
+		sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
 
         uint64_t relativeFrame = frame.frameCounter - state.firstFrameCounter;
         sample.timestamp = static_cast<double>(relativeFrame * static_cast<uint64_t>(state.metadata.hopSize)) /
                            static_cast<double>(state.metadata.sampleRate);
 
-        state.samples.push_back(sample);
+		state.samples.push_back(sample);
         RecorderColourCache::appendSampleLocked(state, state.samples.back());
     }
 }

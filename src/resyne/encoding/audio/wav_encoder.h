@@ -34,13 +34,13 @@ public:
 		size_t numChannels = 1
 	);
 
-private:
 	static std::vector<float> inverseFFT(
 		const std::vector<float>& magnitudes,
 		const std::vector<float>& phases,
 		int fftSize
 	);
 
+private:
 	static std::vector<float> overlapAdd(
 		const std::vector<std::vector<float>>& frames,
 		int hopSize

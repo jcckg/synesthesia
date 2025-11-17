@@ -5,6 +5,7 @@
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/analysis/eq/equaliser.h"
 #include "colour/colour_mapper.h"
+#include "constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -63,10 +64,12 @@ bool importAudioFile(
 
     auto consumeFrames = [&](std::vector<FFTProcessor::FFTFrame>&& frames) {
         for (auto& frame : frames) {
-            AudioColourSample sample;
-            sample.magnitudes = std::move(frame.magnitudes);
-            sample.phases = std::move(frame.phases);
-            sample.sampleRate = frame.sampleRate;
+			AudioColourSample sample;
+			sample.magnitudes = std::move(frame.magnitudes);
+			sample.phases = std::move(frame.phases);
+			sample.sampleRate = frame.sampleRate;
+			sample.loudnessLUFS = frame.loudnessLUFS;
+			sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
             sample.timestamp = static_cast<double>(frameIndex * FFTProcessor::HOP_SIZE) /
                                static_cast<double>(decoded.sampleRate);
             samples.push_back(std::move(sample));
@@ -100,6 +103,23 @@ bool importAudioFile(
     if (samples.empty()) {
         errorMessage = "no analyser frames";
         return false;
+    }
+
+    size_t firstValidFrame = 0;
+    for (size_t i = 0; i < samples.size(); ++i) {
+        if (samples[i].loudnessLUFS > -100.0f) {
+            firstValidFrame = i;
+            break;
+        }
+    }
+
+    if (firstValidFrame > 0) {
+        samples.erase(samples.begin(), samples.begin() + static_cast<std::ptrdiff_t>(firstValidFrame));
+
+        for (size_t i = 0; i < samples.size(); ++i) {
+            samples[i].timestamp -= static_cast<double>(firstValidFrame * FFTProcessor::HOP_SIZE) /
+                                     static_cast<double>(decoded.sampleRate);
+        }
     }
 
     metadata.sampleRate = sampleRate;

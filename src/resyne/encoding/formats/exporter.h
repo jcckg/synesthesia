@@ -4,12 +4,15 @@
 #include <vector>
 #include <cstdint>
 #include <functional>
+#include <limits>
 
 struct AudioColourSample {
 	std::vector<float> magnitudes;
 	std::vector<float> phases;
 	double timestamp;
 	float sampleRate;
+	float loudnessLUFS = std::numeric_limits<float>::quiet_NaN();
+	float splDb = std::numeric_limits<float>::quiet_NaN();
 };
 
 struct AudioMetadata {

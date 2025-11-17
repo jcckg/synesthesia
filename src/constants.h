@@ -22,6 +22,8 @@ constexpr float MAX_AUDIO_FREQ = 20000.0f;
 constexpr float MIN_WAVELENGTH_NM = 390.0f;
 constexpr float MAX_WAVELENGTH_NM = 830.0f;
 constexpr float MAX_USABLE_WAVELENGTH_NM = 700.0f;
+constexpr float REFERENCE_SPL_AT_0_LUFS = 83.0f;
+constexpr float REFERENCE_WHITE_LUMINANCE_CDM2 = 100.0f;
 
 }
 }

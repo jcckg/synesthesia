@@ -8,6 +8,8 @@
 #include "resyne/encoding/reconstruction/phase_vocoder.h"
 #include "resyne/encoding/reconstruction/pghi.h"
 #include "resyne/encoding/reconstruction/phase_smoothing.h"
+#include "resyne/recorder/loudness_utils.h"
+#include "constants.h"
 
 #include <algorithm>
 #include <array>
@@ -18,8 +20,8 @@
 #include <vector>
 
 namespace {
-constexpr float DB_MIN = -120.0f;
-constexpr float DB_MAX = 20.0f;
+constexpr float DB_MIN = -140.0f;
+constexpr float DB_MAX = 40.0f;
 constexpr float DB_RANGE = DB_MAX - DB_MIN;
 
 constexpr float EPSILON = 1e-6f;

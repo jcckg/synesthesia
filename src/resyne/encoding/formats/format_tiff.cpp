@@ -1,6 +1,7 @@
 #include "resyne/encoding/formats/format_tiff.h"
 
 #include "resyne/encoding/spectral/colour_native_codec.h"
+#include "resyne/recorder/loudness_utils.h"
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -280,6 +281,7 @@ bool loadFromTIFF(const std::string& filepath,
 	};
 
 	samples = ColourNativeCodec::decode(colourImage, detectedSampleRate, hopSize, frameCallback, decodeProgress);
+	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata);
 
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.hopSize = hopSize;

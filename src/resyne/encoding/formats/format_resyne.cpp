@@ -1,6 +1,7 @@
 #include "resyne/encoding/formats/format_resyne.h"
 
 #include "resyne/encoding/spectral/colour_native_codec.h"
+#include "resyne/recorder/loudness_utils.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -196,12 +197,13 @@ bool loadFromResyne(const std::string& filepath,
 
 	samples = ColourNativeCodec::decode(image, detectedSampleRate, resolvedHopSize, frameCallback, decodeProgress);
 
+	image.metadata.sampleRate = detectedSampleRate;
+	image.metadata.hopSize = resolvedHopSize;
+	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, image.metadata);
+
 	if (progress) {
 		progress(0.96f);
 	}
-
-	image.metadata.sampleRate = detectedSampleRate;
-	image.metadata.hopSize = resolvedHopSize;
 
 	const float finalSampleRate = samples.empty()
 		? detectedSampleRate

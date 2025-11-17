@@ -21,6 +21,7 @@ FFTProcessor::FFTProcessor()
 	  spectralEnvelope(FFT_SIZE / 2 + 1, 0.0f),
 	  phaseBuffer(FFT_SIZE / 2 + 1, 0.0f),
 	  currentLoudness(0.0f),
+	  momentaryLoudnessLUFS(-200.0f),
 	  totalEnergy(0.0f),
 	  maxMagnitude(0.0f),
 	  spectralFlux(0.0f),
@@ -117,6 +118,9 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
 		const size_t samplesAvailable = buffer.size() - bufferPos;
 		const size_t samplesToCopy = std::min(samplesNeeded, samplesAvailable);
 
+		const std::span<const float> incoming(buffer.data() + bufferPos, samplesToCopy);
+		loudnessMeter.processSamples(incoming, sampleRate);
+
 		std::copy_n(buffer.begin() + static_cast<std::ptrdiff_t>(bufferPos), samplesToCopy,
 					inputAccumulator.begin() + static_cast<std::ptrdiff_t>(accumulatedSamples));
 		accumulatedSamples += samplesToCopy;
@@ -151,9 +155,9 @@ void FFTProcessor::normalizeFFTOutput() {
 	}
 }
 
-float FFTProcessor::updateLoudnessMetrics(const float sampleRate) {
-	loudnessMeter.processSamples(windowBuffer, sampleRate);
+float FFTProcessor::updateLoudnessMetrics() {
 	const float lufs = loudnessMeter.getMomentaryLoudness();
+	momentaryLoudnessLUFS = lufs;
 	return std::clamp((lufs + LUFS_NORMALISATION_OFFSET) / LUFS_NORMALISATION_OFFSET, 0.0f, 1.0f);
 }
 
@@ -190,7 +194,7 @@ void FFTProcessor::processOverlappingWindow(const float sampleRate) {
 	calculateMagnitudes(rawMagnitudes, sampleRate, frameMaxMagnitude, frameTotalEnergy);
 	calculatePhases();
 
-	const float normalisedLoudness = updateLoudnessMetrics(sampleRate);
+	const float normalisedLoudness = updateLoudnessMetrics();
 
 	if (processedMagnitudesBuffer.size() != binCount) {
 		processedMagnitudesBuffer.resize(binCount, 0.0f);
@@ -343,6 +347,7 @@ void FFTProcessor::reset() {
 	accumulatedSamples = 0;
 	frameCounter = 0;
 	loudnessMeter.reset();
+	momentaryLoudnessLUFS = -200.0f;
 
 	frameBufferHead = 0;
 	frameBufferTail = 0;
@@ -369,6 +374,7 @@ void FFTProcessor::pushFrameToBuffer(const std::vector<float>& mags, const std::
 	std::copy_n(phases.begin(), phasesToCopy, frame.phases.begin());
 	frame.frameCounter = frameCounter;
 	frame.sampleRate = sampleRate;
+	frame.loudnessLUFS = momentaryLoudnessLUFS;
 
 	frameBufferHead = nextHead;
 }

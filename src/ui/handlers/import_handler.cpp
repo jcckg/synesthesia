@@ -60,6 +60,8 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 					recorderState.metadata = std::move(recorderState.importedMetadata);
 					recorderState.isRecording = false;
 					recorderState.isPlaybackInitialised = false;
+					recorderState.sampleColourCache.clear();
+					recorderState.colourCacheDirty = true;
 
 					if (recorderState.audioOutput) {
 						recorderState.audioOutput->stop();

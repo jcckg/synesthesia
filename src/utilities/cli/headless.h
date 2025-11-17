@@ -26,9 +26,10 @@ private:
     std::vector<AudioInput::DeviceInfo> devices;
     AudioInput audioInput;
     
-    float lastDominantFreq = -1.0f;
-    size_t lastPeakCount = 0;
-    float lastR = -1.0f, lastG = -1.0f, lastB = -1.0f;
+	float lastDominantFreq = -1.0f;
+	size_t lastPeakCount = 0;
+	float lastR = -1.0f, lastG = -1.0f, lastB = -1.0f;
+	float lastLoudnessDb = -200.0f;
     
     void setupTerminal();
     void restoreTerminal();

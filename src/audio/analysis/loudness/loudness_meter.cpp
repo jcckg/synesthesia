@@ -6,13 +6,13 @@
 #include <numeric>
 
 LoudnessMeter::LoudnessMeter()
-	: currentSampleRate(48000.0f),
-	  blockSize(static_cast<size_t>(BLOCK_DURATION * currentSampleRate)),
-	  hopSize(static_cast<size_t>(blockSize * (1.0f - OVERLAP))),
+	: currentSampleRate(0.0f),
+	  blockSize(static_cast<size_t>(BLOCK_DURATION * 48000.0f)),
+	  hopSize(static_cast<size_t>(BLOCK_DURATION * 48000.0f * (1.0f - OVERLAP))),
 	  bufferPosition(0) {
 	audioBuffer.resize(blockSize, 0.0f);
 	filteredSamples.reserve(blockSize);
-	initialiseFilters(currentSampleRate);
+	initialiseFilters(48000.0f);
 }
 
 // ITU-R BS.1770-4 - Algorithms to measure audio programme loudness and true-peak audio level
@@ -21,13 +21,17 @@ LoudnessMeter::LoudnessMeter()
 // Stage 2: High-pass filter at 38 Hz (removes subsonic content)
 // https://www.itu.int/rec/R-REC-BS.1770
 void LoudnessMeter::initialiseFilters(const float sampleRate) {
-	if (sampleRate == currentSampleRate)
+	if (currentSampleRate != 0.0f && sampleRate == currentSampleRate)
 		return;
 
 	currentSampleRate = sampleRate;
 	blockSize = static_cast<size_t>(BLOCK_DURATION * sampleRate);
 	hopSize = static_cast<size_t>(blockSize * (1.0f - OVERLAP));
 	audioBuffer.resize(blockSize, 0.0f);
+	bufferPosition = 0;
+	bufferInitialised = false;
+	samplesSinceLastBlock = 0;
+	blockLoudness.clear();
 
 	// ITU-R BS.1770-4 Stage 1: High-frequency shelving filter
 	// Centre frequency f0 ≈ 1681.97 Hz, Gain G ≈ 4.0 dB, Q ≈ 0.7071
@@ -88,12 +92,22 @@ void LoudnessMeter::processSamples(const std::span<const float> samples, const f
 		const float filtered2 = rlbFilter.process(filtered1);
 
 		audioBuffer[bufferPosition] = filtered2;
+		const size_t previousPosition = bufferPosition;
 		bufferPosition = (bufferPosition + 1) % blockSize;
 
-		if (bufferPosition % hopSize == 0) {
+		if (!bufferInitialised && previousPosition > 0 && bufferPosition == 0) {
+			bufferInitialised = true;
+		}
+
+		++samplesSinceLastBlock;
+
+		if (bufferInitialised && samplesSinceLastBlock >= hopSize) {
 			const float meanSquare = calculateMeanSquare(audioBuffer);
 			const float loudness = loudnessFromMeanSquare(meanSquare);
 			blockLoudness.push_back(loudness);
+			blockHistory.emplace_back(processedBlockCount, loudness);
+			++processedBlockCount;
+			samplesSinceLastBlock = 0;
 
 			constexpr size_t maxBlocks = 100;
 			if (blockLoudness.size() > maxBlocks) {
@@ -173,10 +187,24 @@ float LoudnessMeter::getMomentaryLoudness() const {
 	return lastLoudness;
 }
 
+bool LoudnessMeter::getBlockLoudness(const uint64_t index, float& out) const {
+	for (const auto& [blockIndex, loudness] : blockHistory) {
+		if (blockIndex == index) {
+			out = loudness;
+			return true;
+		}
+	}
+	return false;
+}
+
 void LoudnessMeter::reset() {
 	preFilter.reset();
 	rlbFilter.reset();
 	blockLoudness.clear();
-	std::ranges::fill(audioBuffer, 0.0f);
+	blockHistory.clear();
+	std::fill(audioBuffer.begin(), audioBuffer.end(), 0.0f);
 	bufferPosition = 0;
+	bufferInitialised = false;
+	samplesSinceLastBlock = 0;
+	processedBlockCount = 0;
 }

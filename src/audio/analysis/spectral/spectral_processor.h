@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits>
 #include <span>
 #include <vector>
 #include "colour_mapper.h"
@@ -26,6 +27,11 @@ public:
 		float spectralSpread;
 		float spectralRolloff;
 		float spectralCrestFactor;
+		float loudnessDb;
+		float loudnessNormalised;
+		float brightnessNormalised;
+		float estimatedSPL;
+		float luminanceCdM2;
 	};
 
 	static SpectralColourResult spectrumToColour(
@@ -34,14 +40,16 @@ public:
 		float sampleRate,
 		float gamma = 1.0f,
 		ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020,
-		bool applyGamutMapping = true
+		bool applyGamutMapping = true,
+		float overrideLoudnessDb = std::numeric_limits<float>::quiet_NaN()
 	);
 
 	static SpectralColourResult spectrumToColour(
 		const std::vector<FFTProcessor::ComplexBin>& spectrum,
 		float gamma = 1.0f,
 		ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020,
-		bool applyGamutMapping = true
+		bool applyGamutMapping = true,
+		float overrideLoudnessDb = std::numeric_limits<float>::quiet_NaN()
 	);
 
 private:

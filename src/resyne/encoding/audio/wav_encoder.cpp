@@ -122,6 +122,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 			if (spectralEnergy > std::numeric_limits<float>::epsilon()) {
 				const float gain = std::sqrt(spectralEnergy / timeEnergy);
 				const float clampedGain = std::clamp(gain, 0.1f, 10.0f);
+
 				if (std::isfinite(clampedGain) && std::abs(clampedGain - 1.0f) > 1e-4f) {
 					for (float& value : timeFrame) {
 						value *= clampedGain;
@@ -139,6 +140,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	// Previously skipped first hopSize samples to avoid windowing artifacts,
 	// but this created audible dead space at the beginning of playback
 	applyLimiter(reconstructed);
+
 	result.audioSamples = std::move(reconstructed);
 
 	result.success = true;
@@ -235,7 +237,7 @@ std::vector<float> WAVEncoder::overlapAdd(
 	}
 
 	constexpr float normalisationEpsilon = 1e-6f;
-	constexpr float expectedColaSumHann50 = 0.375f;
+	constexpr float expectedColaSumHann50 = 0.5f;
 
 	const size_t edgeStart = static_cast<size_t>(hopSize);
 	const size_t edgeEnd = totalSamples - (frameSize - static_cast<size_t>(hopSize));

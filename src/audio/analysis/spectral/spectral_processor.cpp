@@ -1,8 +1,65 @@
 #include "spectral_processor.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
 #include <numeric>
+
+namespace {
+
+constexpr float MIN_LOUDNESS_DB = -70.0f; // Matches ITU-R BS.1770-4 gate for very quiet passages.
+constexpr float MAX_LOUDNESS_DB = 0.0f;
+constexpr float RMS_EPSILON = 1e-12f;
+constexpr float PERCEPTUAL_REFERENCE_LUFS = -23.0f; // EBU R128 nominal programme level (0 LU).
+
+float soneFromLoudness(const float loudnessDb) {
+	// Stevens' power law: loudness in sones doubles for each +10 phon;LU ≈ 1 phon change around reference band.
+	const float relative = (loudnessDb - PERCEPTUAL_REFERENCE_LUFS) / 10.0f;
+	return std::pow(2.0f, relative);
+}
+
+float clampLoudnessDb(const float value) {
+	if (!std::isfinite(value)) {
+		return MIN_LOUDNESS_DB;
+	}
+	return std::clamp(value, MIN_LOUDNESS_DB, MAX_LOUDNESS_DB);
+}
+
+float calculateLoudnessDbFromEnergy(const float totalEnergy, const size_t binCount) {
+	if (binCount == 0) {
+		return MIN_LOUDNESS_DB;
+	}
+	const float meanSquare = totalEnergy / static_cast<float>(binCount);
+	if (meanSquare <= RMS_EPSILON) {
+		return MIN_LOUDNESS_DB;
+	}
+	const float rms = std::sqrt(std::max(meanSquare, RMS_EPSILON));
+	return 20.0f * std::log10(std::max(rms, RMS_EPSILON));
+}
+
+float normaliseLoudness(const float clampedDb) {
+	return (clampedDb - MIN_LOUDNESS_DB) / (MAX_LOUDNESS_DB - MIN_LOUDNESS_DB);
+}
+
+float logisticSone(const float sone) {
+	return sone / (sone + 1.0f);
+}
+
+float loudnessToBrightness(const float clampedDb) {
+	const float soneValue = soneFromLoudness(clampedDb);
+	const float logisticValue = logisticSone(soneValue);
+	const float logisticMin = logisticSone(soneFromLoudness(MIN_LOUDNESS_DB));
+	const float logisticMax = logisticSone(soneFromLoudness(MAX_LOUDNESS_DB));
+	float normalised = 0.0f;
+	if (logisticMax - logisticMin > 1e-6f) {
+		normalised = (logisticValue - logisticMin) / (logisticMax - logisticMin);
+	}
+	normalised = std::clamp(normalised, 0.0f, 1.0f);
+	constexpr float BRIGHTNESS_RESPONSE_GAMMA = 1.1f;
+	return std::pow(normalised, BRIGHTNESS_RESPONSE_GAMMA);
+}
+
+}
 
 SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	std::span<const float> magnitudes,
@@ -10,12 +67,20 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	const float sampleRate,
 	const float gamma,
 	const ColourMapper::ColourSpace colourSpace,
-	const bool applyGamutMapping
+	const bool applyGamutMapping,
+	const float overrideLoudnessDb
 ) {
 	SpectralColourResult result{};
 
 	if (magnitudes.empty() || sampleRate <= 0.0f) {
 		result.r = result.g = result.b = 0.1f;
+		result.X = result.Y = result.Z = 0.0f;
+		result.L = result.a = result.b_comp = 0.0f;
+		result.loudnessDb = MIN_LOUDNESS_DB;
+		result.loudnessNormalised = 0.0f;
+		result.brightnessNormalised = 0.0f;
+		result.estimatedSPL = synesthesia::constants::REFERENCE_SPL_AT_0_LUFS + MIN_LOUDNESS_DB;
+		result.luminanceCdM2 = 0.0f;
 		return result;
 	}
 
@@ -42,6 +107,14 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	}
 	result.spectralCrestFactor = calculateSpectralCrestFactor(magnitudes, maxMag, totalEnergyLocal);
 
+	const float computedLoudnessDb = calculateLoudnessDbFromEnergy(totalEnergyLocal, binCount);
+	const float loudnessDb = std::isfinite(overrideLoudnessDb) ? overrideLoudnessDb : computedLoudnessDb;
+	const float clampedLoudnessDb = clampLoudnessDb(loudnessDb);
+	const float loudnessNormalised = std::clamp(normaliseLoudness(clampedLoudnessDb), 0.0f, 1.0f);
+	const float brightnessGain = loudnessToBrightness(clampedLoudnessDb);
+	const float estimatedSPL = synesthesia::constants::REFERENCE_SPL_AT_0_LUFS + clampedLoudnessDb;
+	const float luminanceCdM2 = brightnessGain * synesthesia::constants::REFERENCE_WHITE_LUMINANCE_CDM2;
+
 	// Note: A-weighting and EQ are already applied in FFTProcessor::processMagnitudes
 	// Do NOT apply perceptual weighting again as it would be applied twice
 
@@ -51,23 +124,33 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 
 	integrateSpectrumCIE(magnitudes, frequencies, X_total, Y_total, Z_total);
 
-	// Normalise XYZ by total spectral weight to produce weighted average colour
-	// rather than absolute tristimulus values. This ensures consistent brightness
-	// independent of overall signal amplitude.
-	float totalWeight = std::accumulate(magnitudes.begin(), magnitudes.end(), 0.0f);
+	float chromaX = 0.0f;
+	float chromaY = 0.0f;
+	float chromaZ = 0.0f;
+	const float totalWeight = std::accumulate(magnitudes.begin(), magnitudes.end(), 0.0f);
 	if (totalWeight > 1e-6f) {
-		X_total /= totalWeight;
-		Y_total /= totalWeight;
-		Z_total /= totalWeight;
+		const float invWeight = 1.0f / totalWeight;
+		chromaX = X_total * invWeight;
+		chromaY = Y_total * invWeight;
+		chromaZ = Z_total * invWeight;
 	}
 
-	result.X = X_total;
-	result.Y = Y_total;
-	result.Z = Z_total;
+	const float scaledX = chromaX * brightnessGain;
+	const float scaledY = chromaY * brightnessGain;
+	const float scaledZ = chromaZ * brightnessGain;
 
-	ColourMapper::XYZtoRGB(X_total, Y_total, Z_total, result.r, result.g, result.b, colourSpace, true, applyGamutMapping);
+	result.X = scaledX;
+	result.Y = scaledY;
+	result.Z = scaledZ;
+	result.loudnessDb = clampedLoudnessDb;
+	result.loudnessNormalised = loudnessNormalised;
+	result.brightnessNormalised = brightnessGain;
+	result.estimatedSPL = estimatedSPL;
+	result.luminanceCdM2 = luminanceCdM2;
 
-	ColourMapper::XYZtoLab(X_total, Y_total, Z_total, result.L, result.a, result.b_comp);
+	ColourMapper::XYZtoRGB(scaledX, scaledY, scaledZ, result.r, result.g, result.b, colourSpace, true, applyGamutMapping);
+
+	ColourMapper::XYZtoLab(scaledX, scaledY, scaledZ, result.L, result.a, result.b_comp);
 
 	result.dominantFrequency = result.spectralCentroid;
 	result.dominantWavelength = ColourMapper::logFrequencyToWavelength(result.dominantFrequency);
@@ -96,7 +179,8 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	const std::vector<FFTProcessor::ComplexBin>& spectrum,
 	const float gamma,
 	const ColourMapper::ColourSpace colourSpace,
-	const bool applyGamutMapping
+	const bool applyGamutMapping,
+	const float overrideLoudnessDb
 ) {
 	std::vector<float> magnitudes;
 	std::vector<float> phases;
@@ -114,7 +198,7 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 		sampleRate = binSize * 2.0f * (spectrum.size() - 1);
 	}
 
-	return spectrumToColour(magnitudes, phases, sampleRate, gamma, colourSpace, applyGamutMapping);
+	return spectrumToColour(magnitudes, phases, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb);
 }
 
 float SpectralProcessor::calculateSpectralCentroid(

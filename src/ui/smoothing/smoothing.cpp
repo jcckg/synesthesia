@@ -115,30 +115,48 @@ float SpringSmoother::getSmoothingAmount() const {
 }
 
 // Stowell & Plumbley (2007) - adaptive whitening for improved onset detection
-// Adaptive smoothing: reduce during onsets, scale by flux, increase for noise
-bool SpringSmoother::update(const float deltaTime, const bool onsetDetected,
-                            const float spectralFlux, const float spectralFlatness) {
+// Adaptive smoothing with perceptual cues
+bool SpringSmoother::update(const float deltaTime, const SmoothingSignalFeatures& features) {
     float adaptiveStiffness = m_baseStiffness;
 
-    constexpr float ONSET_STIFFNESS_REDUCTION = 0.3f;
-    if (onsetDetected) {
-        adaptiveStiffness *= (1.0f - ONSET_STIFFNESS_REDUCTION);
+    constexpr float ONSET_STIFFNESS_BOOST = 0.45f;
+    if (features.onsetDetected) {
+        adaptiveStiffness *= (1.0f + ONSET_STIFFNESS_BOOST);
     }
 
-    constexpr float FLUX_SENSITIVITY = 2.0f;
-    const float clampedFlux = std::clamp(spectralFlux * 10.0f, 0.0f, 1.0f);
-    const float fluxScale = 1.0f - (clampedFlux * FLUX_SENSITIVITY * 0.5f);
-    adaptiveStiffness *= std::max(fluxScale, 0.1f);
+    // Böck & Widmer (2013) SuperFlux: spectral flux spikes reveal transients, so chase them faster
+    constexpr float FLUX_STIFFNESS_GAIN = 8.0f;
+    const float fluxContribution = std::clamp(features.spectralFlux * FLUX_STIFFNESS_GAIN, 0.0f, 1.0f);
+    adaptiveStiffness *= (1.0f + fluxContribution);
 
-    constexpr float FLATNESS_SMOOTHING_BOOST = 1.5f;
-    const float clampedFlatness = std::clamp(spectralFlatness, 0.0f, 1.0f);
-    const float flatnessScale = 1.0f + (clampedFlatness * FLATNESS_SMOOTHING_BOOST);
-    adaptiveStiffness *= flatnessScale;
+    // Peeters (2004): spectral flatness close to 1 indicates noise, so provide extra damping
+    constexpr float FLATNESS_SUPPRESSION = 0.6f;
+    const float clampedFlatness = std::clamp(features.spectralFlatness, 0.0f, 1.0f);
+    const float noiseSuppression = 1.0f - clampedFlatness * FLATNESS_SUPPRESSION;
+    adaptiveStiffness *= std::clamp(noiseSuppression, 0.35f, 1.0f);
 
-    adaptiveStiffness = std::clamp(adaptiveStiffness, MIN_STIFFNESS * 0.5f, MAX_STIFFNESS * 2.0f);
+    constexpr float PSYCHOACOUSTIC_RANGE = 0.5f;
+    const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
+    const float brightness = std::clamp(features.brightnessNormalised, 0.0f, 1.0f);
+    const float psychoScalar = 0.5f * loudness + 0.5f * brightness;
+    adaptiveStiffness *= (1.0f + psychoScalar * PSYCHOACOUSTIC_RANGE);
+
+    adaptiveStiffness = std::clamp(adaptiveStiffness, MIN_STIFFNESS * 0.5f, MAX_STIFFNESS * 2.5f);
 
     m_stiffness = adaptiveStiffness;
-    m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * 0.5f;
+    constexpr float BASE_DAMPING_RATIO = 0.65f;
+    constexpr float DAMPING_RANGE = 0.25f;
+    const float dampingRatio = std::clamp(BASE_DAMPING_RATIO + (1.0f - loudness) * DAMPING_RANGE, 0.55f, 0.9f);
+    m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * dampingRatio;
 
     return update(deltaTime);
+}
+
+bool SpringSmoother::update(const float deltaTime, const bool onsetDetected,
+                            const float spectralFlux, const float spectralFlatness) {
+    SmoothingSignalFeatures features{};
+    features.onsetDetected = onsetDetected;
+    features.spectralFlux = spectralFlux;
+    features.spectralFlatness = spectralFlatness;
+    return update(deltaTime, features);
 }

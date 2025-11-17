@@ -1,5 +1,13 @@
 #pragma once
 
+struct SmoothingSignalFeatures {
+    bool onsetDetected = false;
+    float spectralFlux = 0.0f;
+    float spectralFlatness = 0.0f;
+    float loudnessNormalised = 0.0f;
+    float brightnessNormalised = 0.0f;
+};
+
 class SpringSmoother {
 public:
     explicit SpringSmoother(float stiffness = 8.0f, float damping = 1.0f, float mass = 0.3f);
@@ -7,6 +15,7 @@ public:
     void reset(float r, float g, float b);
     void setTargetColour(float r, float g, float b);
     bool update(float deltaTime);
+    bool update(float deltaTime, const SmoothingSignalFeatures& features);
     bool update(float deltaTime, bool onsetDetected, float spectralFlux, float spectralFlatness);
     void getCurrentColour(float& r, float& g, float& b) const;
     void setSmoothingAmount(float smoothingAmount);

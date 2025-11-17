@@ -52,6 +52,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/recorder/dialogs.cpp
     ${SRC_DIR}/resyne/recorder/import.cpp
     ${SRC_DIR}/resyne/recorder/import_helpers.cpp
+    ${SRC_DIR}/resyne/recorder/loudness_utils.cpp
     ${SRC_DIR}/resyne/recorder/colour_cache_utils.cpp
     ${SRC_DIR}/resyne/ui/recorder/bottom_panel.cpp
     ${SRC_DIR}/resyne/ui/recorder/full_window.cpp

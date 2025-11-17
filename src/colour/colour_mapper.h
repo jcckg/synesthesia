@@ -1,8 +1,9 @@
 #pragma once
 
 #include <array>
-#include <vector>
 #include <cmath>
+#include <limits>
+#include <vector>
 #include "constants.h"
 
 #ifdef USE_NEON_OPTIMISATIONS
@@ -30,6 +31,11 @@ public:
 		float spectralSpread;
 		float spectralRolloff;
 		float spectralCrestFactor;
+		float loudnessDb;
+		float loudnessNormalised;
+		float brightnessNormalised;
+		float estimatedSPL;
+		float luminanceCdM2;
 	};
 
 	struct SpectralCharacteristics {
@@ -51,14 +57,16 @@ public:
 	static constexpr float EPSILON_TINY = 1e-10f;
 	static constexpr float SRGB_GAMMA_ENCODE_THRESHOLD = 0.0031308f;
 	static constexpr float SRGB_GAMMA_DECODE_THRESHOLD = 0.04045f;
+	static constexpr float LOUDNESS_DB_UNSPECIFIED = std::numeric_limits<float>::quiet_NaN();
 
 	using ColourSpace = ::ColourSpace;
 
 	static ColourResult spectrumToColour(const std::vector<float>& magnitudes,
-										 const std::vector<float>& phases,
-										 float sampleRate = 44100.0f, float gamma = 1.0f,
-										 ColourSpace colourSpace = ColourSpace::Rec2020,
-										 bool applyGamutMapping = true);
+								 const std::vector<float>& phases,
+								 float sampleRate = 44100.0f, float gamma = 1.0f,
+								 ColourSpace colourSpace = ColourSpace::Rec2020,
+							 bool applyGamutMapping = true,
+							 float overrideLoudnessDb = LOUDNESS_DB_UNSPECIFIED);
 
 	static float logFrequencyToWavelength(float freq);
 	static void wavelengthToRGBCIE(float wavelength, float& r, float& g, float& b,
