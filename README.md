@@ -1,6 +1,13 @@
 # Synesthesia
 
-Synesthesia is an application which provides a real-time visualisation of audio frequencies represented as colour. Features a rudimentary EQ, real-time frequency & wavelength information, and an audio input selection system.
+<div align="left">
+<img align="right" width="550" alt="SCR-20251118-snff" src="https://github.com/user-attachments/assets/092142bc-ec44-4f55-9ee1-2169e130ecdc" />
+
+Synesthesia is an application designed to provide a real-time visualisation of audio frequencies as colour. Done through an artistic, physics-inspired process mapping our audible frequency range to the visible spectrum of colours.
+
+Synesthesia features two modes of visualisation, one being "ReSyne", allowing you to import audio files (WAV/FLAC/OGG/MP3), visualise the entire song as a gradient (constructed via our mapping process), and export as a .tiff for external editing in applications like Photoshop (allowing for intuitive effects: blacking out w/ shapes -> eq, blur -> reverb). We can also export (our gradient + colour) as a video file on macOS hosts.
+
+</div>
 
 ### Installation
 
@@ -9,9 +16,6 @@ Synesthesia is automatically built by GitHub Actions, you can download the appli
 ### Manual Building & Running
 
 Synesthesia runs on Windows (DirectX 12) and macOS (Metal). To run this project, make sure `cmake` is installed, and just clone this repository with submodules (we build app dependencies locally):
-
-> **Note**:
-> For Windows clients, you must install VS Microsoft C++ Build Tools, [here is a guide](https://github.com/bycloudai/InstallVSBuildToolsWindows?tab=readme-ov-file) for installing and setting up your PATH.
 
 ```sh
 # Clone the repository with submodules
@@ -42,6 +46,9 @@ And your `.app` will be in the root of the build directory.
 
 #### Building an Executable on Windows
 
+> **Note**:
+> For Windows clients, you must install VS Microsoft C++ Build Tools, [here is a guide](https://github.com/bycloudai/InstallVSBuildToolsWindows?tab=readme-ov-file) for installing and setting up your PATH.
+
 To build a standalone/portable Windows executable, we use the following flags (`-DCMAKE_BUILD_TYPE=Release`) to build:
 
 ```sh
@@ -50,10 +57,6 @@ cmake --build . --config Release
 ```
 
 Your executable will then be placed in the Release folder (placed at the root of your build directory).
-
-### Video Demo
-
-https://github.com/user-attachments/assets/f2d9a25c-81e7-4976-b707-c5cdb479754d
 
 ### Credits & Footnotes
 
