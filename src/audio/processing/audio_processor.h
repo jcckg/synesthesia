@@ -12,16 +12,16 @@
 class AudioProcessor {
 public:
 	struct SpectralData {
-		std::vector<float> magnitudes;
-		std::vector<float> phases;
-		float sampleRate;
+		std::vector<std::vector<float>> magnitudes;
+		std::vector<std::vector<float>> phases;
 		float dominantFrequency;
+		float sampleRate;
 	};
 
 	AudioProcessor();
 	~AudioProcessor();
 
-	void queueAudioData(const float* buffer, size_t numSamples, float sampleRate);
+	void queueAudioData(const float* buffer, size_t numSamples, float sampleRate, size_t numChannels);
 
 	SpectralData getSpectralData() const;
 	void setEQGains(float low, float mid, float high);
@@ -30,8 +30,9 @@ public:
 	void stop();
 	uint64_t getDroppedBufferCount() const { return droppedBufferCount.load(std::memory_order_relaxed); }
 
-	FFTProcessor& getFFTProcessor() { return fftProcessor; }
-	const FFTProcessor& getFFTProcessor() const { return fftProcessor; }
+	FFTProcessor& getFFTProcessor(size_t channel = 0);
+	const FFTProcessor& getFFTProcessor(size_t channel = 0) const;
+    size_t getChannelCount() const { return fftProcessors.size(); }
 
 private:
 	static constexpr size_t QUEUE_SIZE = 16;
@@ -41,6 +42,7 @@ private:
 		std::vector<float> data = std::vector<float>(MAX_SAMPLES);
 		size_t sampleCount = 0;
 		float sampleRate = 44100.0f;
+		size_t numChannels = 1;
 	};
 
 	std::array<AudioBuffer, QUEUE_SIZE> audioQueue;
@@ -52,7 +54,7 @@ private:
 	std::mutex queueMutex;
 	std::atomic<uint64_t> droppedBufferCount{0};
 
-	FFTProcessor fftProcessor;
+	std::vector<std::unique_ptr<FFTProcessor>> fftProcessors;
 
 	mutable std::mutex resultsMutex;
 	SpectralData currentSpectralData;

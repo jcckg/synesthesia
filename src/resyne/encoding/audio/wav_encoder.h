@@ -4,8 +4,8 @@
 #include <string>
 
 struct SpectralSample {
-	std::vector<float> magnitudes;
-	std::vector<float> phases;
+	std::vector<std::vector<float>> magnitudes;
+	std::vector<std::vector<float>> phases;
 	double timestamp;
 	float sampleRate;
 };

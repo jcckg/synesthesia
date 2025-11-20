@@ -24,9 +24,43 @@ SampleColourEntry computeEntryInternal(const AudioColourSample& sample,
 	const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
 		? sample.loudnessLUFS
 		: ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+
+	std::vector<float> averagedMagnitudes;
+	std::vector<float> averagedPhases;
+
+	if (!sample.magnitudes.empty() && !sample.magnitudes[0].empty()) {
+		const size_t numBins = sample.magnitudes[0].size();
+		const uint32_t numChannels = sample.channels;
+
+		averagedMagnitudes.resize(numBins, 0.0f);
+		averagedPhases.resize(numBins, 0.0f);
+
+		for (uint32_t ch = 0; ch < numChannels && ch < sample.magnitudes.size(); ++ch) {
+			if (sample.magnitudes[ch].size() == numBins) {
+				for (size_t bin = 0; bin < numBins; ++bin) {
+					const float mag = sample.magnitudes[ch][bin];
+					averagedMagnitudes[bin] += mag * mag;
+				}
+			}
+			if (ch < sample.phases.size() && sample.phases[ch].size() == numBins) {
+				for (size_t bin = 0; bin < numBins; ++bin) {
+					averagedPhases[bin] += sample.phases[ch][bin];
+				}
+			}
+		}
+
+		if (numChannels > 0) {
+			const float invChannels = 1.0f / static_cast<float>(numChannels);
+			for (size_t bin = 0; bin < numBins; ++bin) {
+				averagedMagnitudes[bin] = std::sqrt(averagedMagnitudes[bin] * invChannels);
+				averagedPhases[bin] *= invChannels;
+			}
+		}
+	}
+
 	const auto colour = ColourMapper::spectrumToColour(
-		sample.magnitudes,
-		sample.phases,
+		averagedMagnitudes,
+		averagedPhases,
 		sample.sampleRate,
 		gamma,
 		colourSpace,

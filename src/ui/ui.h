@@ -28,7 +28,7 @@ struct AudioSettings {
     float lowGain = 1.0f;
     float midGain = 1.0f;
     float highGain = 1.0f;
-    std::vector<float> smoothedMagnitudes;
+    std::vector<std::vector<float>> smoothedMagnitudes;
     float spectrumSmoothingFactor = 0.2f;
 };
 

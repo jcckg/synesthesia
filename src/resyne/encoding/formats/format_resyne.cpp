@@ -10,7 +10,7 @@
 
 namespace {
 constexpr uint32_t RESYNE_MAGIC = 0x5253594E;
-constexpr uint32_t RESYNE_VERSION = 3;
+constexpr uint32_t RESYNE_VERSION = 4;
 }
 
 namespace SequenceExporterInternal {
@@ -64,6 +64,9 @@ bool exportToResyne(const std::string& filepath,
 	const uint32_t storedHopSize = metadata.hopSize > 0
 		? static_cast<uint32_t>(metadata.hopSize)
 		: (storedFftSize > 0 ? storedFftSize / 2 : 1u);
+	const uint32_t storedChannels = metadata.channels > 0
+		? metadata.channels
+		: (!samples.empty() ? samples.front().channels : 1u);
 
 	file.write(reinterpret_cast<const char*>(&RESYNE_MAGIC), sizeof(uint32_t));
 	file.write(reinterpret_cast<const char*>(&RESYNE_VERSION), sizeof(uint32_t));
@@ -72,6 +75,7 @@ bool exportToResyne(const std::string& filepath,
 	file.write(reinterpret_cast<const char*>(&sampleRate), sizeof(float));
 	file.write(reinterpret_cast<const char*>(&storedFftSize), sizeof(uint32_t));
 	file.write(reinterpret_cast<const char*>(&storedHopSize), sizeof(uint32_t));
+	file.write(reinterpret_cast<const char*>(&storedChannels), sizeof(uint32_t));
 
 	for (size_t y = 0; y < image.height; ++y) {
 		for (size_t x = 0; x < image.width; ++x) {
@@ -118,18 +122,22 @@ bool loadFromResyne(const std::string& filepath,
 	file.read(reinterpret_cast<char*>(&width), sizeof(uint32_t));
 	file.read(reinterpret_cast<char*>(&height), sizeof(uint32_t));
 
-	if (!file.good() || magic != RESYNE_MAGIC || width == 0 || height == 0 || (version != RESYNE_VERSION && version != 2)) {
+	if (!file.good() || magic != RESYNE_MAGIC || width == 0 || height == 0 || (version != RESYNE_VERSION && version != 3 && version != 2)) {
 		return false;
 	}
 
 	float storedSampleRate = 0.0f;
 	uint32_t storedFftSize = 0;
 	uint32_t storedHopSize = 0;
+	uint32_t storedChannels = 1;
 
 	if (version >= 3) {
 		file.read(reinterpret_cast<char*>(&storedSampleRate), sizeof(float));
 		file.read(reinterpret_cast<char*>(&storedFftSize), sizeof(uint32_t));
 		file.read(reinterpret_cast<char*>(&storedHopSize), sizeof(uint32_t));
+		if (version >= 4) {
+			file.read(reinterpret_cast<char*>(&storedChannels), sizeof(uint32_t));
+		}
 		if (!file.good()) {
 			return false;
 		}
@@ -179,6 +187,7 @@ bool loadFromResyne(const std::string& filepath,
 	image.metadata.hopSize = resolvedHopSize;
 	image.metadata.numFrames = image.width;
 	image.metadata.numBins = binCount;
+	image.metadata.channels = storedChannels;
 	image.metadata.version = "3.0.0";
 	image.metadata.windowType = "hann";
 
@@ -215,6 +224,7 @@ bool loadFromResyne(const std::string& filepath,
 	metadata.windowType = "hann";
 	metadata.numFrames = samples.size();
 	metadata.numBins = binCount;
+	metadata.channels = storedChannels;
 	metadata.version = "3.0.0";
 
 	if (progress) {

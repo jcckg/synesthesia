@@ -7,7 +7,7 @@
 namespace AudioDecoding {
 
 struct DecodedAudio {
-    std::vector<float> samples;
+    std::vector<std::vector<float>> channelSamples;
     std::uint32_t sampleRate = 0;
     std::uint32_t channels = 0;
 };

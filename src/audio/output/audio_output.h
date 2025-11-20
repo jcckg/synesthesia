@@ -19,17 +19,22 @@ public:
 	~AudioOutput();
 
 	static std::vector<DeviceInfo> getOutputDevices();
-	bool initOutputStream(float sampleRate, int deviceIndex = -1, int framesPerBuffer = 512);
-	void setAudioData(const std::vector<float>& audioSamples);
+	bool initOutputStream(float sampleRate, int channelCount = 1, int deviceIndex = -1, int framesPerBuffer = 512);
+	void setAudioData(const std::vector<float>& audioSamples, size_t channelCount = 1);
 
 	void play();
 	void pause();
 	void stop();
 	bool isPlaying() const { return isPlaying_.load(); }
 
-	void seek(size_t samplePosition);
+	void seek(size_t framePosition);
 	size_t getPlaybackPosition() const { return playbackPosition_.load(); }
 	size_t getTotalSamples() const { return totalSamples_.load(); }
+	size_t getTotalFrames() const {
+		const size_t channelCount = channelCount_.load();
+		const size_t totalSamples = totalSamples_.load();
+		return channelCount > 0 ? totalSamples / channelCount : totalSamples;
+	}
 
 	void setLoopEnabled(bool enabled) { loopEnabled_.store(enabled); }
 	bool isLoopEnabled() const { return loopEnabled_.load(); }
@@ -52,6 +57,7 @@ private:
 	std::atomic<float> requestedSampleRate_;
 	std::atomic<float> actualSampleRate_;
 	std::atomic<float> playbackStep_;
+	std::atomic<size_t> channelCount_;
 	double playbackCursor_;
 
 	std::atomic<bool> seekCrossfadeActive_;

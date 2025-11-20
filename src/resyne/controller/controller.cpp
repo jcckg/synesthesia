@@ -5,7 +5,7 @@
 namespace ReSyne {
 
 void updateFromFFT(State& state,
-                   FFTProcessor& fftProcessor,
+                   AudioProcessor& audioProcessor,
                    float sampleRate,
                    float currentR,
                    float currentG,
@@ -22,7 +22,7 @@ void updateFromFFT(State& state,
 
     Recorder::updateFromFFTProcessor(
         state.recorderState,
-        fftProcessor,
+        audioProcessor,
         currentR,
         currentG,
         currentB);

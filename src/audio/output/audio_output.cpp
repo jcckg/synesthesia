@@ -13,6 +13,7 @@ AudioOutput::AudioOutput()
 	  requestedSampleRate_(0.0f),
 	  actualSampleRate_(0.0f),
 	  playbackStep_(1.0f),
+	  channelCount_(1),
 	  playbackCursor_(0.0),
 	  seekCrossfadeActive_(false),
 	  pendingSeekPosition_(0),
@@ -48,7 +49,7 @@ std::vector<AudioOutput::DeviceInfo> AudioOutput::getOutputDevices() {
 	return devices;
 }
 
-bool AudioOutput::initOutputStream(float sampleRate, int deviceIndex, int framesPerBuffer) {
+bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int deviceIndex, int framesPerBuffer) {
 	if (stream_) {
 		if (Pa_IsStreamActive(stream_) == 1) {
 			Pa_StopStream(stream_);
@@ -59,6 +60,7 @@ bool AudioOutput::initOutputStream(float sampleRate, int deviceIndex, int frames
 	requestedSampleRate_.store(sampleRate);
 	actualSampleRate_.store(sampleRate);
 	playbackStep_.store(1.0f);
+	channelCount_.store(static_cast<size_t>(std::max(1, channelCount)));
 
 	PaStreamParameters outputParameters{};
 	if (deviceIndex >= 0) {
@@ -75,7 +77,9 @@ bool AudioOutput::initOutputStream(float sampleRate, int deviceIndex, int frames
 		return false;
 	}
 
-	outputParameters.channelCount = 1;
+	const int requestedChannels = std::max(1, channelCount);
+	const int clampedChannels = std::min(requestedChannels, deviceInfo->maxOutputChannels);
+	outputParameters.channelCount = clampedChannels;
 	outputParameters.sampleFormat = paFloat32;
 	outputParameters.suggestedLatency = deviceInfo->defaultLowOutputLatency;
 	outputParameters.hostApiSpecificStreamInfo = nullptr;
@@ -108,11 +112,13 @@ bool AudioOutput::initOutputStream(float sampleRate, int deviceIndex, int frames
 	return true;
 }
 
-void AudioOutput::setAudioData(const std::vector<float>& audioSamples) {
+void AudioOutput::setAudioData(const std::vector<float>& audioSamples, size_t channelCount) {
 	if (audioSamples.empty()) {
 		clearAudioData();
 		return;
 	}
+
+	channelCount_.store(std::max<size_t>(1, channelCount));
 
 	auto newBuffer = std::make_shared<std::vector<float>>(audioSamples);
 	{
@@ -163,9 +169,11 @@ void AudioOutput::stop() {
 	}
 }
 
-void AudioOutput::seek(size_t samplePosition) {
-	const size_t total = totalSamples_.load();
-	const size_t clamped = std::min(samplePosition, total);
+void AudioOutput::seek(size_t framePosition) {
+	const size_t channelCount = channelCount_.load();
+	const size_t totalSamples = totalSamples_.load();
+	const size_t totalFrames = channelCount > 0 ? totalSamples / channelCount : totalSamples;
+	const size_t clamped = std::min(framePosition, totalFrames);
 	const size_t oldPos = playbackPosition_.load();
 
 	constexpr size_t SEEK_THRESHOLD = 2205;
@@ -213,9 +221,10 @@ int AudioOutput::audioCallback(const void* input, void* output,
 
 	auto* audioOutput = static_cast<AudioOutput*>(userData);
 	auto* out = static_cast<float*>(output);
+	const size_t outputChannels = audioOutput->channelCount_.load();
 
 	if (!audioOutput->isPlaying_.load()) {
-		std::memset(out, 0, frameCount * sizeof(float));
+		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
 		return paContinue;
 	}
 
@@ -242,7 +251,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	const double totalDouble = static_cast<double>(total);
 
 	if (!bufferSnapshot || bufferSnapshot->empty() || total == 0) {
-		std::memset(out, 0, frameCount * sizeof(float));
+		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
 		return paContinue;
 	}
 
@@ -261,7 +270,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		if (!loopEnabled && cursor >= totalDouble) {
 			const size_t remaining = frameCount - i;
 			if (remaining > 0) {
-				std::memset(&out[i], 0, remaining * sizeof(float));
+				std::memset(&out[i * outputChannels], 0, remaining * outputChannels * sizeof(float));
 			}
 			stopPlayback = true;
 			cursor = totalDouble;
@@ -280,30 +289,40 @@ int AudioOutput::audioCallback(const void* input, void* output,
 			workingCursor = std::clamp(workingCursor, 0.0, totalDouble);
 		}
 
-		size_t index = static_cast<size_t>(workingCursor);
-		if (index >= total) {
-			index = total - 1;
-		}
-		size_t nextIndex = index + 1;
-		if (nextIndex >= total) {
-			nextIndex = loopEnabled ? 0 : total - 1;
+		const size_t frameIndex = static_cast<size_t>(workingCursor);
+		const size_t totalFrames = outputChannels > 0 ? total / outputChannels : total;
+
+		size_t clampedFrameIndex = std::min(frameIndex, totalFrames > 0 ? totalFrames - 1 : 0);
+		size_t nextFrameIndex = clampedFrameIndex + 1;
+		if (nextFrameIndex >= totalFrames) {
+			nextFrameIndex = loopEnabled ? 0 : (totalFrames > 0 ? totalFrames - 1 : 0);
 		}
 
-		const double frac = std::clamp(workingCursor - static_cast<double>(index), 0.0, 1.0);
-		const float current = buffer[index];
-		const float next = buffer[nextIndex];
+		const double frac = std::clamp(workingCursor - static_cast<double>(clampedFrameIndex), 0.0, 1.0);
 
 		constexpr size_t LOOP_CROSSFADE_SAMPLES = 128;
-		const bool nearLoopBoundary = loopEnabled && total >= LOOP_CROSSFADE_SAMPLES * 2;
+		const bool nearLoopBoundary = loopEnabled && totalFrames >= LOOP_CROSSFADE_SAMPLES * 2;
 
-		if (nearLoopBoundary && index >= total - LOOP_CROSSFADE_SAMPLES && nextIndex < LOOP_CROSSFADE_SAMPLES) {
-			const size_t distanceFromEnd = total - 1 - index;
-			const float fadeOut = static_cast<float>(distanceFromEnd + 1) / static_cast<float>(LOOP_CROSSFADE_SAMPLES);
-			const float fadeIn = 1.0f - fadeOut;
-			out[i] = (current + static_cast<float>(frac) * (next - current)) * fadeOut +
-			         buffer[nextIndex] * fadeIn;
-		} else {
-			out[i] = current + static_cast<float>(frac) * (next - current);
+		for (size_t ch = 0; ch < outputChannels; ++ch) {
+			const size_t currentSampleIndex = clampedFrameIndex * outputChannels + ch;
+			const size_t nextSampleIndex = nextFrameIndex * outputChannels + ch;
+
+			const float current = buffer[std::min(currentSampleIndex, total - 1)];
+			const float next = buffer[std::min(nextSampleIndex, total - 1)];
+
+			float sample;
+			if (nearLoopBoundary && clampedFrameIndex >= totalFrames - LOOP_CROSSFADE_SAMPLES &&
+			    nextFrameIndex < LOOP_CROSSFADE_SAMPLES) {
+				const size_t distanceFromEnd = totalFrames - 1 - clampedFrameIndex;
+				const float fadeOut = static_cast<float>(distanceFromEnd + 1) / static_cast<float>(LOOP_CROSSFADE_SAMPLES);
+				const float fadeIn = 1.0f - fadeOut;
+				sample = (current + static_cast<float>(frac) * (next - current)) * fadeOut +
+				         buffer[std::min(nextFrameIndex * outputChannels + ch, total - 1)] * fadeIn;
+			} else {
+				sample = current + static_cast<float>(frac) * (next - current);
+			}
+
+			out[i * outputChannels + ch] = sample;
 		}
 
 		if (seekFadeRemaining > 0) {
@@ -319,23 +338,27 @@ int AudioOutput::audioCallback(const void* input, void* output,
 				oldWorkingCursor = std::clamp(oldWorkingCursor, 0.0, totalDouble);
 			}
 
-			size_t oldIndex = static_cast<size_t>(oldWorkingCursor);
-			if (oldIndex >= total) {
-				oldIndex = total - 1;
-			}
-			size_t oldNextIndex = oldIndex + 1;
-			if (oldNextIndex >= total) {
-				oldNextIndex = loopEnabled ? 0 : total - 1;
+			const size_t oldFrameIndex = static_cast<size_t>(oldWorkingCursor);
+			const size_t oldClampedFrameIndex = std::min(oldFrameIndex, totalFrames > 0 ? totalFrames - 1 : 0);
+			size_t oldNextFrameIndex = oldClampedFrameIndex + 1;
+			if (oldNextFrameIndex >= totalFrames) {
+				oldNextFrameIndex = loopEnabled ? 0 : (totalFrames > 0 ? totalFrames - 1 : 0);
 			}
 
-			const double oldFrac = std::clamp(oldWorkingCursor - static_cast<double>(oldIndex), 0.0, 1.0);
-			const float oldSample = buffer[oldIndex] + static_cast<float>(oldFrac) * (buffer[oldNextIndex] - buffer[oldIndex]);
+			const double oldFrac = std::clamp(oldWorkingCursor - static_cast<double>(oldClampedFrameIndex), 0.0, 1.0);
 
 			constexpr size_t TOTAL_CROSSFADE_SAMPLES = 256;
 			const float fadeIn = static_cast<float>(TOTAL_CROSSFADE_SAMPLES - seekFadeRemaining) / static_cast<float>(TOTAL_CROSSFADE_SAMPLES);
 			const float fadeOut = 1.0f - fadeIn;
 
-			out[i] = out[i] * fadeIn + oldSample * fadeOut;
+			for (size_t ch = 0; ch < outputChannels; ++ch) {
+				const size_t oldCurrentSampleIndex = oldClampedFrameIndex * outputChannels + ch;
+				const size_t oldNextSampleIndex = oldNextFrameIndex * outputChannels + ch;
+				const float oldSample = buffer[std::min(oldCurrentSampleIndex, total - 1)] +
+					static_cast<float>(oldFrac) * (buffer[std::min(oldNextSampleIndex, total - 1)] - buffer[std::min(oldCurrentSampleIndex, total - 1)]);
+
+				out[i * outputChannels + ch] = out[i * outputChannels + ch] * fadeIn + oldSample * fadeOut;
+			}
 
 			seekFadeRemaining--;
 			oldSeekCursor += step;
@@ -384,12 +407,11 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		}
 	}
 
-	// Apply soft-knee limiter to prevent clipping and protect hearing
-	constexpr float THRESHOLD = 0.85f;  // Start limiting at -1.4 dBFS
-	constexpr float KNEE = 0.1f;        // Soft knee width
-	constexpr float CEILING = 0.95f;    // Hard ceiling at -0.44 dBFS
+	constexpr float THRESHOLD = 0.85f;
+	constexpr float KNEE = 0.1f;
+	constexpr float CEILING = 0.95f;
 
-	for (size_t i = 0; i < frameCount; ++i) {
+	for (size_t i = 0; i < frameCount * outputChannels; ++i) {
 		float sample = out[i];
 		float absSample = std::abs(sample);
 
@@ -398,14 +420,12 @@ int AudioOutput::audioCallback(const void* input, void* output,
 			float reduction;
 
 			if (excess < KNEE) {
-				// Soft knee: gradual compression
 				reduction = excess * excess / (2.0f * KNEE);
 			} else {
-				// Above knee: stronger limiting
 				reduction = excess - KNEE / 2.0f;
 			}
 
-			float limited = THRESHOLD + reduction * 0.3f;  // 3:1 ratio above threshold
+			float limited = THRESHOLD + reduction * 0.3f;
 			limited = std::min(limited, CEILING);
 			out[i] = (sample >= 0.0f) ? limited : -limited;
 		}

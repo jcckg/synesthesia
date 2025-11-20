@@ -10,7 +10,7 @@ public:
     SpectrumAnalyser() = default;
 
     void drawSpectrumWindow(
-        const std::vector<float>& smoothedMagnitudes,
+        const std::vector<std::vector<float>>& smoothedMagnitudes,
         const std::vector<AudioInput::DeviceInfo>& devices,
         int selectedDeviceIndex,
         const ImVec2& displaySize,
@@ -29,9 +29,9 @@ private:
     static constexpr float GAUSSIAN_SIGMA = 1.0f;
     static constexpr float CUBIC_TENSION = 0.5f;
 
-    std::vector<float> previousFrameData;
-    std::vector<float> smoothingBuffer1;
-    std::vector<float> smoothingBuffer2;
+    std::vector<std::vector<float>> previousFrameData;
+    std::vector<std::vector<float>> smoothingBuffer1;
+    std::vector<std::vector<float>> smoothingBuffer2;
     std::vector<float> gaussianWeights;
     std::vector<float> cachedFrequencies;
     float lastCachedSampleRate = 0.0f;
@@ -41,13 +41,12 @@ private:
     void prepareSpectrumData(std::vector<float>& xData, std::vector<float>& yData,
                             const std::vector<float>& magnitudes, float sampleRate);
     void smoothData(std::vector<float>& yData);
-    void applyTemporalSmoothing(std::vector<float>& yData);
     void applyGaussianSmoothing(std::vector<float>& yData);
     void applyDynamicRangeCompensation(std::vector<float>& yData);
     static float cubicInterpolate(float y0, float y1, float y2, float y3, float t);
     static int getFrequencyDependentWindowSize(int index);
     float gaussianWeight(int distance, float sigma);
-    void initialiseBuffers();
+    void initialiseBuffers(size_t numChannels);
     void precomputeGaussianWeights();
     static float calculateLocalVariance(const std::vector<float>& yData, int centre, int windowSize);
 };

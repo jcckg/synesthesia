@@ -102,13 +102,16 @@ void sanitiseMagnitudes(std::vector<float>& magnitudes) {
 	}
 }
 
-void resetAnalyserState(UIState& state, size_t binCount) {
-	if (state.audioSettings.smoothedMagnitudes.size() != binCount) {
-		state.audioSettings.smoothedMagnitudes.assign(binCount, 0.0f);
-	} else {
-		std::fill(state.audioSettings.smoothedMagnitudes.begin(),
-				  state.audioSettings.smoothedMagnitudes.end(),
-				  0.0f);
+void resetAnalyserState(UIState& state, size_t binCount, size_t numChannels = 1) {
+	if (state.audioSettings.smoothedMagnitudes.size() != numChannels) {
+		state.audioSettings.smoothedMagnitudes.resize(numChannels);
+	}
+	for (auto& channelMags : state.audioSettings.smoothedMagnitudes) {
+		if (channelMags.size() != binCount) {
+			channelMags.assign(binCount, 0.0f);
+		} else {
+			std::fill(channelMags.begin(), channelMags.end(), 0.0f);
+		}
 	}
 	state.spectrumAnalyser.resetTemporalBuffers();
 }
@@ -151,12 +154,18 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 	size_t playbackPosition = recorderState.audioOutput->getPlaybackPosition();
 	size_t totalSamples = recorderState.audioOutput->getTotalSamples();
 
-	if (totalSamples > 0 && recorderState.metadata.hopSize > 0 && !recorderState.samples.empty()) {
-		size_t currentFrame = playbackPosition / static_cast<size_t>(recorderState.metadata.hopSize);
-		currentFrame = std::min(currentFrame, recorderState.samples.size() - 1);
+	if (totalSamples > 0 && !recorderState.samples.empty()) {
+		const size_t totalFrames = recorderState.audioOutput->getTotalFrames();
+		if (totalFrames > 0) {
+			const float audioNormalised = static_cast<float>(playbackPosition) / static_cast<float>(totalFrames);
+			const size_t spectralFrame = static_cast<size_t>(
+				std::clamp(audioNormalised, 0.0f, 1.0f) * static_cast<float>(recorderState.samples.size())
+			);
+			const size_t clampedSpectralFrame = std::min(spectralFrame, recorderState.samples.size() - 1);
 
-		recorderState.timeline.scrubberNormalisedPosition =
-			static_cast<float>(currentFrame) / static_cast<float>(recorderState.samples.size() - 1);
+			recorderState.timeline.scrubberNormalisedPosition =
+				static_cast<float>(clampedSpectralFrame) / static_cast<float>(recorderState.samples.size() - 1);
+		}
 	}
 
 	ImVec4 playbackColour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -193,14 +202,16 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 		}
 
 		const auto& currentSample = recorderState.samples[clampedIndex];
+		const auto& currentMagnitudes = !currentSample.magnitudes.empty() ? currentSample.magnitudes[0] : std::vector<float>();
+		const auto& currentPhases = !currentSample.phases.empty() ? currentSample.phases[0] : std::vector<float>();
 
-		if (!currentSample.magnitudes.empty()) {
+		if (!currentMagnitudes.empty()) {
 			const float sampleLoudness = std::isfinite(currentSample.loudnessLUFS)
 				? currentSample.loudnessLUFS
 				: ColourMapper::LOUDNESS_DB_UNSPECIFIED;
 			auto playbackColourResult = ColourMapper::spectrumToColour(
-				currentSample.magnitudes,
-				currentSample.phases,
+				currentMagnitudes,
+				currentPhases,
 				currentSample.sampleRate,
 				UIConstants::DEFAULT_GAMMA,
 				state.visualSettings.colourSpace,
@@ -216,25 +227,25 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 
 #ifdef ENABLE_API_SERVER
 			auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-			api.updateColourData(currentSample.magnitudes, currentSample.phases, playbackColourResult.dominantFrequency,
+			api.updateColourData(currentMagnitudes, currentPhases, playbackColourResult.dominantFrequency,
 								 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB,
 								 playbackColourResult.L, playbackColourResult.a, playbackColourResult.b_comp);
 #endif
 		}
-		if (currentSample.magnitudes.empty()) {
+		if (currentMagnitudes.empty()) {
 			resetAnalyserState(state, 0);
 		} else {
 			float playbackFlux = 0.0f;
 			bool fluxComputed = false;
-			if (playbackSmoothingState.previousMagnitudes.size() == currentSample.magnitudes.size()) {
-				for (size_t i = 0; i < currentSample.magnitudes.size(); ++i) {
-					const float diff = currentSample.magnitudes[i] - playbackSmoothingState.previousMagnitudes[i];
+			if (playbackSmoothingState.previousMagnitudes.size() == currentMagnitudes.size()) {
+				for (size_t i = 0; i < currentMagnitudes.size(); ++i) {
+					const float diff = currentMagnitudes[i] - playbackSmoothingState.previousMagnitudes[i];
 					playbackFlux += std::max(diff, 0.0f);
 				}
-				playbackFlux /= static_cast<float>(currentSample.magnitudes.size());
+				playbackFlux /= static_cast<float>(currentMagnitudes.size());
 				fluxComputed = true;
 			}
-			playbackSmoothingState.previousMagnitudes = currentSample.magnitudes;
+			playbackSmoothingState.previousMagnitudes = currentMagnitudes;
 
 			if (fluxComputed) {
 				playbackSmoothingState.fluxHistory[playbackSmoothingState.fluxHistoryIndex] = playbackFlux;
@@ -258,16 +269,21 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 				playbackSignalFeatures.onsetDetected = playbackOnset;
 			}
 
-			const size_t binCount = currentSample.magnitudes.size();
+			const size_t binCount = currentMagnitudes.size();
+			const size_t channelIndex = 0;  // Processing first channel for playback display
 
-			if (spectrumIsSilent(currentSample.magnitudes)) {
-				resetAnalyserState(state, binCount);
+			if (spectrumIsSilent(currentMagnitudes)) {
+				resetAnalyserState(state, binCount, 1);
 			} else {
-				if (state.audioSettings.smoothedMagnitudes.size() != binCount) {
-					state.audioSettings.smoothedMagnitudes.assign(binCount, 0.0f);
+				// Ensure we have at least one channel in smoothedMagnitudes
+				if (state.audioSettings.smoothedMagnitudes.empty()) {
+					state.audioSettings.smoothedMagnitudes.resize(1);
+				}
+				if (state.audioSettings.smoothedMagnitudes[channelIndex].size() != binCount) {
+					state.audioSettings.smoothedMagnitudes[channelIndex].assign(binCount, 0.0f);
 				}
 
-				std::vector<float> processedMagnitudes = currentSample.magnitudes;
+				std::vector<float> processedMagnitudes = currentMagnitudes;
 
 				float maxMagnitude = 0.0f;
 				for (float mag : processedMagnitudes) {
@@ -278,7 +294,7 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 				}
 
 				if (maxMagnitude <= SILENCE_MAGNITUDE_THRESHOLD) {
-					resetAnalyserState(state, binCount);
+					resetAnalyserState(state, binCount, 1);
 				} else {
 					float sampleRate = currentSample.sampleRate;
 					if (sampleRate <= 0.0f) {
@@ -326,9 +342,9 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 					const float historyContribution = smoothing;
 
 					for (size_t i = 0; i < processedMagnitudes.size(); ++i) {
-						state.audioSettings.smoothedMagnitudes[i] =
+						state.audioSettings.smoothedMagnitudes[channelIndex][i] =
 							newContribution * processedMagnitudes[i] +
-							historyContribution * state.audioSettings.smoothedMagnitudes[i];
+							historyContribution * state.audioSettings.smoothedMagnitudes[channelIndex][i];
 					}
 				}
 			}
@@ -349,7 +365,7 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 
 	ReSyne::updateFromFFT(
 		state.resyneState,
-		audioInput.getFFTProcessor(),
+		audioInput.getAudioProcessor(),
 		audioInput.getSampleRate(),
 		currentDisplayR,
 		currentDisplayG,
@@ -427,17 +443,23 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 
 	ReSyne::updateFromFFT(
 		state.resyneState,
-		audioInput.getFFTProcessor(),
+		audioInput.getAudioProcessor(),
 		audioInput.getSampleRate(),
 		currentDisplayR,
 		currentDisplayG,
 		currentDisplayB);
 
+	const size_t channelIndex = 0;  // Processing first channel for live audio display
+
 	if (silentMagnitudeFrame || magnitudes.empty()) {
-		resetAnalyserState(state, magnitudes.size());
+		resetAnalyserState(state, magnitudes.size(), 1);
 	} else {
-		if (state.audioSettings.smoothedMagnitudes.size() != magnitudes.size()) {
-			state.audioSettings.smoothedMagnitudes.assign(magnitudes.size(), 0.0f);
+		// Ensure we have at least one channel in smoothedMagnitudes
+		if (state.audioSettings.smoothedMagnitudes.empty()) {
+			state.audioSettings.smoothedMagnitudes.resize(1);
+		}
+		if (state.audioSettings.smoothedMagnitudes[channelIndex].size() != magnitudes.size()) {
+			state.audioSettings.smoothedMagnitudes[channelIndex].assign(magnitudes.size(), 0.0f);
 		}
 
 		const float smoothing = std::clamp(state.audioSettings.spectrumSmoothingFactor, 0.0f, 1.0f);
@@ -445,9 +467,9 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 		const float historyContribution = smoothing;
 
 		for (size_t i = 0; i < magnitudes.size(); ++i) {
-			state.audioSettings.smoothedMagnitudes[i] =
+			state.audioSettings.smoothedMagnitudes[channelIndex][i] =
 				newContribution * magnitudes[i] +
-				historyContribution * state.audioSettings.smoothedMagnitudes[i];
+				historyContribution * state.audioSettings.smoothedMagnitudes[channelIndex][i];
 		}
 	}
 }
@@ -632,8 +654,9 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
         if (sampleRate <= 0.0f) {
             sampleRate = UIConstants::DEFAULT_SAMPLE_RATE;
         }
+        const int channelCount = recorderState.metadata.channels > 0 ? static_cast<int>(recorderState.metadata.channels) : 1;
 
-        if (!recorderState.audioOutput->initOutputStream(sampleRate, requestedOutputDeviceIndex)) {
+        if (!recorderState.audioOutput->initOutputStream(sampleRate, channelCount, requestedOutputDeviceIndex)) {
             recorderState.outputDeviceIndex = previousOutputDeviceIndex;
             state.deviceState.selectedOutputDeviceIndex = fallbackOutputDeviceSelection;
             recorderState.statusMessage = "Unable to switch output device";

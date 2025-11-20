@@ -1,13 +1,14 @@
 #pragma once
 
 #include "audio/analysis/fft/fft_processor.h"
+#include "audio/processing/audio_processor.h"
 #include "audio/input/audio_input.h"
 #include "resyne/controller/state.h"
 
 namespace ReSyne {
 
 void updateFromFFT(State& state,
-                   FFTProcessor& fftProcessor,
+                   AudioProcessor& audioProcessor,
                    float sampleRate,
                    float currentR,
                    float currentG,

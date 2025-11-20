@@ -1,6 +1,7 @@
 #include "resyne/recorder/recorder.h"
 
 #include "audio/analysis/fft/fft_processor.h"
+#include "audio/processing/audio_processor.h"
 #include "constants.h"
 #include "resyne/recorder/colour_cache_utils.h"
 
@@ -16,7 +17,7 @@ RecorderState::~RecorderState() {
 }
 
 void Recorder::updateFromFFTProcessor(RecorderState& state,
-                                                FFTProcessor& fftProcessor,
+                                                AudioProcessor& audioProcessor,
                                                 float r,
                                                 float g,
                                                 float b) {
@@ -28,7 +29,12 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
     (void)g;
     (void)b;
 
-    auto frames = fftProcessor.getBufferedFrames();
+    const size_t numChannels = audioProcessor.getChannelCount();
+    if (numChannels == 0) {
+        return;
+    }
+
+    auto frames = audioProcessor.getFFTProcessor(0).getBufferedFrames();
     if (frames.empty()) {
         return;
     }
@@ -44,20 +50,44 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
         if (state.samples.empty()) {
             state.firstFrameCounter = frame.frameCounter;
             state.metadata.sampleRate = frame.sampleRate;
+            state.metadata.channels = static_cast<uint32_t>(numChannels);
         }
 
-		AudioColourSample sample;
-		sample.magnitudes = frame.magnitudes;
-		sample.phases = frame.phases;
-		sample.sampleRate = frame.sampleRate;
-		sample.loudnessLUFS = frame.loudnessLUFS;
-		sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
+        AudioColourSample sample;
+        sample.magnitudes.resize(numChannels);
+        sample.phases.resize(numChannels);
+        sample.channels = static_cast<uint32_t>(numChannels);
+        sample.sampleRate = frame.sampleRate;
+        sample.loudnessLUFS = frame.loudnessLUFS;
+        sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
+
+        for (size_t ch = 0; ch < numChannels; ++ch) {
+            auto channelFrames = audioProcessor.getFFTProcessor(ch).getBufferedFrames();
+            if (!channelFrames.empty() && frame.frameCounter < channelFrames.size()) {
+                bool foundMatch = false;
+                for (const auto& chFrame : channelFrames) {
+                    if (chFrame.frameCounter == frame.frameCounter) {
+                        sample.magnitudes[ch] = chFrame.magnitudes;
+                        sample.phases[ch] = chFrame.phases;
+                        foundMatch = true;
+                        break;
+                    }
+                }
+                if (!foundMatch) {
+                    sample.magnitudes[ch] = channelFrames[0].magnitudes;
+                    sample.phases[ch] = channelFrames[0].phases;
+                }
+            } else {
+                sample.magnitudes[ch] = std::vector<float>();
+                sample.phases[ch] = std::vector<float>();
+            }
+        }
 
         uint64_t relativeFrame = frame.frameCounter - state.firstFrameCounter;
         sample.timestamp = static_cast<double>(relativeFrame * static_cast<uint64_t>(state.metadata.hopSize)) /
                            static_cast<double>(state.metadata.sampleRate);
 
-		state.samples.push_back(sample);
+        state.samples.push_back(sample);
         RecorderColourCache::appendSampleLocked(state, state.samples.back());
     }
 }
@@ -106,7 +136,6 @@ void Recorder::stopRecording(RecorderState& state) {
         state.metadata.numFrames = state.samples.size();
     }
 
-    // Reconstruct immediately after recording to keep playback responsive
     reconstructAudio(state);
 }
 

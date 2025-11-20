@@ -254,37 +254,83 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 
     std::vector<float> reconstructedAudio;
     bool reconstructionSuccess = false;
+    uint32_t numChannels = 1;
 
-    if (success && !samples.empty()) {
+    const bool shouldReconstructDuringImport = (extension == ".wav" || extension == ".flac" ||
+                                                 extension == ".mp3" || extension == ".mpeg3" ||
+                                                 extension == ".mpga" || extension == ".ogg" ||
+                                                 extension == ".oga");
+
+    if (success && !samples.empty() && shouldReconstructDuringImport) {
         setStatus("Reconstructing audio...");
         updateProgress(0.85f);
 
-        std::vector<SpectralSample> spectralSamples;
-        spectralSamples.reserve(samples.size());
-        for (const auto& sample : samples) {
-            SpectralSample spectral;
-            spectral.magnitudes = sample.magnitudes;
-            spectral.phases = sample.phases;
-            spectral.timestamp = sample.timestamp;
-            spectral.sampleRate = sample.sampleRate;
-            spectralSamples.push_back(spectral);
+        numChannels = !samples.empty() ? samples.front().channels : 1;
+
+        std::vector<std::vector<float>> channelAudioData(numChannels);
+        size_t maxLength = 0;
+        bool allChannelsSuccess = true;
+
+        for (uint32_t ch = 0; ch < numChannels; ++ch) {
+            std::vector<SpectralSample> spectralSamples;
+            spectralSamples.reserve(samples.size());
+
+            for (const auto& sample : samples) {
+                SpectralSample spectral;
+                spectral.magnitudes.clear();
+                spectral.phases.clear();
+                if (ch < sample.magnitudes.size()) {
+                    spectral.magnitudes.push_back(sample.magnitudes[ch]);
+                } else {
+                    spectral.magnitudes.push_back(std::vector<float>());
+                }
+                if (ch < sample.phases.size()) {
+                    spectral.phases.push_back(sample.phases[ch]);
+                } else {
+                    spectral.phases.push_back(std::vector<float>());
+                }
+                spectral.timestamp = sample.timestamp;
+                spectral.sampleRate = sample.sampleRate;
+                spectralSamples.push_back(spectral);
+            }
+
+            updateProgress(0.85f + 0.05f * (static_cast<float>(ch) / static_cast<float>(numChannels)));
+
+            auto result = WAVEncoder::reconstructFromSpectralData(
+                spectralSamples,
+                metadata.sampleRate,
+                metadata.fftSize,
+                metadata.hopSize
+            );
+
+            if (!result.success || result.audioSamples.empty()) {
+                allChannelsSuccess = false;
+                break;
+            }
+
+            channelAudioData[ch] = std::move(result.audioSamples);
+            maxLength = std::max(maxLength, channelAudioData[ch].size());
         }
-
-        updateProgress(0.90f);
-
-        auto result = WAVEncoder::reconstructFromSpectralData(
-            spectralSamples,
-            metadata.sampleRate,
-            metadata.fftSize,
-            metadata.hopSize
-        );
 
         updateProgress(0.95f);
 
-        if (result.success && !result.audioSamples.empty()) {
-            reconstructedAudio = std::move(result.audioSamples);
+        if (allChannelsSuccess) {
+            reconstructedAudio.clear();
+            reconstructedAudio.reserve(maxLength * numChannels);
+
+            for (size_t i = 0; i < maxLength; ++i) {
+                for (uint32_t ch = 0; ch < numChannels; ++ch) {
+                    if (i < channelAudioData[ch].size()) {
+                        reconstructedAudio.push_back(channelAudioData[ch][i]);
+                    } else {
+                        reconstructedAudio.push_back(0.0f);
+                    }
+                }
+            }
             reconstructionSuccess = true;
         }
+    } else if (success && !samples.empty() && !shouldReconstructDuringImport) {
+        updateProgress(0.95f);
     }
 
     {
@@ -302,6 +348,8 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 
             if (reconstructionSuccess) {
                 state.reconstructedAudio = std::move(reconstructedAudio);
+            } else {
+                state.reconstructedAudio.clear();
             }
 
             updateProgress(1.0f);

@@ -106,9 +106,11 @@ public:
         const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
             ? sample.loudnessLUFS
             : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+        const auto& magnitudes = !sample.magnitudes.empty() ? sample.magnitudes[0] : std::vector<float>();
+        const auto& phases = !sample.phases.empty() ? sample.phases[0] : std::vector<float>();
         const auto colour = ColourMapper::spectrumToColour(
-            sample.magnitudes,
-            sample.phases,
+            magnitudes,
+            phases,
             sample.sampleRate,
             gamma_,
             colourSpace_,

@@ -12,26 +12,27 @@ namespace {
 
 using SampleCount = std::size_t;
 
-std::vector<float> convertToMono(const float* interleaved,
-                                 SampleCount frameCount,
-                                 std::uint32_t channels) {
-    std::vector<float> mono;
+std::vector<std::vector<float>> deinterleave(const float* interleaved,
+                                              SampleCount frameCount,
+                                              std::uint32_t channels) {
+    std::vector<std::vector<float>> channelSamples;
     if (!interleaved || frameCount == 0 || channels == 0) {
-        return mono;
+        return channelSamples;
     }
 
-    mono.resize(frameCount);
-    const double channelScale = 1.0 / static_cast<double>(channels);
+    channelSamples.resize(channels);
+    for (std::uint32_t ch = 0; ch < channels; ++ch) {
+        channelSamples[ch].reserve(frameCount);
+    }
+
     for (SampleCount frame = 0; frame < frameCount; ++frame) {
-        double accum = 0.0;
         const SampleCount baseIndex = frame * static_cast<SampleCount>(channels);
         for (std::uint32_t ch = 0; ch < channels; ++ch) {
             const float raw = interleaved[baseIndex + ch];
-            accum += std::isfinite(raw) ? static_cast<double>(raw) : 0.0;
+            channelSamples[ch].push_back(std::isfinite(raw) ? raw : 0.0f);
         }
-        mono[frame] = static_cast<float>(accum * channelScale);
     }
-    return mono;
+    return channelSamples;
 }
 
 }
@@ -80,10 +81,10 @@ bool decodeOgg(const std::string& filepath, DecodedAudio& out, std::string& erro
     const SampleCount frameCount = interleaved.size() / channelCount;
     out.channels = channelCount;
     out.sampleRate = sampleRate;
-    out.samples = convertToMono(interleaved.data(), frameCount, channelCount);
+    out.channelSamples = deinterleave(interleaved.data(), frameCount, channelCount);
 
-    if (out.samples.empty()) {
-        error = "ogg mono conversion failed";
+    if (out.channelSamples.empty()) {
+        error = "ogg deinterleave failed";
         return false;
     }
     return true;

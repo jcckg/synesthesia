@@ -13,9 +13,11 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -84,21 +86,25 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 										  const std::function<void(float)>& onProgress) {
 	ColourNativeImage image;
 	const size_t numFrames = samples.size();
-	const size_t numBins = metadata.numBins != 0
+	const uint32_t numChannels = metadata.channels > 0 ? metadata.channels :
+		(!samples.empty() ? samples.front().channels : 1);
+	const size_t numBinsPerChannel = metadata.numBins != 0
 		? metadata.numBins
-		: (samples.empty() ? 0 : samples.front().magnitudes.size());
+		: (samples.empty() || samples.front().magnitudes.empty() ? 0 : samples.front().magnitudes[0].size());
 
-	image.resize(numFrames, numBins);
+	const size_t totalHeight = numBinsPerChannel * numChannels;
+
+	image.resize(numFrames, totalHeight);
 	image.metadata = metadata;
 	image.metadata.numFrames = numFrames;
-	image.metadata.numBins = numBins;
+	image.metadata.numBins = numBinsPerChannel;
+	image.metadata.channels = numChannels;
 
 	if (onProgress) {
 		onProgress(numFrames == 0 ? 1.0f : 0.0f);
 	}
 
 	for (size_t frame = 0; frame < numFrames; ++frame) {
-		std::vector<RGBAColour> column;
 		const auto& sample = samples[frame];
 		const float frameSampleRate = sample.sampleRate > 0.0f
 			? sample.sampleRate
@@ -106,10 +112,19 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 		const float hopRatio = (metadata.fftSize > 0)
 			? static_cast<float>(metadata.hopSize) / static_cast<float>(metadata.fftSize)
 			: 0.5f;
-		encodeTimeFrame(sample.magnitudes, sample.phases, frameSampleRate, hopRatio, column);
 
-		for (size_t bin = 0; bin < numBins && bin < column.size(); ++bin) {
-			image.at(frame, bin) = column[bin];
+		for (uint32_t ch = 0; ch < numChannels; ++ch) {
+			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
+				continue;
+			}
+
+			std::vector<RGBAColour> column;
+			encodeTimeFrame(sample.magnitudes[ch], sample.phases[ch], frameSampleRate, hopRatio, column);
+
+			const size_t yOffset = ch * numBinsPerChannel;
+			for (size_t bin = 0; bin < numBinsPerChannel && bin < column.size(); ++bin) {
+				image.at(frame, yOffset + bin) = column[bin];
+			}
 		}
 
 		if (onProgress && numFrames > 0) {
@@ -123,7 +138,29 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 }
 
 float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
-	const size_t usableHeight = std::min(image.height, ColourNativeCodec::MAX_BIN_COUNT);
+	const std::vector<size_t> commonBinCounts = {257, 513, 1025, 2049, 4097, 8193};
+
+	size_t binCountPerChannel = 0;
+
+	for (size_t candidateBinCount : commonBinCounts) {
+		if (candidateBinCount > MAX_BIN_COUNT || candidateBinCount > image.height) {
+			continue;
+		}
+
+		if (image.height % candidateBinCount == 0) {
+			const uint32_t candidateChannels = static_cast<uint32_t>(image.height / candidateBinCount);
+			if (candidateChannels >= 1 && candidateChannels <= 8) {
+				binCountPerChannel = candidateBinCount;
+				break;
+			}
+		}
+	}
+
+	if (binCountPerChannel == 0) {
+		binCountPerChannel = std::min(image.height, MAX_BIN_COUNT);
+	}
+
+	const size_t usableHeight = binCountPerChannel;
 	if (usableHeight <= 1) {
 		return DEFAULT_SAMPLE_RATE;
 	}
@@ -188,7 +225,11 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 														int& hopSize,
 														const SequenceFrameCallback& onFrameDecoded,
 														const std::function<void(float)>& onProgress) {
-	const size_t binCount = std::min(image.height, ColourNativeCodec::MAX_BIN_COUNT);
+	const uint32_t numChannels = image.metadata.channels > 0 ? image.metadata.channels : 1;
+	const size_t totalHeight = std::min(image.height, ColourNativeCodec::MAX_BIN_COUNT);
+	const size_t binCountPerChannel = totalHeight / numChannels;
+	const size_t binCount = binCountPerChannel > 0 ? binCountPerChannel : totalHeight;
+
 	std::vector<AudioColourSample> samples(image.width);
 	const size_t totalFrames = image.width;
 	if (binCount == 0 || totalFrames == 0) {
@@ -198,8 +239,6 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 		return samples;
 	}
 
-	// Metadata pixel (0,0) is corrupted by hue shifts in image editors
-	// Use the sample rate and hop size passed in from detectSampleRate()
 	const size_t fftSize = binCount > 1 ? (binCount - 1) * 2 : 2;
 
 	if (!std::isfinite(sampleRate) || sampleRate <= EPSILON) {
@@ -210,147 +249,242 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 		hopSize = std::max<int>(1, static_cast<int>(fftSize / 2));
 	}
 
-	std::vector<std::vector<float>> allMagnitudes(totalFrames);
-	std::vector<std::vector<float>> allRawPhases(totalFrames);
-	std::vector<std::vector<float>> allFrequencies(totalFrames);
+	std::vector<std::vector<std::vector<float>>> allChannelsMagnitudes(numChannels);
+	std::vector<std::vector<std::vector<float>>> allChannelsRawPhases(numChannels);
+	std::vector<std::vector<std::vector<float>>> allChannelsFrequencies(numChannels);
+
+	for (uint32_t ch = 0; ch < numChannels; ++ch) {
+		allChannelsMagnitudes[ch].resize(totalFrames);
+		allChannelsRawPhases[ch].resize(totalFrames);
+		allChannelsFrequencies[ch].resize(totalFrames);
+	}
 
 	if (onProgress) {
 		onProgress(0.0f);
 	}
 
-	for (size_t frame = 0; frame < totalFrames; ++frame) {
-		std::vector<RGBAColour> column(binCount);
-		for (size_t bin = 0; bin < binCount; ++bin) {
-			column[bin] = image.at(frame, bin);
-		}
+	const size_t numThreads = std::min(std::thread::hardware_concurrency(), static_cast<unsigned>(8));
+	const size_t framesPerThread = (totalFrames + numThreads - 1) / numThreads;
+	std::vector<std::thread> pixelThreads;
+	std::atomic<size_t> framesProcessed{0};
 
-		std::vector<float> magnitudesFrame, rawPhasesFrame, frequenciesFrame;
-		decodeTimeFrame(column, sampleRate, magnitudesFrame, rawPhasesFrame, frequenciesFrame);
+	for (size_t t = 0; t < numThreads; ++t) {
+		pixelThreads.emplace_back([&, t]() {
+			const size_t frameStart = t * framesPerThread;
+			const size_t frameEnd = std::min(frameStart + framesPerThread, totalFrames);
 
-		allMagnitudes[frame] = magnitudesFrame;
-		allRawPhases[frame] = rawPhasesFrame;
-		allFrequencies[frame] = frequenciesFrame;
+			for (size_t frame = frameStart; frame < frameEnd; ++frame) {
+				for (uint32_t ch = 0; ch < numChannels; ++ch) {
+					const size_t yOffset = ch * binCount;
+					std::vector<RGBAColour> column(binCount);
+					for (size_t bin = 0; bin < binCount; ++bin) {
+						column[bin] = image.at(frame, yOffset + bin);
+					}
 
-		if (onProgress && (frame % 100 == 0)) {
-			onProgress(0.5f * static_cast<float>(frame) / static_cast<float>(totalFrames));
+					std::vector<float> magnitudesFrame, rawPhasesFrame, frequenciesFrame;
+					decodeTimeFrame(column, sampleRate, magnitudesFrame, rawPhasesFrame, frequenciesFrame);
+
+					allChannelsMagnitudes[ch][frame] = std::move(magnitudesFrame);
+					allChannelsRawPhases[ch][frame] = std::move(rawPhasesFrame);
+					allChannelsFrequencies[ch][frame] = std::move(frequenciesFrame);
+				}
+
+				const size_t completed = framesProcessed.fetch_add(1, std::memory_order_relaxed) + 1;
+				if (onProgress && (completed % 100 == 0)) {
+					onProgress(0.15f * static_cast<float>(completed) / static_cast<float>(totalFrames));
+				}
+			}
+		});
+	}
+
+	for (auto& thread : pixelThreads) {
+		thread.join();
+	}
+
+	std::vector<std::vector<float>> allChannelsSpectralFlux(numChannels);
+	for (uint32_t ch = 0; ch < numChannels; ++ch) {
+		const auto& channelMagnitudes = allChannelsMagnitudes[ch];
+		allChannelsSpectralFlux[ch].resize(totalFrames, 0.0f);
+		for (size_t frame = 1; frame < totalFrames; ++frame) {
+			allChannelsSpectralFlux[ch][frame] = PhaseReconstruction::computeSpectralFlux(
+				channelMagnitudes[frame], channelMagnitudes[frame - 1]);
 		}
 	}
 
-	std::vector<float> spectralFluxes(totalFrames, 0.0f);
-	for (size_t frame = 1; frame < totalFrames; ++frame) {
-		spectralFluxes[frame] = PhaseReconstruction::computeSpectralFlux(allMagnitudes[frame], allMagnitudes[frame - 1]);
-	}
+	constexpr size_t TRANSIENT_WINDOW_RADIUS = 50;
 
-	float fluxMean = 0.0f;
-	float fluxStdDev = 0.0f;
-	if (totalFrames > 1) {
-		for (const float flux : spectralFluxes) {
-			fluxMean += flux;
-		}
-		fluxMean /= static_cast<float>(totalFrames);
-
-		for (const float flux : spectralFluxes) {
-			const float diff = flux - fluxMean;
-			fluxStdDev += diff * diff;
-		}
-		fluxStdDev = std::sqrt(fluxStdDev / static_cast<float>(totalFrames));
-	}
-
-	const float transientThreshold = fluxMean + 1.5f * fluxStdDev;
 	const size_t callbackStride = std::max<size_t>(1, totalFrames / 200);
 	const float freqResolution = fftSize > 0 ? sampleRate / static_cast<float>(fftSize) : 0.0f;
-
-	std::vector<float> prevDecodedPhase(binCount, 0.0f);
-	std::vector<float> prevOutputPhase(binCount, 0.0f);
-	std::vector<bool> phaseInitialised(binCount, false);
-	std::vector<int> silenceFrames(binCount, 0);
-
 	constexpr size_t TRANSITION_RADIUS = 3;
 
-	for (size_t frame = 0; frame < totalFrames; ++frame) {
-		const bool isTransient = spectralFluxes[frame] > transientThreshold;
+	constexpr float ADAPTIVE_DAMPING_FACTOR = 0.95f;
+	constexpr float DISCONTINUITY_THRESHOLD = std::numbers::pi_v<float> / 2.0f;
 
-		std::vector<float>& magnitudesFrame = allMagnitudes[frame];
-		std::vector<float>& rawPhasesFrame = allRawPhases[frame];
-		std::vector<float>& frequenciesFrame = allFrequencies[frame];
-		std::vector<float> adjustedPhases(binCount, 0.0f);
+	std::vector<std::vector<std::vector<float>>> allChannelsReconstructedPhases(numChannels);
+	std::vector<std::thread> channelThreads;
+	std::atomic<uint32_t> channelsCompleted{0};
 
-		const std::vector<bool> damagedMask = PhaseReconstruction::detectDamagedBins(allMagnitudes, frame);
-		const std::vector<float> damageWeights = PhaseReconstruction::computeDamageBlend(damagedMask, TRANSITION_RADIUS);
-		const bool hasDamagedBins = std::any_of(damagedMask.begin(), damagedMask.end(),
-			[](bool value) { return value; });
-		const bool hasBlendRegions = std::any_of(damageWeights.begin(), damageWeights.end(),
-			[](float weight) { return weight > 0.0f; });
+	auto processChannel = [&](uint32_t ch) {
+		allChannelsReconstructedPhases[ch].resize(totalFrames);
 
-		std::vector<float> reconstructedPhases(binCount, 0.0f);
-		if (hasBlendRegions) {
-			PhaseReconstruction::reconstructPhasePGHI(allMagnitudes, allFrequencies, frame, reconstructedPhases, sampleRate, hopSize, &prevOutputPhase);
-			PhaseReconstruction::alignReconstructedPhase(reconstructedPhases, prevOutputPhase, frequenciesFrame, damageWeights, sampleRate, hopSize);
+		const auto& channelMagnitudes = allChannelsMagnitudes[ch];
+		const auto& channelRawPhases = allChannelsRawPhases[ch];
+		const auto& channelFrequencies = allChannelsFrequencies[ch];
+		const auto& channelSpectralFlux = allChannelsSpectralFlux[ch];
 
-			const auto peaks = PhaseReconstruction::findSpectralPeaks(magnitudesFrame, MIN_BIN_INTENSITY * 5.0f);
-			PhaseReconstruction::applyPhaseLocking(reconstructedPhases, magnitudesFrame, peaks, damageWeights);
-			PhaseReconstruction::smoothPhase(reconstructedPhases, magnitudesFrame, 3);
-		}
+		std::vector<float> prevDecodedPhase(binCount, 0.0f);
+		std::vector<float> prevOutputPhase(binCount, 0.0f);
+		std::vector<bool> phaseInitialised(binCount, false);
+		std::vector<int> silenceFrames(binCount, 0);
 
-		for (size_t bin = 0; bin < binCount; ++bin) {
-			const float magnitude = magnitudesFrame[bin];
-			const float decodedPhase = PhaseReconstruction::wrapToPi(rawPhasesFrame[bin]);
-			const float frequency = frequenciesFrame[bin] > 0.0f
-				? frequenciesFrame[bin]
-				: freqResolution * static_cast<float>(bin);
+		for (size_t frame = 0; frame < totalFrames; ++frame) {
+			const size_t windowStart = frame >= TRANSIENT_WINDOW_RADIUS ? frame - TRANSIENT_WINDOW_RADIUS : 0;
+			const size_t windowEnd = std::min(frame + TRANSIENT_WINDOW_RADIUS + 1, totalFrames);
 
-			const float expectedAdvance = (sampleRate > EPSILON && hopSize > 0)
-				? TWO_PI * frequency * static_cast<float>(hopSize) / sampleRate
-				: 0.0f;
+			float localMean = 0.0f;
+			size_t windowSize = 0;
+			for (size_t i = windowStart; i < windowEnd; ++i) {
+				localMean += channelSpectralFlux[i];
+				++windowSize;
+			}
+			if (windowSize > 0) {
+				localMean /= static_cast<float>(windowSize);
+			}
 
-			const bool binActive = magnitude > MIN_BIN_INTENSITY;
-			silenceFrames[bin] = binActive ? 0 : std::min(silenceFrames[bin] + 1, 64);
+			float localStdDev = 0.0f;
+			for (size_t i = windowStart; i < windowEnd; ++i) {
+				const float diff = channelSpectralFlux[i] - localMean;
+				localStdDev += diff * diff;
+			}
+			if (windowSize > 0) {
+				localStdDev = std::sqrt(localStdDev / static_cast<float>(windowSize));
+			}
 
-			float vocoderPhase = prevOutputPhase[bin];
+			const float localTransientThreshold = localMean + 1.5f * localStdDev;
+			const bool isTransient = channelSpectralFlux[frame] > localTransientThreshold;
 
-			if (!phaseInitialised[bin]) {
-				if (binActive) {
-					vocoderPhase = decodedPhase;
-					phaseInitialised[bin] = true;
+			const std::vector<float>& magnitudesFrame = channelMagnitudes[frame];
+			const std::vector<float>& rawPhasesFrame = channelRawPhases[frame];
+			const std::vector<float>& frequenciesFrame = channelFrequencies[frame];
+			std::vector<float> adjustedPhases(binCount, 0.0f);
+
+			const std::vector<bool> damagedMask = PhaseReconstruction::detectDamagedBins(channelMagnitudes, frame);
+			const std::vector<float> damageWeights = PhaseReconstruction::computeDamageBlend(damagedMask, TRANSITION_RADIUS);
+			const bool hasDamagedBins = std::any_of(damagedMask.begin(), damagedMask.end(),
+				[](bool value) { return value; });
+			const bool hasBlendRegions = std::any_of(damageWeights.begin(), damageWeights.end(),
+				[](float weight) { return weight > 0.0f; });
+
+			std::vector<float> reconstructedPhases(binCount, 0.0f);
+			if (hasBlendRegions) {
+				PhaseReconstruction::reconstructPhasePGHI(channelMagnitudes, channelFrequencies, frame, reconstructedPhases, sampleRate, hopSize, &prevOutputPhase);
+				PhaseReconstruction::alignReconstructedPhase(reconstructedPhases, prevOutputPhase, frequenciesFrame, damageWeights, sampleRate, hopSize);
+
+				const auto peaks = PhaseReconstruction::findSpectralPeaks(magnitudesFrame, MIN_BIN_INTENSITY * 5.0f);
+				PhaseReconstruction::applyPhaseLocking(reconstructedPhases, magnitudesFrame, peaks, damageWeights);
+				PhaseReconstruction::smoothPhase(reconstructedPhases, magnitudesFrame, 3);
+			}
+
+			for (size_t bin = 0; bin < binCount; ++bin) {
+				const float magnitude = magnitudesFrame[bin];
+				const float decodedPhase = PhaseReconstruction::wrapToPi(rawPhasesFrame[bin]);
+				const float frequency = frequenciesFrame[bin] > 0.0f
+					? frequenciesFrame[bin]
+					: freqResolution * static_cast<float>(bin);
+
+				const float expectedAdvance = (sampleRate > EPSILON && hopSize > 0)
+					? TWO_PI * frequency * static_cast<float>(hopSize) / sampleRate
+					: 0.0f;
+
+				const bool binActive = magnitude > MIN_BIN_INTENSITY;
+				silenceFrames[bin] = binActive ? 0 : std::min(silenceFrames[bin] + 1, 64);
+
+				float vocoderPhase = prevOutputPhase[bin];
+
+				if (!phaseInitialised[bin]) {
+					if (binActive) {
+						vocoderPhase = decodedPhase;
+						phaseInitialised[bin] = true;
+					} else {
+						vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
+					}
+				} else if (binActive) {
+					if (isTransient) {
+						vocoderPhase = decodedPhase;
+					} else {
+						const float phaseDeviation = std::abs(PhaseReconstruction::wrapToPi(
+							decodedPhase - prevDecodedPhase[bin] - expectedAdvance));
+
+						if (phaseDeviation > DISCONTINUITY_THRESHOLD) {
+							vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
+						} else {
+							const float phaseError = PhaseReconstruction::wrapToPi(
+								decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
+							const float correctedAdvance = expectedAdvance + phaseError;
+
+							const float dampedPrevPhase = ADAPTIVE_DAMPING_FACTOR * prevOutputPhase[bin] +
+								(1.0f - ADAPTIVE_DAMPING_FACTOR) * decodedPhase;
+							vocoderPhase = PhaseReconstruction::wrapToPi(dampedPrevPhase + correctedAdvance);
+						}
+					}
 				} else {
 					vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
 				}
-			} else if (binActive) {
-				if (isTransient) {
-					vocoderPhase = decodedPhase;
-				} else {
-					const float phaseError = PhaseReconstruction::wrapToPi(decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
-					const float correctedAdvance = expectedAdvance + phaseError;
-					vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + correctedAdvance);
+
+				const float weight = hasBlendRegions ? std::clamp(damageWeights[bin], 0.0f, 1.0f) : 0.0f;
+				float finalPhase = vocoderPhase;
+
+				if (hasDamagedBins && weight > 0.0f) {
+					const float reconPhase = reconstructedPhases[bin];
+					const float phaseOffset = PhaseReconstruction::wrapToPi(reconPhase - vocoderPhase);
+					const float blendedPhase = PhaseReconstruction::wrapToPi(vocoderPhase + weight * phaseOffset);
+					const float smoothing = 0.4f + 0.6f * weight;
+					const float delta = PhaseReconstruction::wrapToPi(blendedPhase - prevOutputPhase[bin]);
+					finalPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + smoothing * delta);
 				}
-			} else {
-				vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
+
+				adjustedPhases[bin] = finalPhase;
+
+				if (binActive) {
+					prevDecodedPhase[bin] = decodedPhase;
+				}
+
+				prevOutputPhase[bin] = finalPhase;
 			}
 
-			const float weight = hasBlendRegions ? std::clamp(damageWeights[bin], 0.0f, 1.0f) : 0.0f;
-			float finalPhase = vocoderPhase;
-
-			if (hasDamagedBins && weight > 0.0f) {
-				const float reconPhase = reconstructedPhases[bin];
-				const float phaseOffset = PhaseReconstruction::wrapToPi(reconPhase - vocoderPhase);
-				const float blendedPhase = PhaseReconstruction::wrapToPi(vocoderPhase + weight * phaseOffset);
-				const float smoothing = 0.4f + 0.6f * weight;
-				const float delta = PhaseReconstruction::wrapToPi(blendedPhase - prevOutputPhase[bin]);
-				finalPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + smoothing * delta);
-			}
-
-			adjustedPhases[bin] = finalPhase;
-
-			if (binActive) {
-				prevDecodedPhase[bin] = decodedPhase;
-			}
-
-			prevOutputPhase[bin] = finalPhase;
+			allChannelsReconstructedPhases[ch][frame] = std::move(adjustedPhases);
 		}
 
+		channelsCompleted.fetch_add(1, std::memory_order_relaxed);
+		if (onProgress) {
+			const float channelProgress = 0.15f + 0.7f * (static_cast<float>(channelsCompleted.load(std::memory_order_relaxed)) / static_cast<float>(numChannels));
+			onProgress(channelProgress);
+		}
+	};
+
+	if (numChannels > 1) {
+		channelThreads.reserve(numChannels);
+		for (uint32_t ch = 0; ch < numChannels; ++ch) {
+			channelThreads.emplace_back(processChannel, ch);
+		}
+		for (auto& thread : channelThreads) {
+			thread.join();
+		}
+	} else {
+		processChannel(0);
+	}
+
+	for (size_t frame = 0; frame < totalFrames; ++frame) {
 		AudioColourSample sample;
-		sample.magnitudes = magnitudesFrame;
-		sample.phases = adjustedPhases;
+		sample.magnitudes.resize(numChannels);
+		sample.phases.resize(numChannels);
+		sample.channels = numChannels;
+
+		for (uint32_t ch = 0; ch < numChannels; ++ch) {
+			sample.magnitudes[ch] = allChannelsMagnitudes[ch][frame];
+			sample.phases[ch] = allChannelsReconstructedPhases[ch][frame];
+		}
+
 		sample.sampleRate = sampleRate;
 		sample.timestamp = (sampleRate > EPSILON && hopSize > 0)
 			? static_cast<double>(frame * static_cast<size_t>(hopSize)) /
@@ -358,10 +492,6 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 			: 0.0;
 
 		samples[frame] = sample;
-
-		if (onProgress) {
-			onProgress(0.5f + 0.5f * static_cast<float>(frame + 1) / static_cast<float>(totalFrames));
-		}
 
 		if (onFrameDecoded && ((frame + 1) % callbackStride == 0 || frame + 1 == totalFrames)) {
 			onFrameDecoded(samples, frame + 1);

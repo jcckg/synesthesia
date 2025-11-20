@@ -175,32 +175,13 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 
 	try {
 		const auto* inBuffer = static_cast<const float*>(input);
-		// Pre-allocate to maximum expected buffer size to avoid allocation in audio thread
 		constexpr size_t MAX_BUFFER_SIZE = 4096;
 		thread_local std::vector<float> processedBuffer(MAX_BUFFER_SIZE);
 		if (frameCount > MAX_BUFFER_SIZE) {
-			// If we somehow get a larger buffer, resize once (shouldn't happen in practice)
 			processedBuffer.resize(frameCount);
 		}
 
-		int activeChannel = audio->activeChannel.load();
-		const int channelCount = audio->channelCount;
-
-		if (activeChannel >= channelCount) {
-			activeChannel = 0;
-		}
-
-		for (unsigned long i = 0; i < frameCount; ++i) {
-			const auto activeChannelIndex = static_cast<size_t>(activeChannel);
-			const float sample = inBuffer[i * static_cast<unsigned long>(channelCount) + activeChannelIndex];
-
-			float filtered = audio->dcFilter.process(sample, activeChannelIndex);
-			filtered = audio->noiseGate.process(filtered);
-
-			processedBuffer[i] = filtered;
-		}
-
-		audio->processor.queueAudioData(processedBuffer.data(), frameCount, audio->sampleRate);
+		audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount), audio->sampleRate, static_cast<size_t>(audio->channelCount));
 	}
 	catch (...) {
 		return paContinue;

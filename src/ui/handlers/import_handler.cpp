@@ -53,7 +53,6 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 				std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
 				success = !recorderState.importedSamples.empty();
 				errorMessage = recorderState.importErrorMessage;
-				hasReconstructedAudio = !recorderState.reconstructedAudio.empty();
 
 				if (success) {
 					recorderState.samples = std::move(recorderState.importedSamples);
@@ -62,6 +61,9 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 					recorderState.isPlaybackInitialised = false;
 					recorderState.sampleColourCache.clear();
 					recorderState.colourCacheDirty = true;
+
+					// Check if NEW import has reconstructed audio (WAV/FLAC/etc do, TIFF doesn't)
+					hasReconstructedAudio = !recorderState.reconstructedAudio.empty();
 
 					if (recorderState.audioOutput) {
 						recorderState.audioOutput->stop();
@@ -101,8 +103,9 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 				}
 
 				const int deviceIndex = recorderState.outputDeviceIndex;
-				recorderState.audioOutput->initOutputStream(recorderState.metadata.sampleRate, deviceIndex);
-				recorderState.audioOutput->setAudioData(recorderState.reconstructedAudio);
+				const int channelCount = recorderState.metadata.channels > 0 ? static_cast<int>(recorderState.metadata.channels) : 1;
+				recorderState.audioOutput->initOutputStream(recorderState.metadata.sampleRate, channelCount, deviceIndex);
+				recorderState.audioOutput->setAudioData(recorderState.reconstructedAudio, static_cast<size_t>(channelCount));
 				recorderState.isPlaybackInitialised = true;
 
 				recorderState.statusMessage.clear();

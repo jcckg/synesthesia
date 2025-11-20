@@ -1,6 +1,7 @@
 #include "resyne/encoding/audio/wav_encoder.h"
 #include <kiss_fftr.h>
 #include <fstream>
+#include <iostream>
 #include <algorithm>
 #include <cstring>
 #include <cmath>
@@ -82,66 +83,91 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	EncodingResult result;
 	result.success = false;
 	result.sampleRate = sampleRate;
-	result.numChannels = 1;
+	result.numChannels = 0;
 
 	if (samples.empty()) {
 		result.errorMessage = "No spectral samples provided";
 		return result;
 	}
 
-	std::vector<std::vector<float>> timeFrames;
-	timeFrames.reserve(samples.size());
+	size_t numChannels = samples[0].magnitudes.size();
 
-	for (const auto& sample : samples) {
-		std::vector<float> timeFrame = inverseFFT(sample.magnitudes, sample.phases, fftSize);
+	if (numChannels == 0) {
+		result.errorMessage = "Sample has 0 channels";
+		return result;
+	}
+	result.numChannels = numChannels;
 
-		// Energy compensation for FFT scaling convention
-		// Parseval's theorem for real DFT: Σ x[n]² = (1/N) [|X[0]|² + 2Σ|X[k]|² + |X[N/2]|²]
-		// However, our forward FFT applies 2.0/N scaling to regular bins and 1.0/N to DC/Nyquist
-		// The compensation below accounts for this custom scaling to maintain signal energy
-		float timeEnergy = 0.0f;
-		for (float value : timeFrame) {
-			timeEnergy += value * value;
-		}
+	std::vector<std::vector<float>> channelAudio(numChannels);
 
-		if (!sample.magnitudes.empty() && fftSize > 0 && timeEnergy > std::numeric_limits<float>::epsilon()) {
-			const size_t binCount = sample.magnitudes.size();
-			float edgeEnergy = sample.magnitudes[0] * sample.magnitudes[0];
-			if (binCount > 1) {
-				edgeEnergy += sample.magnitudes[binCount - 1] * sample.magnitudes[binCount - 1];
+	for (size_t ch = 0; ch < numChannels; ++ch) {
+		std::vector<std::vector<float>> timeFrames;
+		timeFrames.reserve(samples.size());
+
+		for (const auto& sample : samples) {
+			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
+				timeFrames.push_back(std::vector<float>(static_cast<size_t>(fftSize), 0.0f));
+				continue;
 			}
 
-			float interiorSum = 0.0f;
-			for (size_t bin = 1; bin + 1 < binCount; ++bin) {
-				const float magnitude = sample.magnitudes[bin];
-				interiorSum += magnitude * magnitude;
+			const auto& mags = sample.magnitudes[ch];
+			const auto& phs = sample.phases[ch];
+
+			std::vector<float> timeFrame = inverseFFT(mags, phs, fftSize);
+
+			float timeEnergy = 0.0f;
+			for (float value : timeFrame) {
+				timeEnergy += value * value;
 			}
 
-			// Empirical energy formula compensating for forward FFT 2.0/N scaling
-			const float spectralEnergy = static_cast<float>(fftSize) * (edgeEnergy + 0.5f * interiorSum);
-			if (spectralEnergy > std::numeric_limits<float>::epsilon()) {
-				const float gain = std::sqrt(spectralEnergy / timeEnergy);
-				const float clampedGain = std::clamp(gain, 0.1f, 10.0f);
+			if (!mags.empty() && fftSize > 0 && timeEnergy > std::numeric_limits<float>::epsilon()) {
+				const size_t binCount = mags.size();
+				float edgeEnergy = mags[0] * mags[0];
+				if (binCount > 1) {
+					edgeEnergy += mags[binCount - 1] * mags[binCount - 1];
+				}
 
-				if (std::isfinite(clampedGain) && std::abs(clampedGain - 1.0f) > 1e-4f) {
-					for (float& value : timeFrame) {
-						value *= clampedGain;
+				float interiorSum = 0.0f;
+				for (size_t bin = 1; bin + 1 < binCount; ++bin) {
+					const float magnitude = mags[bin];
+					interiorSum += magnitude * magnitude;
+				}
+
+				const float spectralEnergy = static_cast<float>(fftSize) * (edgeEnergy + 0.5f * interiorSum);
+				if (spectralEnergy > std::numeric_limits<float>::epsilon()) {
+					const float gain = std::sqrt(spectralEnergy / timeEnergy);
+					const float clampedGain = std::clamp(gain, 0.1f, 10.0f);
+
+					if (std::isfinite(clampedGain) && std::abs(clampedGain - 1.0f) > 1e-4f) {
+						for (float& value : timeFrame) {
+							value *= clampedGain;
+						}
 					}
 				}
 			}
+
+			timeFrames.push_back(std::move(timeFrame));
 		}
 
-		timeFrames.push_back(std::move(timeFrame));
+		channelAudio[ch] = overlapAdd(timeFrames, hopSize);
+		applyLimiter(channelAudio[ch]);
 	}
 
-	std::vector<float> reconstructed = overlapAdd(timeFrames, hopSize);
+	if (numChannels == 1) {
+		result.audioSamples = std::move(channelAudio[0]);
+	} else {
+		size_t numSamplesPerChannel = channelAudio[0].size();
+		for (size_t ch = 1; ch < numChannels; ++ch) {
+			numSamplesPerChannel = std::min(numSamplesPerChannel, channelAudio[ch].size());
+		}
 
-	// Preserve all samples including the first frame
-	// Previously skipped first hopSize samples to avoid windowing artifacts,
-	// but this created audible dead space at the beginning of playback
-	applyLimiter(reconstructed);
-
-	result.audioSamples = std::move(reconstructed);
+		result.audioSamples.resize(numSamplesPerChannel * numChannels);
+		for (size_t i = 0; i < numSamplesPerChannel; ++i) {
+			for (size_t ch = 0; ch < numChannels; ++ch) {
+				result.audioSamples[i * numChannels + ch] = channelAudio[ch][i];
+			}
+		}
+	}
 
 	result.success = true;
 
@@ -158,12 +184,6 @@ std::vector<float> WAVEncoder::inverseFFT(
 
 	const size_t dataSize = std::min(magnitudes.size(), phases.size());
 
-	// Reconstruct complex FFT bins from magnitude and phase
-	// Forward FFT scaling: regular bins by 2.0/N, DC and Nyquist by 1.0/N (see fft_processor.cpp)
-	// KissFFT inverse multiplies by N:
-	//   - Regular bins: (2.0/N) * N = 2.0× windowed signal
-	//   - DC/Nyquist:   (1.0/N) * N = 1.0× windowed signal
-	// Scale DC/Nyquist by 2× to match regular bins for consistent amplitude
 	for (size_t i = 0; i < numBins && i < dataSize; ++i) {
 		float magnitude = magnitudes[i];
 		float phase = phases[i];
@@ -172,7 +192,6 @@ std::vector<float> WAVEncoder::inverseFFT(
 		fftBins[i].i = magnitude * std::sin(phase);
 	}
 
-	// Compensate for 0.5× extra scaling on DC and Nyquist from forward FFT
 	if (!fftBins.empty()) {
 		fftBins[0].r *= 2.0f;
 		fftBins[0].i *= 2.0f;
@@ -208,8 +227,6 @@ std::vector<float> WAVEncoder::overlapAdd(
 		return {};
 	}
 
-	// Hann window for WOLA (Weighted Overlap-Add) synthesis
-	// With 50% overlap (hop = frameSize/2), Hann² windows satisfy COLA property
 	std::vector<float> hannWindow(frameSize, 1.0f);
 	if (frameSize > 1) {
 		const float denom = static_cast<float>(frameSize - 1);
@@ -231,7 +248,6 @@ std::vector<float> WAVEncoder::overlapAdd(
 			const float windowed = frame[j] * hannWindow[j];
 			const size_t index = writePos + j;
 			output[index] += windowed;
-			// WOLA normalisation: divide by sum of squared windows for perfect reconstruction
 			normalisation[index] += hannWindow[j] * hannWindow[j];
 		}
 	}

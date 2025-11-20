@@ -28,8 +28,8 @@ public:
 	bool resumeStream();
 	bool isStreamActive() const;
 	AudioProcessor::SpectralData getSpectralData() const;
-	FFTProcessor& getFFTProcessor() { return processor.getFFTProcessor(); }
-	const FFTProcessor& getFFTProcessor() const { return processor.getFFTProcessor(); }
+	FFTProcessor& getFFTProcessor(size_t channel = 0) { return processor.getFFTProcessor(channel); }
+	const FFTProcessor& getFFTProcessor(size_t channel = 0) const { return processor.getFFTProcessor(channel); }
 	AudioProcessor& getAudioProcessor() { return processor; }
 	const AudioProcessor& getAudioProcessor() const { return processor; }
 

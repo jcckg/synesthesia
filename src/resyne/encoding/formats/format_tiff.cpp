@@ -255,7 +255,35 @@ bool loadFromTIFF(const std::string& filepath,
 	}
 
 	float detectedSampleRate = ColourNativeCodec::detectSampleRate(colourImage);
-	const size_t binCount = std::min(colourImage.height, ColourNativeCodec::MAX_BIN_COUNT);
+
+	const std::vector<size_t> commonBinCounts = {257, 513, 1025, 2049, 4097, 8193};
+
+	size_t binCount = 0;
+	uint32_t inferredChannels = 1;
+
+	for (size_t candidateBinCount : commonBinCounts) {
+		if (candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
+			continue;
+		}
+		if (candidateBinCount > colourImage.height) {
+			continue;
+		}
+
+		if (colourImage.height % candidateBinCount == 0) {
+			const uint32_t candidateChannels = static_cast<uint32_t>(colourImage.height / candidateBinCount);
+			if (candidateChannels >= 1 && candidateChannels <= 8) {
+				binCount = candidateBinCount;
+				inferredChannels = candidateChannels;
+				break;
+			}
+		}
+	}
+
+	if (binCount == 0) {
+		binCount = std::min(colourImage.height, ColourNativeCodec::MAX_BIN_COUNT);
+		inferredChannels = 1;
+	}
+
 	const int fftSize = binCount > 1 ? static_cast<int>((binCount - 1) * 2) : 2;
 	int hopSize = std::max(1, fftSize / 2);
 
@@ -264,6 +292,7 @@ bool loadFromTIFF(const std::string& filepath,
 	colourImage.metadata.hopSize = hopSize;
 	colourImage.metadata.numFrames = colourImage.width;
 	colourImage.metadata.numBins = binCount;
+	colourImage.metadata.channels = inferredChannels;
 	colourImage.metadata.windowType = "hann";
 	colourImage.metadata.version = "3.0.0";
 
@@ -300,6 +329,7 @@ bool loadFromTIFF(const std::string& filepath,
 	metadata.windowType = "hann";
 	metadata.numFrames = samples.size();
 	metadata.numBins = binCount;
+	metadata.channels = inferredChannels;
 	metadata.version = "3.0.0";
 
 	if (progress) {

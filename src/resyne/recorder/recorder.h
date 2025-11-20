@@ -17,6 +17,7 @@
 
 class FFTProcessor;
 class AudioInput;
+class AudioProcessor;
 
 namespace ReSyne {
 
@@ -118,7 +119,7 @@ struct RecorderState {
 class Recorder {
 public:
     static void updateFromFFTProcessor(RecorderState& state,
-                                       FFTProcessor& fftProcessor,
+                                       AudioProcessor& audioProcessor,
                                        float r,
                                        float g,
                                        float b);

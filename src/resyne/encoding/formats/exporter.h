@@ -7,12 +7,13 @@
 #include <limits>
 
 struct AudioColourSample {
-	std::vector<float> magnitudes;
-	std::vector<float> phases;
+	std::vector<std::vector<float>> magnitudes;
+	std::vector<std::vector<float>> phases;
 	double timestamp;
 	float sampleRate;
 	float loudnessLUFS = std::numeric_limits<float>::quiet_NaN();
 	float splDb = std::numeric_limits<float>::quiet_NaN();
+	std::uint32_t channels = 1;
 };
 
 struct AudioMetadata {
@@ -22,6 +23,7 @@ struct AudioMetadata {
     std::string windowType = "hann";
     size_t numFrames = 0;
     size_t numBins = 0;
+    std::uint32_t channels = 1;
     std::string version = "3.0.0";
 };
 

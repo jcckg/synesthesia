@@ -2,6 +2,7 @@
 #include "resyne/encoding/audio/wav_encoder.h"
 
 #include <algorithm>
+#include <iostream>
 
 namespace SequenceExporterInternal {
 

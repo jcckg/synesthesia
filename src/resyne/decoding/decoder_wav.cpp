@@ -8,10 +8,10 @@ bool decodeWav(const std::string& filepath, DecodedAudio& out, std::string& erro
     if (!WAVDecoder::decodeFile(filepath, wav, error)) {
         return false;
     }
-    out.samples = std::move(wav.samples);
+    out.channelSamples = std::move(wav.channelSamples);
     out.sampleRate = wav.sampleRate;
     out.channels = wav.channels;
-    if (out.samples.empty()) {
+    if (out.channelSamples.empty()) {
         error = "empty wav";
         return false;
     }

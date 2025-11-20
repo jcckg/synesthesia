@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 
 namespace WAVDecoder {
 
@@ -174,12 +175,14 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
     }
 
     const size_t frameCount = totalSamples / channels;
-    out.samples.clear();
-    out.samples.reserve(frameCount);
+    out.channelSamples.clear();
+    out.channelSamples.resize(channels);
+    for (uint16_t channel = 0; channel < channels; ++channel) {
+        out.channelSamples[channel].reserve(frameCount);
+    }
 
     const uint8_t* raw = dataChunk.data();
     for (size_t frame = 0; frame < frameCount; ++frame) {
-        double accum = 0.0;
         for (uint16_t channel = 0; channel < channels; ++channel) {
             const uint8_t* samplePtr = raw + (frame * channels + channel) * bytesPerSample;
             float value = 0.0f;
@@ -188,9 +191,8 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
             } else {
                 value = readPCMValue(samplePtr, bitsPerSample);
             }
-            accum += static_cast<double>(value);
+            out.channelSamples[channel].push_back(value);
         }
-        out.samples.push_back(static_cast<float>(accum / static_cast<double>(channels)));
     }
 
     out.sampleRate = sampleRate;

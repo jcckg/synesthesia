@@ -12,37 +12,69 @@ void Recorder::reconstructAudio(RecorderState& state) {
         return;
     }
 
-    std::vector<SpectralSample> spectralSamples;
-    spectralSamples.reserve(state.samples.size());
-    for (const auto& sample : state.samples) {
-        SpectralSample spectral;
-        spectral.magnitudes = sample.magnitudes;
-        spectral.phases = sample.phases;
-        spectral.timestamp = sample.timestamp;
-        spectral.sampleRate = sample.sampleRate;
-        spectralSamples.push_back(spectral);
+    const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
+
+    std::vector<std::vector<float>> channelAudioData(numChannels);
+    size_t maxLength = 0;
+
+    for (uint32_t ch = 0; ch < numChannels; ++ch) {
+        std::vector<SpectralSample> spectralSamples;
+        spectralSamples.reserve(state.samples.size());
+
+        for (const auto& sample : state.samples) {
+            SpectralSample spectral;
+            spectral.magnitudes.clear();
+            spectral.phases.clear();
+            if (ch < sample.magnitudes.size()) {
+                spectral.magnitudes.push_back(sample.magnitudes[ch]);
+            } else {
+                spectral.magnitudes.push_back(std::vector<float>());
+            }
+            if (ch < sample.phases.size()) {
+                spectral.phases.push_back(sample.phases[ch]);
+            } else {
+                spectral.phases.push_back(std::vector<float>());
+            }
+            spectral.timestamp = sample.timestamp;
+            spectral.sampleRate = sample.sampleRate;
+            spectralSamples.push_back(spectral);
+        }
+
+        auto result = WAVEncoder::reconstructFromSpectralData(
+            spectralSamples,
+            state.metadata.sampleRate,
+            state.metadata.fftSize,
+            state.metadata.hopSize
+        );
+
+        if (!result.success || result.audioSamples.empty()) {
+            return;
+        }
+
+        channelAudioData[ch] = std::move(result.audioSamples);
+        maxLength = std::max(maxLength, channelAudioData[ch].size());
     }
 
-    auto result = WAVEncoder::reconstructFromSpectralData(
-        spectralSamples,
-        state.metadata.sampleRate,
-        state.metadata.fftSize,
-        state.metadata.hopSize
-    );
+    state.reconstructedAudio.clear();
+    state.reconstructedAudio.reserve(maxLength * numChannels);
 
-    if (!result.success || result.audioSamples.empty()) {
-        return;
+    for (size_t i = 0; i < maxLength; ++i) {
+        for (uint32_t ch = 0; ch < numChannels; ++ch) {
+            if (i < channelAudioData[ch].size()) {
+                state.reconstructedAudio.push_back(channelAudioData[ch][i]);
+            } else {
+                state.reconstructedAudio.push_back(0.0f);
+            }
+        }
     }
-
-    state.reconstructedAudio = std::move(result.audioSamples);
 
     if (!state.audioOutput) {
         state.audioOutput = std::make_unique<AudioOutput>();
     }
 
     int deviceIndex = state.outputDeviceIndex;
-    state.audioOutput->initOutputStream(result.sampleRate, deviceIndex);
-    state.audioOutput->setAudioData(state.reconstructedAudio);
+    state.audioOutput->initOutputStream(state.metadata.sampleRate, static_cast<int>(numChannels), deviceIndex);
+    state.audioOutput->setAudioData(state.reconstructedAudio, numChannels);
 
     state.isPlaybackInitialised = true;
 }
@@ -60,23 +92,24 @@ void Recorder::startPlayback(RecorderState& state) {
     }
 
     if (!state.reconstructedAudio.empty()) {
-        size_t totalSamples = state.audioOutput->getTotalSamples();
+        size_t totalFrames = state.audioOutput->getTotalFrames();
         size_t currentPosition = state.audioOutput->getPlaybackPosition();
-        if (totalSamples > 0 && currentPosition >= totalSamples - 1) {
+        if (totalFrames > 0 && currentPosition >= totalFrames - 1) {
             state.audioOutput->seek(0);
             state.timeline.scrubberNormalisedPosition = 0.0f;
         } else {
-            if (totalSamples == 0) {
-                totalSamples = state.reconstructedAudio.size();
+            if (totalFrames == 0) {
+                const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
+                totalFrames = numChannels > 0 ? state.reconstructedAudio.size() / numChannels : state.reconstructedAudio.size();
             }
-            if (totalSamples > 0) {
-                size_t startSample = static_cast<size_t>(
+            if (totalFrames > 0) {
+                size_t startFrame = static_cast<size_t>(
                     std::clamp(state.timeline.scrubberNormalisedPosition, 0.0f, 1.0f) *
-                    static_cast<float>(totalSamples));
-                startSample = std::min(startSample, totalSamples - 1);
+                    static_cast<float>(totalFrames));
+                startFrame = std::min(startFrame, totalFrames - 1);
                 size_t currentPos = state.audioOutput->getPlaybackPosition();
-                if (currentPos != startSample) {
-                    state.audioOutput->seek(startSample);
+                if (currentPos != startFrame) {
+                    state.audioOutput->seek(startFrame);
                 }
             }
         }
@@ -103,14 +136,15 @@ void Recorder::seekPlayback(RecorderState& state, float normalisedPosition) {
     state.timeline.scrubberNormalisedPosition = clamped;
 
     if (state.audioOutput && !state.reconstructedAudio.empty()) {
-        size_t totalSamples = state.audioOutput->getTotalSamples();
-        if (totalSamples == 0) {
-            totalSamples = state.reconstructedAudio.size();
+        size_t totalFrames = state.audioOutput->getTotalFrames();
+        if (totalFrames == 0) {
+            const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
+            totalFrames = numChannels > 0 ? state.reconstructedAudio.size() / numChannels : state.reconstructedAudio.size();
         }
-        if (totalSamples > 0) {
-            size_t samplePosition = static_cast<size_t>(clamped * static_cast<float>(totalSamples));
-            samplePosition = std::min(samplePosition, totalSamples - 1);
-            state.audioOutput->seek(samplePosition);
+        if (totalFrames > 0) {
+            size_t framePosition = static_cast<size_t>(clamped * static_cast<float>(totalFrames));
+            framePosition = std::min(framePosition, totalFrames - 1);
+            state.audioOutput->seek(framePosition);
         }
     }
 }

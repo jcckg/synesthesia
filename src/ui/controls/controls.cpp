@@ -48,8 +48,8 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
             const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
 
             const auto& currentSample = recorderState.samples[clampedIndex];
-            magnitudes = currentSample.magnitudes;
-            phases = currentSample.phases;
+            magnitudes = !currentSample.magnitudes.empty() ? currentSample.magnitudes[0] : std::vector<float>();
+            phases = !currentSample.phases.empty() ? currentSample.phases[0] : std::vector<float>();
             sampleRate = currentSample.sampleRate;
 			if (std::isfinite(currentSample.loudnessLUFS)) {
 				storedLoudness = currentSample.loudnessLUFS;
