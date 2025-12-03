@@ -3,7 +3,6 @@
 #include <atomic>
 #include <chrono>
 #include <mutex>
-#include <deque>
 #include <span>
 #include <vector>
 
@@ -156,8 +155,6 @@ private:
 	float updateLoudnessMetrics();
 	void updateSpectralData(const std::vector<float>& rawMagnitudes, float sampleRate,
 							float frameMaxMagnitude, float frameTotalEnergy, float normalisedLoudness);
-	void handleLoudnessBlocks();
-	void assignBlockLoudness(float blockValue, size_t samplesForBlock);
 
 	void calculateMagnitudes(std::vector<float>& rawMagnitudes, float sampleRate,
 							 float& outMaxMagnitude, float& outTotalEnergy) const;
@@ -165,11 +162,6 @@ private:
 	void processMagnitudes(std::vector<float>& magnitudes, float sampleRate, float referenceMaxMagnitude);
 	void calculateSpectralFluxAndOnset(const std::vector<float>& currentMagnitudes);
 	void pushFrameToBuffer(const std::vector<float>& mags, const std::vector<float>& phases, float sampleRate);
-
-	std::deque<FFTFrame*> pendingLoudnessFrames;
-	uint64_t lastProcessedLoudnessBlock{0};
-	size_t samplesAwaitingLoudnessAssignment{0};
-	bool firstLoudnessBlockHandled{false};
 
 	void initialiseCriticalBands(float sampleRate);
 	void applyCriticalBandSmoothing(std::vector<float>& magnitudes);

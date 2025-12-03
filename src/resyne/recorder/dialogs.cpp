@@ -188,6 +188,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
         } catch (...) {
             success = false;
             errorMessage = "Unknown export error";
+            std::cerr << "[ReSyne] Non-standard exception caught during export" << std::endl;
         }
 
         {

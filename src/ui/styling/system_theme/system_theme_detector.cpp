@@ -16,7 +16,7 @@ SystemTheme SystemThemeDetector::detectSystemTheme() {
         double brightness = (0.299 * background.R + 0.587 * background.G + 0.114 * background.B) / 255.0;
 
         return brightness > 0.5 ? SystemTheme::Light : SystemTheme::Dark;
-    } catch (...) {
+    } catch (const winrt::hresult_error&) {
         HKEY hKey;
         DWORD dwType = REG_DWORD;
         DWORD dwSize = sizeof(DWORD);

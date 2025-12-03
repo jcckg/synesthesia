@@ -113,7 +113,6 @@ elseif(APPLE)
     set_source_files_properties(${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/input/trackpad_gestures_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/updating/update.cpp PROPERTIES COMPILE_FLAGS "-Wno-nan-infinity-disabled")
-    set_source_files_properties(${SRC_DIR}/ui/gradient_recorder/gradient_recorder.cpp PROPERTIES COMPILE_FLAGS "-w")
 
     set_property(SOURCE ${SRC_DIR}/ui/ui.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/ui/controls/controls.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")

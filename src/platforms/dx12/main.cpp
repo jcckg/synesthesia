@@ -39,6 +39,16 @@ static const int APP_NUM_FRAMES_IN_FLIGHT = 2;
 static const int APP_NUM_BACK_BUFFERS = 2;
 static const int APP_SRV_HEAP_SIZE = 64;
 
+static constexpr int DEFAULT_WINDOW_WIDTH = 1480;
+static constexpr int DEFAULT_WINDOW_HEIGHT = 750;
+static constexpr int DEFAULT_WINDOW_X = 100;
+static constexpr int DEFAULT_WINDOW_Y = 100;
+static constexpr int TARGET_FPS = 120;
+static constexpr int TARGET_FRAME_DURATION_MICROSECONDS = 1'000'000 / TARGET_FPS;
+
+static constexpr UINT DRAG_QUERY_FILE_COUNT = 0xFFFFFFFF;
+static constexpr WPARAM WM_SYSCOMMAND_MASK = 0xFFF0;
+
 struct FrameContext
 {
     ID3D12CommandAllocator*     CommandAllocator;
@@ -134,7 +144,7 @@ int app_main(int, char**)
         nullptr
     };
     ::RegisterClassExW(&wc);
-    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Synesthesia", WS_OVERLAPPEDWINDOW, 100, 100, 1480, 750, nullptr, nullptr, wc.hInstance, nullptr);
+    HWND hwnd = ::CreateWindowW(wc.lpszClassName, L"Synesthesia", WS_OVERLAPPEDWINDOW, DEFAULT_WINDOW_X, DEFAULT_WINDOW_Y, DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, nullptr, nullptr, wc.hInstance, nullptr);
     ::DragAcceptFiles(hwnd, TRUE);
 
     SystemTheme theme = SystemThemeDetector::detectSystemTheme();
@@ -296,7 +306,7 @@ int app_main(int, char**)
     ::ShowWindow(hwnd, SW_SHOWDEFAULT);
     ::UpdateWindow(hwnd);
 
-    constexpr auto target_frame_duration = std::chrono::microseconds(8333);
+    constexpr auto target_frame_duration = std::chrono::microseconds(TARGET_FRAME_DURATION_MICROSECONDS);
 
     bool done = false;
     while (!done)
@@ -626,7 +636,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_DROPFILES:
     {
         HDROP drop = reinterpret_cast<HDROP>(wParam);
-        const UINT fileCount = ::DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        const UINT fileCount = ::DragQueryFileW(drop, DRAG_QUERY_FILE_COUNT, nullptr, 0);
         std::vector<std::string> paths;
         paths.reserve(fileCount);
         for (UINT index = 0; index < fileCount; ++index) {
@@ -658,7 +668,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         return 0;
     }
     case WM_SYSCOMMAND:
-        if ((wParam & 0xfff0) == SC_KEYMENU)
+        if ((wParam & WM_SYSCOMMAND_MASK) == SC_KEYMENU)
             return 0;
         break;
     case WM_DESTROY:

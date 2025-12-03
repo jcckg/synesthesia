@@ -46,6 +46,11 @@ std::string resolveResourceFile(const std::vector<std::string>& candidates) {
 
 }
 
+static constexpr int DEFAULT_WINDOW_WIDTH = 1480;
+static constexpr int DEFAULT_WINDOW_HEIGHT = 750;
+static constexpr int TARGET_FPS = 120;
+static constexpr int TARGET_FRAME_DURATION_MICROSECONDS = 1'000'000 / TARGET_FPS;
+
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "Glfw Error %d: %s\n", error, description);
 }
@@ -177,8 +182,8 @@ int app_main(int, char**) {
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
-    
-    GLFWwindow* window = glfwCreateWindow(1480, 750, "Synesthesia", nullptr, nullptr);
+
+    GLFWwindow* window = glfwCreateWindow(DEFAULT_WINDOW_WIDTH, DEFAULT_WINDOW_HEIGHT, "Synesthesia", nullptr, nullptr);
     if (window == nullptr)
         return 1;
 
@@ -242,7 +247,7 @@ int app_main(int, char**) {
     }
 #endif
 
-    constexpr auto target_frame_duration = std::chrono::microseconds(8333);
+    constexpr auto target_frame_duration = std::chrono::microseconds(TARGET_FRAME_DURATION_MICROSECONDS);
 
     while (!glfwWindowShouldClose(window)) {
         auto frame_start = std::chrono::steady_clock::now();

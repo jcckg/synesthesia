@@ -3,6 +3,10 @@
 #include <sstream>
 #include <iomanip>
 
+namespace {
+    constexpr int MIDI_PITCH_BEND_CENTER = 8192;
+}
+
 MIDIAnalyser::MIDIAnalyser() {
 	reset();
 }
@@ -127,7 +131,7 @@ void MIDIAnalyser::logEvent(const MIDIEvent& event) {
 
 		case MIDIEventType::PitchBend:
 			{
-				int bend = currentState.pitchBend - 8192;
+				int bend = currentState.pitchBend - MIDI_PITCH_BEND_CENTER;
 				oss << "Pitch Bend: " << (bend >= 0 ? "+" : "") << bend;
 			}
 			break;

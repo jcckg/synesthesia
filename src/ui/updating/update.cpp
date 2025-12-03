@@ -90,7 +90,9 @@ bool UpdateChecker::isNewerVersion(const std::string& current, const std::string
         while (std::getline(cleanSs, part, '.')) {
             try {
                 parts.push_back(std::stoi(part));
-            } catch (...) {
+            } catch (const std::invalid_argument&) {
+                parts.push_back(0);
+            } catch (const std::out_of_range&) {
                 parts.push_back(0);
             }
         }
@@ -104,8 +106,8 @@ bool UpdateChecker::isNewerVersion(const std::string& current, const std::string
     
     auto currentParts = parseVersion(current);
     auto latestParts = parseVersion(latest);
-    
-    size_t minSize = (currentParts.size() < latestParts.size()) ? currentParts.size() : latestParts.size();
+
+    size_t minSize = std::min(currentParts.size(), latestParts.size());
     for (size_t i = 0; i < minSize; ++i) {
         if (latestParts[i] > currentParts[i]) {
             return true;

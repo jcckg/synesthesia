@@ -1,6 +1,19 @@
 #include "midi_input.h"
 #include <iostream>
 
+namespace {
+    // MIDI protocol constants (status byte upper nibble)
+    constexpr unsigned char MIDI_NOTE_OFF = 0x80;
+    constexpr unsigned char MIDI_NOTE_ON = 0x90;
+    constexpr unsigned char MIDI_AFTERTOUCH = 0xA0;
+    constexpr unsigned char MIDI_CONTROL_CHANGE = 0xB0;
+    constexpr unsigned char MIDI_PROGRAM_CHANGE = 0xC0;
+    constexpr unsigned char MIDI_CHANNEL_PRESSURE = 0xD0;
+    constexpr unsigned char MIDI_PITCH_BEND = 0xE0;
+    constexpr unsigned char MIDI_STATUS_MASK = 0xF0;
+    constexpr unsigned char MIDI_CHANNEL_MASK = 0x0F;
+}
+
 MIDIInput::MIDIInput() : isActive(false) {
 	try {
 		midiIn = std::make_unique<RtMidiIn>();
@@ -110,8 +123,8 @@ MIDIEvent MIDIInput::parseMIDIMessage(const std::vector<unsigned char>& message)
 	}
 
 	unsigned char status = message[0];
-	unsigned char messageType = status & 0xF0;
-	unsigned char channel = status & 0x0F;
+	unsigned char messageType = status & MIDI_STATUS_MASK;
+	unsigned char channel = status & MIDI_CHANNEL_MASK;
 
 	unsigned char data1 = message.size() > 1 ? message[1] : 0;
 	unsigned char data2 = message.size() > 2 ? message[2] : 0;
@@ -119,25 +132,25 @@ MIDIEvent MIDIInput::parseMIDIMessage(const std::vector<unsigned char>& message)
 	MIDIEventType type = MIDIEventType::Unknown;
 
 	switch (messageType) {
-		case 0x80:
+		case MIDI_NOTE_OFF:
 			type = MIDIEventType::NoteOff;
 			break;
-		case 0x90:
+		case MIDI_NOTE_ON:
 			type = MIDIEventType::NoteOn;
 			break;
-		case 0xA0:
+		case MIDI_AFTERTOUCH:
 			type = MIDIEventType::Aftertouch;
 			break;
-		case 0xB0:
+		case MIDI_CONTROL_CHANGE:
 			type = MIDIEventType::ControlChange;
 			break;
-		case 0xC0:
+		case MIDI_PROGRAM_CHANGE:
 			type = MIDIEventType::ProgramChange;
 			break;
-		case 0xD0:
+		case MIDI_CHANNEL_PRESSURE:
 			type = MIDIEventType::ChannelPressure;
 			break;
-		case 0xE0:
+		case MIDI_PITCH_BEND:
 			type = MIDIEventType::PitchBend;
 			break;
 		default:

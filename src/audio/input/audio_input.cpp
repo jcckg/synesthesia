@@ -183,7 +183,12 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 
 		audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount), audio->sampleRate, static_cast<size_t>(audio->channelCount));
 	}
+	catch (const std::exception& e) {
+		std::cerr << "[Audio] Exception in audio callback: " << e.what() << std::endl;
+		return paContinue;
+	}
 	catch (...) {
+		std::cerr << "[Audio] Unknown exception in audio callback" << std::endl;
 		return paContinue;
 	}
 
