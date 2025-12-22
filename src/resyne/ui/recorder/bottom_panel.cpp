@@ -58,7 +58,9 @@ void Recorder::drawBottomPanel(RecorderState& state,
 
         if (hasData) {
             if (!state.reconstructedAudio.empty() && state.metadata.sampleRate > 0.0f) {
-                duration = static_cast<double>(state.reconstructedAudio.size()) / static_cast<double>(state.metadata.sampleRate);
+                const uint32_t numChannels = state.metadata.channels > 0 ? state.metadata.channels : 1;
+                const size_t totalFrames = state.reconstructedAudio.size() / numChannels;
+                duration = static_cast<double>(totalFrames) / static_cast<double>(state.metadata.sampleRate);
             } else {
                 duration = sourceSamples.back().timestamp;
             }
