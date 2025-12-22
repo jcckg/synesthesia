@@ -12,6 +12,7 @@
 #include <vector>
 
 #ifdef _WIN32
+    #define NOMINMAX
     #include <windows.h>
     #include <shellapi.h>
     #include <winhttp.h>
