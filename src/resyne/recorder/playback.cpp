@@ -25,6 +25,7 @@ void Recorder::reconstructAudio(RecorderState& state) {
             SpectralSample spectral;
             spectral.magnitudes.clear();
             spectral.phases.clear();
+            spectral.frequencies.clear();
             if (ch < sample.magnitudes.size()) {
                 spectral.magnitudes.push_back(sample.magnitudes[ch]);
             } else {
@@ -34,6 +35,11 @@ void Recorder::reconstructAudio(RecorderState& state) {
                 spectral.phases.push_back(sample.phases[ch]);
             } else {
                 spectral.phases.push_back(std::vector<float>());
+            }
+            if (ch < sample.frequencies.size()) {
+                spectral.frequencies.push_back(sample.frequencies[ch]);
+            } else {
+                spectral.frequencies.push_back(std::vector<float>());
             }
             spectral.timestamp = sample.timestamp;
             spectral.sampleRate = sample.sampleRate;

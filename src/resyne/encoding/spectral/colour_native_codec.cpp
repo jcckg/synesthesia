@@ -20,6 +20,7 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#include <map>
 
 namespace {
 constexpr float DB_MIN = -140.0f;
@@ -209,6 +210,67 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 
 	if (candidates.empty()) {
 		return DEFAULT_SAMPLE_RATE;
+	}
+
+	struct RateBucket {
+		int count = 0;
+		double sum = 0.0;
+		double sumSq = 0.0;
+		float commonRate = 0.0f;
+	};
+	
+	std::map<int, RateBucket> buckets;
+	int totalVotes = 0;
+	
+	constexpr std::array<float, 12> COMMON_RATES = {
+		8000.0f, 11025.0f, 16000.0f, 22050.0f, 32000.0f, 44100.0f,
+		48000.0f, 88200.0f, 96000.0f, 176400.0f, 192000.0f, 384000.0f
+	};
+	
+	for (float rate : candidates) {
+		for (float common : COMMON_RATES) {
+			if (std::abs(rate - common) < common * 0.002f) { 
+				int key = static_cast<int>(common);
+				RateBucket& b = buckets[key];
+				b.count++;
+				b.sum += static_cast<double>(rate);
+				b.sumSq += (double)rate * (double)rate;
+				b.commonRate = common;
+				totalVotes++;
+				break;
+			}
+		}
+	}
+	
+	float bestRate = 0.0f;
+	double minStdDev = std::numeric_limits<double>::max();
+	const int minVotesRequired = std::max(10, totalVotes / 100);
+	
+	for (const auto& [key, bucket] : buckets) {
+		if (bucket.count < minVotesRequired) continue;
+		
+		double mean = bucket.sum / bucket.count;
+		double variance = (bucket.sumSq / bucket.count) - (mean * mean);
+		double stdDev = std::sqrt(std::max(0.0, variance));
+		
+		bool isBetter = false;
+		
+		if (bestRate == 0.0f) {
+			isBetter = true;
+		} else {
+			if (stdDev < minStdDev) {
+				isBetter = true;
+			}
+		}
+		
+		if (isBetter) {
+			minStdDev = stdDev;
+			bestRate = bucket.commonRate;
+		}
+	}
+
+	if (bestRate > 0.0f) {
+		return std::clamp(bestRate, MIN_SAMPLE_RATE, MAX_SAMPLE_RATE);
 	}
 
 	float sampleRate = computeRobustMedian(candidates);
@@ -401,7 +463,7 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 
 				float vocoderPhase = prevOutputPhase[bin];
 
-				if (!phaseInitialised[bin]) {
+			if (!phaseInitialised[bin]) {
 					if (binActive) {
 						vocoderPhase = decodedPhase;
 						phaseInitialised[bin] = true;
@@ -409,7 +471,15 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 						vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
 					}
 				} else if (binActive) {
-					if (isTransient) {
+					const float binDamageWeight = hasBlendRegions ? damageWeights[bin] : 0.0f;
+					const bool isEditedBin = binDamageWeight >= 0.01f;
+					
+					if (!isEditedBin) {
+						const float phaseError = PhaseReconstruction::wrapToPi(
+							decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
+						const float correctedAdvance = expectedAdvance + phaseError;
+						vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + correctedAdvance);
+					} else if (isTransient) {
 						vocoderPhase = decodedPhase;
 					} else {
 						const float phaseDeviation = std::abs(PhaseReconstruction::wrapToPi(
@@ -417,14 +487,18 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 
 						if (phaseDeviation > DISCONTINUITY_THRESHOLD) {
 							vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
+						} else if (phaseDeviation > 0.6f) {
+							vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
 						} else {
+							const float binDamageWeight = hasBlendRegions ? damageWeights[bin] : 0.0f;
 							const float phaseError = PhaseReconstruction::wrapToPi(
 								decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
 							const float correctedAdvance = expectedAdvance + phaseError;
-
-							const float dampedPrevPhase = ADAPTIVE_DAMPING_FACTOR * prevOutputPhase[bin] +
-								(1.0f - ADAPTIVE_DAMPING_FACTOR) * decodedPhase;
-							vocoderPhase = PhaseReconstruction::wrapToPi(dampedPrevPhase + correctedAdvance);
+							const float prediction = prevOutputPhase[bin] + correctedAdvance;
+							
+							const float driftError = PhaseReconstruction::wrapToPi(decodedPhase - prediction);
+							const float dampingScale = 1.0f - ADAPTIVE_DAMPING_FACTOR * (1.0f - binDamageWeight);
+							vocoderPhase = PhaseReconstruction::wrapToPi(prediction + dampingScale * driftError);
 						}
 					}
 				} else {
@@ -478,11 +552,13 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 		AudioColourSample sample;
 		sample.magnitudes.resize(numChannels);
 		sample.phases.resize(numChannels);
+		sample.frequencies.resize(numChannels);
 		sample.channels = numChannels;
 
 		for (uint32_t ch = 0; ch < numChannels; ++ch) {
 			sample.magnitudes[ch] = allChannelsMagnitudes[ch][frame];
 			sample.phases[ch] = allChannelsReconstructedPhases[ch][frame];
+			sample.frequencies[ch] = allChannelsFrequencies[ch][frame];
 		}
 
 		sample.sampleRate = sampleRate;

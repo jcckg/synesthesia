@@ -1,4 +1,5 @@
 #include "resyne/encoding/audio/wav_encoder.h"
+#include "resyne/encoding/reconstruction/varispeed.h"
 #include <kiss_fftr.h>
 #include <fstream>
 #include <iostream>
@@ -99,19 +100,28 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	result.numChannels = numChannels;
 
 	std::vector<std::vector<float>> channelAudio(numChannels);
+	std::vector<std::vector<std::vector<float>>> channelFrequencies(numChannels);
 
 	for (size_t ch = 0; ch < numChannels; ++ch) {
 		std::vector<std::vector<float>> timeFrames;
 		timeFrames.reserve(samples.size());
+		channelFrequencies[ch].reserve(samples.size());
 
 		for (const auto& sample : samples) {
 			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
 				timeFrames.push_back(std::vector<float>(static_cast<size_t>(fftSize), 0.0f));
+				channelFrequencies[ch].push_back(std::vector<float>());
 				continue;
 			}
 
 			const auto& mags = sample.magnitudes[ch];
 			const auto& phs = sample.phases[ch];
+
+			if (ch < sample.frequencies.size()) {
+				channelFrequencies[ch].push_back(sample.frequencies[ch]);
+			} else {
+				channelFrequencies[ch].push_back(std::vector<float>());
+			}
 
 			std::vector<float> timeFrame = inverseFFT(mags, phs, fftSize);
 
@@ -150,6 +160,15 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 		}
 
 		channelAudio[ch] = overlapAdd(timeFrames, hopSize);
+
+		auto varispeedRegions = Varispeed::detectVarispeedRegions(
+			channelFrequencies[ch], sampleRate, static_cast<size_t>(fftSize));
+
+		if (!varispeedRegions.empty()) {
+			channelAudio[ch] = Varispeed::applyVarispeedRegions(
+				channelAudio[ch], varispeedRegions, hopSize);
+		}
+
 		applyLimiter(channelAudio[ch]);
 	}
 

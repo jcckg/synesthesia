@@ -6,6 +6,7 @@
 struct SpectralSample {
 	std::vector<std::vector<float>> magnitudes;
 	std::vector<std::vector<float>> phases;
+	std::vector<std::vector<float>> frequencies;
 	double timestamp;
 	float sampleRate;
 };

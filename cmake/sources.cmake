@@ -16,7 +16,11 @@ set(SOURCES
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_locking.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_vocoder.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/pghi.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/edit_detection.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/boundary_phase_interpolation.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_smoothing.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/spectral_resampling.cpp
+    ${SRC_DIR}/resyne/encoding/reconstruction/varispeed.cpp
     ${SRC_DIR}/resyne/encoding/formats/exporter.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_tiff.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_resyne.cpp

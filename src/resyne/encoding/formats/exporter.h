@@ -9,6 +9,7 @@
 struct AudioColourSample {
 	std::vector<std::vector<float>> magnitudes;
 	std::vector<std::vector<float>> phases;
+	std::vector<std::vector<float>> frequencies;
 	double timestamp;
 	float sampleRate;
 	float loudnessLUFS = std::numeric_limits<float>::quiet_NaN();

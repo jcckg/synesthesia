@@ -44,9 +44,9 @@ std::vector<bool> detectDamagedBins(const std::vector<std::vector<float>>& allMa
 	std::vector<bool> isDamaged(binCount, false);
 
 	constexpr size_t TEMPORAL_RADIUS = 3;
-	constexpr float SHARPNESS_RATIO = 0.85f;
-	constexpr float MAG_STABILITY_RATIO = 0.1f;
-	constexpr float MAG_DROP_RATIO = 0.6f;
+	constexpr float SHARPNESS_RATIO = 0.7f;
+	constexpr float MAG_STABILITY_RATIO = 0.15f;
+	constexpr float MAG_DROP_RATIO = 0.5f;
 	constexpr float CONTEXT_RATIO = 0.5f;
 	const size_t frameStart = currentFrame > TEMPORAL_RADIUS ? currentFrame - TEMPORAL_RADIUS : 0;
 	const size_t frameEnd = std::min(currentFrame + TEMPORAL_RADIUS + 1, allMagnitudes.size());
