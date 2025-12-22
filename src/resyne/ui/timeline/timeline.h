@@ -38,8 +38,8 @@ struct TimelineState {
     ImVec2 zoomGestureStart = ImVec2(0.0f, 0.0f);
     float zoomGestureStartFactor = 1.0f;
     ImVec2 grabGestureStart = ImVec2(0.0f, 0.0f);
-    float viewCenterNormalised = 0.5f;
-    float grabStartViewCenter = 0.5f;
+    float viewCentreNormalised = 0.5f;
+    float grabStartViewCentre = 0.5f;
     bool trackScrubber = false;
 };
 

@@ -20,6 +20,6 @@ public:
     static void restoreOriginalStyle(ImGuiStyle& style, StyleState& state);
 
 private:
-    static void setColors(ImGuiStyle& style, UITheme theme);
+    static void setColours(ImGuiStyle& style, UITheme theme);
     static void setDimensions(ImGuiStyle& style);
 };

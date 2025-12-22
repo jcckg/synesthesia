@@ -108,9 +108,11 @@ public:
             : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
         const auto& magnitudes = !sample.magnitudes.empty() ? sample.magnitudes[0] : std::vector<float>();
         const auto& phases = !sample.phases.empty() ? sample.phases[0] : std::vector<float>();
+        const std::vector<float>& frequencies = !sample.frequencies.empty() ? sample.frequencies[0] : std::vector<float>();
         const auto colour = ColourMapper::spectrumToColour(
             magnitudes,
             phases,
+            frequencies,
             sample.sampleRate,
             gamma_,
             colourSpace_,

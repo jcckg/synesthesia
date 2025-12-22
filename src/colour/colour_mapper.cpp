@@ -693,6 +693,7 @@ ColourMapper::SpectralCharacteristics ColourMapper::calculateSpectralCharacteris
 ColourMapper::ColourResult ColourMapper::spectrumToColour(
 const std::vector<float>& magnitudes,
 const std::vector<float>& phases,
+const std::vector<float>& frequencies,
 const float sampleRate,
 const float gamma,
 const ColourSpace colourSpace,
@@ -700,7 +701,7 @@ const bool applyGamutMapping,
 const float overrideLoudnessDb
 ) {
 	const auto spectralResult = SpectralProcessor::spectrumToColour(
-		magnitudes, phases, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb
+		magnitudes, phases, frequencies, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb
 	);
 
 	ColourResult result{};

@@ -182,7 +182,7 @@ void Recorder::handleKeyboardShortcuts(RecorderState& state,
     if (pressed(ImGuiKey_0)) {
         state.timeline.trackScrubber = !state.timeline.trackScrubber;
         if (state.timeline.trackScrubber) {
-            state.timeline.viewCenterNormalised = state.timeline.scrubberNormalisedPosition;
+            state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;
             state.toolState.activeTool = UI::Utilities::ToolType::Cursor;
             state.timeline.isGrabGestureActive = false;
         }

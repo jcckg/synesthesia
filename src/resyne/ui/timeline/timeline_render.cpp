@@ -99,7 +99,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         } else if (effectiveTool == ToolType::Grab && state.zoomFactor > Viewport::MIN_ZOOM_FACTOR + 1e-3f) {
             state.isGrabGestureActive = true;
             state.grabGestureStart = io.MousePos;
-            state.grabStartViewCenter = state.viewCenterNormalised;
+            state.grabStartViewCentre = state.viewCentreNormalised;
             state.isScrubberDragging = false;
         }
     }
@@ -136,7 +136,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                 float newStart = pointerTimeline - pointerLocal * newVisibleFraction;
                 float newEnd = newStart + newVisibleFraction;
                 Viewport::constrainView(newStart, newEnd);
-                state.viewCenterNormalised = std::clamp((newStart + newEnd) * 0.5f, 0.0f, 1.0f);
+                state.viewCentreNormalised = std::clamp((newStart + newEnd) * 0.5f, 0.0f, 1.0f);
                 state.isZoomGestureActive = false;
                 state.isGrabGestureActive = false;
                 viewChanged = true;
@@ -148,7 +148,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
             const float visibleFraction = Viewport::computeVisibleFraction(state.zoomFactor);
             const float panAmount = std::clamp(static_cast<float>(gestures.panDeltaX), -80.0f, 80.0f);
             const float delta = panAmount * visibleFraction * Viewport::TRACKPAD_PAN_SENSITIVITY;
-            state.viewCenterNormalised = std::clamp(state.viewCenterNormalised - delta, 0.0f, 1.0f);
+            state.viewCentreNormalised = std::clamp(state.viewCentreNormalised - delta, 0.0f, 1.0f);
             state.isGrabGestureActive = false;
             viewChanged = true;
         }
@@ -180,7 +180,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
             float newStart = pointerTimeline - pointerLocal * newVisibleFraction;
             float newEnd = newStart + newVisibleFraction;
             Viewport::constrainView(newStart, newEnd);
-            state.viewCenterNormalised = std::clamp((newStart + newEnd) * 0.5f, 0.0f, 1.0f);
+            state.viewCentreNormalised = std::clamp((newStart + newEnd) * 0.5f, 0.0f, 1.0f);
             state.isZoomGestureActive = false;
             state.isGrabGestureActive = false;
             viewChanged = true;
@@ -207,10 +207,10 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             const float deltaX = io.MousePos.x - state.grabGestureStart.x;
             const float normalisedDelta = (deltaX / std::max(size.x, 1.0f)) * visibleFraction;
-            float newCenter = state.grabStartViewCenter - normalisedDelta;
+            float newCenter = state.grabStartViewCentre - normalisedDelta;
             newCenter = std::clamp(newCenter, 0.0f, 1.0f);
-            if (std::fabs(newCenter - state.viewCenterNormalised) > 0.0001f) {
-                state.viewCenterNormalised = newCenter;
+            if (std::fabs(newCenter - state.viewCentreNormalised) > 0.0001f) {
+                state.viewCentreNormalised = newCenter;
                 viewChanged = true;
             }
         } else {

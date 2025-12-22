@@ -43,7 +43,7 @@ void applyPhaseLocking(std::vector<float>& phases,
 			const float magnitudeRatio = magnitudes[k] / magnitudes[peakBin];
 			const float strength = std::clamp(magnitudeRatio * blend, 0.0f, 1.0f);
 
-			phases[k] = wrapToPi(strength * phases[k] + (1.0f - strength) * peakPhase);
+			phases[k] = wrapToPi(peakPhase + strength * wrapToPi(phases[k] - peakPhase));
 		}
 	}
 }

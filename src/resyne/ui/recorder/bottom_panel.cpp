@@ -258,7 +258,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         if (ImGui::Button(ICON_FA_CROSSHAIRS, ImVec2(transportButtonSize, transportButtonSize))) {
             state.timeline.trackScrubber = !state.timeline.trackScrubber;
             if (state.timeline.trackScrubber) {
-                state.timeline.viewCenterNormalised = state.timeline.scrubberNormalisedPosition;
+                state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;
                 state.toolState.activeTool = UI::Utilities::ToolType::Cursor;
             }
         }

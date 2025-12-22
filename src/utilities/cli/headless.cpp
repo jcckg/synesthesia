@@ -168,7 +168,7 @@ void HeadlessInterface::displayFrequencyInfo() {
 	float currentLoudnessDb = loudnessDb;
 	if (!magnitudes.empty() && !phases.empty()) {
 		auto colourResult = ColourMapper::spectrumToColour(
-			magnitudes, phases, audioInput.getSampleRate(), 2.2f,
+			magnitudes, phases, {}, audioInput.getSampleRate(), 2.2f,
 			ColourMapper::ColourSpace::Rec2020, true,
 			loudnessDb);
 

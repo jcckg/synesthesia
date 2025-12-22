@@ -45,12 +45,12 @@ void computeViewWindow(TimelineState& state,
         start = 0.0f;
         end = 1.0f;
         span = 1.0f;
-        state.viewCenterNormalised = 0.5f;
+        state.viewCentreNormalised = 0.5f;
         return;
     }
 
     if (state.trackScrubber) {
-        state.viewCenterNormalised = state.scrubberNormalisedPosition;
+        state.viewCentreNormalised = state.scrubberNormalisedPosition;
     }
 
     const float halfSpan = visibleFraction * 0.5f;
@@ -61,16 +61,16 @@ void computeViewWindow(TimelineState& state,
         start = 0.0f;
         end = 1.0f;
         span = 1.0f;
-        state.viewCenterNormalised = 0.5f;
+        state.viewCentreNormalised = 0.5f;
         return;
     }
 
-    float center = std::clamp(state.viewCenterNormalised, minCenter, maxCenter);
-    start = center - halfSpan;
-    end = center + halfSpan;
+    float centre = std::clamp(state.viewCentreNormalised, minCenter, maxCenter);
+    start = centre - halfSpan;
+    end = centre + halfSpan;
     constrainView(start, end);
     span = std::max(end - start, 1e-4f);
-    state.viewCenterNormalised = std::clamp((start + end) * 0.5f, 0.0f, 1.0f);
+    state.viewCentreNormalised = std::clamp((start + end) * 0.5f, 0.0f, 1.0f);
 }
 
 float computeVisibleFraction(float zoomFactor) {

@@ -37,6 +37,7 @@ public:
 	static SpectralColourResult spectrumToColour(
 		std::span<const float> magnitudes,
 		std::span<const float> phases,
+		std::span<const float> frequencies,
 		float sampleRate,
 		float gamma = 1.0f,
 		ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020,

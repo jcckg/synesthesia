@@ -79,8 +79,8 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 					recorderState.timeline.hoverOverlayAlpha = 0.0f;
 					recorderState.timeline.gradientRegionValid = false;
 					recorderState.timeline.zoomFactor = 1.0f;
-					recorderState.timeline.viewCenterNormalised = 0.5f;
-					recorderState.timeline.grabStartViewCenter = 0.5f;
+					recorderState.timeline.viewCentreNormalised = 0.5f;
+					recorderState.timeline.grabStartViewCentre = 0.5f;
 					recorderState.timeline.trackScrubber = false;
 					recorderState.timeline.isZoomGestureActive = false;
 					recorderState.timeline.isGrabGestureActive = false;

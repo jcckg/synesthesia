@@ -12,7 +12,7 @@ void UIStyler::applyCustomStyleWithTheme(ImGuiStyle& style, StyleState& state, U
 
     state.currentTheme = theme;
     setDimensions(style);
-    setColors(style, theme);
+    setColours(style, theme);
 }
 
 void UIStyler::restoreOriginalStyle(ImGuiStyle& style, StyleState& state) {
@@ -37,7 +37,7 @@ void UIStyler::setDimensions(ImGuiStyle& style) {
     style.WindowPadding = ImVec2(12, 12);
 }
 
-void UIStyler::setColors(ImGuiStyle& style, UITheme theme) {
+void UIStyler::setColours(ImGuiStyle& style, UITheme theme) {
     ImVec4* colours = style.Colors;
 
     if (theme == UITheme::Dark) {

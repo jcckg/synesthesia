@@ -98,8 +98,8 @@ EditBoundaryInfo detectEditBoundaries(const ColourNativeImage& original,
 			for (int dy = -1; dy <= 1 && !isBoundary; ++dy) {
 				for (int dx = -1; dx <= 1 && !isBoundary; ++dx) {
 					if (dx == 0 && dy == 0) continue;
-					const size_t nx = x + dx;
-					const size_t ny = y + dy;
+					const size_t nx = static_cast<size_t>(static_cast<ptrdiff_t>(x) + dx);
+					const size_t ny = static_cast<size_t>(static_cast<ptrdiff_t>(y) + dy);
 					const size_t nidx = ny * edited.width + nx;
 					if (result.isEditedRegion[nidx] != currentEdited) {
 						isBoundary = true;
@@ -179,8 +179,8 @@ EditBoundaryInfo detectEditBoundariesSingleImage(const ColourNativeImage& image)
 				for (int dy = -1; dy <= 1; ++dy) {
 					for (int dx = -1; dx <= 1; ++dx) {
 						if (dx == 0 && dy == 0) continue;
-						const size_t nx = cx + dx;
-						const size_t ny = cy + dy;
+						const size_t nx = static_cast<size_t>(static_cast<ptrdiff_t>(cx) + dx);
+						const size_t ny = static_cast<size_t>(static_cast<ptrdiff_t>(cy) + dy);
 						if (nx >= 1 && nx < image.width - 1 &&
 							ny >= 1 && ny < image.height - 1) {
 							const size_t nidx = ny * image.width + nx;
@@ -214,7 +214,7 @@ std::vector<float> computeTransitionWeights(const EditBoundaryInfo& boundaries,
 		return weights;
 	}
 
-	const float radiusF = static_cast<float>(transitionRadius);
+
 
 	for (size_t y = 0; y < boundaries.height; ++y) {
 		for (size_t x = 0; x < boundaries.width; ++x) {

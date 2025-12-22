@@ -202,16 +202,52 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 		}
 
 		const auto& currentSample = recorderState.samples[clampedIndex];
-		const auto& currentMagnitudes = !currentSample.magnitudes.empty() ? currentSample.magnitudes[0] : std::vector<float>();
-		const auto& currentPhases = !currentSample.phases.empty() ? currentSample.phases[0] : std::vector<float>();
+
+		std::vector<float> averagedMagnitudes;
+		std::vector<float> averagedPhases;
+
+		if (!currentSample.magnitudes.empty() && !currentSample.magnitudes[0].empty()) {
+			const size_t numBins = currentSample.magnitudes[0].size();
+			const uint32_t numChannels = currentSample.channels;
+
+			averagedMagnitudes.resize(numBins, 0.0f);
+			averagedPhases.resize(numBins, 0.0f);
+
+			for (uint32_t ch = 0; ch < numChannels && ch < currentSample.magnitudes.size(); ++ch) {
+				if (currentSample.magnitudes[ch].size() == numBins) {
+					for (size_t bin = 0; bin < numBins; ++bin) {
+						const float mag = currentSample.magnitudes[ch][bin];
+						averagedMagnitudes[bin] += mag * mag;
+					}
+				}
+				if (ch < currentSample.phases.size() && currentSample.phases[ch].size() == numBins) {
+					for (size_t bin = 0; bin < numBins; ++bin) {
+						averagedPhases[bin] += currentSample.phases[ch][bin];
+					}
+				}
+			}
+
+			if (numChannels > 0) {
+				const float invChannels = 1.0f / static_cast<float>(numChannels);
+				for (size_t bin = 0; bin < numBins; ++bin) {
+					averagedMagnitudes[bin] = std::sqrt(averagedMagnitudes[bin] * invChannels);
+					averagedPhases[bin] *= invChannels;
+				}
+			}
+		}
+
+		const auto& currentMagnitudes = averagedMagnitudes;
+		const auto& currentPhases = averagedPhases;
 
 		if (!currentMagnitudes.empty()) {
 			const float sampleLoudness = std::isfinite(currentSample.loudnessLUFS)
 				? currentSample.loudnessLUFS
 				: ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+			const std::vector<float>& currentFrequencies = !currentSample.frequencies.empty() ? currentSample.frequencies[0] : std::vector<float>();
 			auto playbackColourResult = ColourMapper::spectrumToColour(
 				currentMagnitudes,
 				currentPhases,
+				currentFrequencies,
 				currentSample.sampleRate,
 				UIConstants::DEFAULT_GAMMA,
 				state.visualSettings.colourSpace,
@@ -388,9 +424,41 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 	recorderState.importHighGain = state.audioSettings.highGain;
 
 	audioInput.getFFTProcessor().setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
+	audioInput.setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
 
-	auto magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
-	auto phases = audioInput.getFFTProcessor().getPhaseBuffer();
+	const size_t numChannels = audioInput.getAudioProcessor().getChannelCount();
+	const size_t numBins = FFTProcessor::FFT_SIZE / 2 + 1;
+	std::vector<float> magnitudes(numBins, 0.0f);
+	std::vector<float> phases(numBins, 0.0f);
+
+	if (numChannels > 0) {
+		for (size_t ch = 0; ch < numChannels; ++ch) {
+			const auto& chMags = audioInput.getFFTProcessor(ch).getMagnitudesBuffer();
+			const auto& chPhases = audioInput.getFFTProcessor(ch).getPhaseBuffer();
+			
+			if (chMags.size() == numBins) {
+				for (size_t i = 0; i < numBins; ++i) {
+					magnitudes[i] += chMags[i] * chMags[i];
+				}
+			}
+			if (chPhases.size() == numBins) {
+				for (size_t i = 0; i < numBins; ++i) {
+					phases[i] += chPhases[i];
+				}
+			}
+		}
+
+		const float invChannels = 1.0f / static_cast<float>(numChannels);
+		for (size_t i = 0; i < numBins; ++i) {
+			magnitudes[i] = std::sqrt(magnitudes[i] * invChannels);
+			phases[i] *= invChannels;
+		}
+	} else {
+		// Fallback for no channels (shouldn't happen if stream is active)
+		magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
+		phases = audioInput.getFFTProcessor().getPhaseBuffer();
+	}
+
 	const float liveLoudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
 
 	const bool silentMagnitudeFrame = spectrumIsSilent(magnitudes);
@@ -399,6 +467,7 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 	auto colourResult = ColourMapper::spectrumToColour(
 		magnitudes,
 		phases,
+		{},
 		audioInput.getSampleRate(),
 		gamma,
 		state.visualSettings.colourSpace,

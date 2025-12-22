@@ -120,7 +120,8 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 			}
 
 			std::vector<RGBAColour> column;
-			encodeTimeFrame(sample.magnitudes[ch], sample.phases[ch], frameSampleRate, hopRatio, column);
+			const std::vector<float>& rawFrequencies = (ch < sample.frequencies.size()) ? sample.frequencies[ch] : std::vector<float>();
+			encodeTimeFrame(sample.magnitudes[ch], sample.phases[ch], rawFrequencies, frameSampleRate, hopRatio, column);
 
 			const size_t yOffset = ch * numBinsPerChannel;
 			for (size_t bin = 0; bin < numBinsPerChannel && bin < column.size(); ++bin) {
@@ -490,7 +491,7 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 						} else if (phaseDeviation > 0.6f) {
 							vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
 						} else {
-							const float binDamageWeight = hasBlendRegions ? damageWeights[bin] : 0.0f;
+
 							const float phaseError = PhaseReconstruction::wrapToPi(
 								decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
 							const float correctedAdvance = expectedAdvance + phaseError;
@@ -583,6 +584,7 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 
 void ColourNativeCodec::encodeTimeFrame(const std::vector<float>& magnitudes,
 									   const std::vector<float>& phases,
+									   const std::vector<float>& frequencies,
 									   const float sampleRate,
 									   const float hopRatio,
 									   std::vector<RGBAColour>& column) {
@@ -603,9 +605,14 @@ void ColourNativeCodec::encodeTimeFrame(const std::vector<float>& magnitudes,
 		const float magnitude = magnitudes[bin];
 		const float phase = phases[bin];
 
-		const float frequency = (freqResolution > 0.0f)
-			? std::min(freqResolution * static_cast<float>(bin), sampleRate * 0.5f)
-			: ColourMapper::MIN_FREQ;
+		float frequency = ColourMapper::MIN_FREQ;
+		if (bin < frequencies.size() && frequencies[bin] > 0.0f) {
+			frequency = frequencies[bin];
+		} else {
+			frequency = (freqResolution > 0.0f)
+				? std::min(freqResolution * static_cast<float>(bin), sampleRate * 0.5f)
+				: ColourMapper::MIN_FREQ;
+		}
 
 		column[bin] = encodeFrequencyBin(frequency, magnitude, phase);
 	}

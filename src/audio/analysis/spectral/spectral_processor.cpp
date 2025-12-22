@@ -64,6 +64,7 @@ float loudnessToBrightness(const float clampedDb) {
 SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	std::span<const float> magnitudes,
 	std::span<const float> /* phases */,
+	std::span<const float> frequencies,
 	const float sampleRate,
 	const float gamma,
 	const ColourMapper::ColourSpace colourSpace,
@@ -85,19 +86,25 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	}
 
 	const size_t binCount = magnitudes.size();
-	std::vector<float> frequencies(binCount);
+	std::vector<float> localFrequencies;
+    std::span<const float> effectiveFrequencies;
 
-	const float binSize = sampleRate / (2.0f * (binCount - 1));
-
-	for (size_t i = 0; i < binCount; ++i) {
-		frequencies[i] = static_cast<float>(i) * binSize;
-	}
+    if (!frequencies.empty() && frequencies.size() == binCount) {
+        effectiveFrequencies = frequencies;
+    } else {
+        localFrequencies.resize(binCount);
+        const float binSize = sampleRate / (2.0f * (binCount - 1));
+        for (size_t i = 0; i < binCount; ++i) {
+            localFrequencies[i] = static_cast<float>(i) * binSize;
+        }
+        effectiveFrequencies = localFrequencies;
+    }
 
 	// Calculate spectral features on unweighted magnitudes for accurate frequency analysis
-	result.spectralCentroid = calculateSpectralCentroid(magnitudes, frequencies);
-	result.spectralSpread = calculateSpectralSpread(magnitudes, frequencies, result.spectralCentroid);
+	result.spectralCentroid = calculateSpectralCentroid(magnitudes, effectiveFrequencies);
+	result.spectralSpread = calculateSpectralSpread(magnitudes, effectiveFrequencies, result.spectralCentroid);
 	result.spectralFlatness = calculateSpectralFlatness(magnitudes);
-	result.spectralRolloff = calculateSpectralRolloff(magnitudes, frequencies);
+	result.spectralRolloff = calculateSpectralRolloff(magnitudes, effectiveFrequencies);
 
 	float maxMag = 0.0f;
 	float totalEnergyLocal = 0.0f;
@@ -122,7 +129,7 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	float Y_total = 0.0f;
 	float Z_total = 0.0f;
 
-	integrateSpectrumCIE(magnitudes, frequencies, X_total, Y_total, Z_total);
+	integrateSpectrumCIE(magnitudes, effectiveFrequencies, X_total, Y_total, Z_total);
 
 	float chromaX = 0.0f;
 	float chromaY = 0.0f;
@@ -198,7 +205,7 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 		sampleRate = binSize * 2.0f * (spectrum.size() - 1);
 	}
 
-	return spectrumToColour(magnitudes, phases, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb);
+	return spectrumToColour(magnitudes, phases, {}, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb);
 }
 
 float SpectralProcessor::calculateSpectralCentroid(

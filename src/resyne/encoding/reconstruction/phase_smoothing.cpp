@@ -43,9 +43,9 @@ void smoothPhase(std::vector<float>& phases,
 				weightSum += weight;
 			}
 
-			const float centerWeight = targetMagnitudes[bin] * 2.0f;
-			phaseSum += phases[bin] * centerWeight;
-			weightSum += centerWeight;
+			const float centreWeight = targetMagnitudes[bin] * 2.0f;
+			phaseSum += phases[bin] * centreWeight;
+			weightSum += centreWeight;
 
 			if (weightSum > 0.0f) {
 				const float smoothedPhase = phaseSum / weightSum;

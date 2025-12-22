@@ -70,6 +70,7 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
 		auto currentColourResult = ColourMapper::spectrumToColour(
 			magnitudes,
 			phases,
+			{},
 			sampleRate,
 			UIConstants::DEFAULT_GAMMA,
 			state.visualSettings.colourSpace,

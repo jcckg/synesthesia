@@ -56,11 +56,19 @@ SampleColourEntry computeEntryInternal(const AudioColourSample& sample,
 				averagedPhases[bin] *= invChannels;
 			}
 		}
+
+		for (float& value : averagedMagnitudes) {
+			if (!std::isfinite(value) || value < 0.0f) {
+				value = 0.0f;
+			}
+		}
 	}
 
+	const std::vector<float>& frequencies = !sample.frequencies.empty() ? sample.frequencies[0] : std::vector<float>();
 	const auto colour = ColourMapper::spectrumToColour(
 		averagedMagnitudes,
 		averagedPhases,
+		frequencies,
 		sample.sampleRate,
 		gamma,
 		colourSpace,

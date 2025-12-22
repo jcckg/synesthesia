@@ -75,8 +75,8 @@ void applyImportedSequence(RecorderState& state,
     state.timeline.hoverOverlayAlpha = 0.0f;
     state.timeline.gradientRegionValid = false;
     state.timeline.zoomFactor = 1.0f;
-    state.timeline.viewCenterNormalised = 0.5f;
-    state.timeline.grabStartViewCenter = 0.5f;
+    state.timeline.viewCentreNormalised = 0.5f;
+    state.timeline.grabStartViewCentre = 0.5f;
     state.timeline.trackScrubber = false;
     state.timeline.isZoomGestureActive = false;
     state.timeline.isGrabGestureActive = false;

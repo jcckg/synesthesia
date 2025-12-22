@@ -9,8 +9,7 @@ namespace PhaseReconstruction {
 
 namespace {
 constexpr float EPSILON = 1e-6f;
-constexpr float PI = std::numbers::pi_v<float>;
-}
+
 
 void slerpPhaseVectors(float cosOriginal, float sinOriginal,
 					   float cosReconstructed, float sinReconstructed,
@@ -67,6 +66,7 @@ void slerpPhaseVectors(float cosOriginal, float sinOriginal,
 
 	cosResult = coeffOrig * nCosOrig + coeffRecon * nCosRecon;
 	sinResult = coeffOrig * nSinOrig + coeffRecon * nSinRecon;
+}
 }
 
 void interpolateBoundaryPhase(std::vector<float>& phases,

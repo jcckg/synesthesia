@@ -63,10 +63,11 @@ public:
 
 	static ColourResult spectrumToColour(const std::vector<float>& magnitudes,
 								 const std::vector<float>& phases,
+								 const std::vector<float>& frequencies = {},
 								 float sampleRate = 44100.0f, float gamma = 1.0f,
 								 ColourSpace colourSpace = ColourSpace::Rec2020,
-							 bool applyGamutMapping = true,
-							 float overrideLoudnessDb = LOUDNESS_DB_UNSPECIFIED);
+								 bool applyGamutMapping = true,
+								 float overrideLoudnessDb = LOUDNESS_DB_UNSPECIFIED);
 
 	static float logFrequencyToWavelength(float freq);
 	static void wavelengthToRGBCIE(float wavelength, float& r, float& g, float& b,
