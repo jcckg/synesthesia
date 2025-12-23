@@ -33,13 +33,24 @@ if(WIN32)
 endif()
 
 if(WIN32)
-    message(STATUS "Configuring for Windows (DirectX 12)")
-    list(APPEND SOURCES
-        ${SRC_DIR}/platforms/dx12/main.cpp
-        ${CMAKE_BINARY_DIR}/app.rc
-        ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
-    )
-    set(DX12_LIBS d3d12 dxgi d3dcompiler)
+    if(VULKAN_WINDOWS)
+        message(STATUS "Configuring for Windows (Vulkan)")
+        find_package(Vulkan REQUIRED)
+        message(STATUS "Found Vulkan: ${Vulkan_LIBRARIES}")
+        list(APPEND SOURCES
+            ${SRC_DIR}/platforms/vulkan/main.cpp
+            ${CMAKE_BINARY_DIR}/app.rc
+            ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
+        )
+    else()
+        message(STATUS "Configuring for Windows (DirectX 12)")
+        list(APPEND SOURCES
+            ${SRC_DIR}/platforms/dx12/main.cpp
+            ${CMAKE_BINARY_DIR}/app.rc
+            ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
+        )
+        set(DX12_LIBS d3d12 dxgi d3dcompiler)
+    endif()
 elseif(APPLE)
     message(STATUS "Configuring for macOS (Metal)")
     list(APPEND SOURCES
@@ -160,18 +171,32 @@ if(APPLE)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})
     endif()
 elseif(WIN32)
-    target_link_libraries(${EXECUTABLE_NAME} PRIVATE
-        ${GLFW_TARGET}
-        ${PORTAUDIO_TARGET}
-        ${DX12_LIBS}
-        nlohmann_json::nlohmann_json
-        vendor_imgui
-        vendor_implot
-        vendor_kissfft
-        vendor_lodepng
-        vendor_imgui_backends
-        windowsapp
-    )
+    if(VULKAN_WINDOWS)
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE
+            ${GLFW_TARGET}
+            ${PORTAUDIO_TARGET}
+            Vulkan::Vulkan
+            nlohmann_json::nlohmann_json
+            vendor_imgui
+            vendor_implot
+            vendor_kissfft
+            vendor_lodepng
+            vendor_imgui_backends
+        )
+    else()
+        target_link_libraries(${EXECUTABLE_NAME} PRIVATE
+            ${GLFW_TARGET}
+            ${PORTAUDIO_TARGET}
+            ${DX12_LIBS}
+            nlohmann_json::nlohmann_json
+            vendor_imgui
+            vendor_implot
+            vendor_kissfft
+            vendor_lodepng
+            vendor_imgui_backends
+            windowsapp
+        )
+    endif()
 
     if(ENABLE_MIDI AND RTMIDI_TARGET)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})

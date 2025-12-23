@@ -23,6 +23,7 @@ option(BUILD_MACOS_BUNDLE "Build as macOS .app bundle" OFF)
 option(ENABLE_NEON_OPTIMISATIONS "Enable ARM NEON SIMD optimisations" ON)
 option(ENABLE_API_SERVER "Enable cross-application colour streaming API (macOS only)" OFF)
 option(ENABLE_MIDI "Enable MIDI input support" ON)
+option(VULKAN_WINDOWS "Use Vulkan instead of DirectX 12 on Windows (for older Windows compatibility)" OFF)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/updating/version.h.in"
