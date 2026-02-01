@@ -13,6 +13,7 @@
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
 #include "resyne/ui/toolbar/toolbar.h"
+#include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace ReSyne {
 
@@ -145,9 +146,11 @@ void Recorder::drawFullWindow(RecorderState& state,
         state.timeline.gradientRegionMax = regionMax;
         state.timeline.gradientRegionValid = gradientSize.x > 1.0f && gradientSize.y > 1.0f;
 
-        const ImU32 liveCol = ImGui::ColorConvertFloat4ToU32(ImVec4(currentR, currentG, currentB, 1.0f));
+        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
+        const ImU32 liveCol = isLightMode ? IM_COL32(245, 245, 245, 255) : ImGui::ColorConvertFloat4ToU32(ImVec4(currentR, currentG, currentB, 1.0f));
+        const ImU32 borderCol = isLightMode ? IM_COL32(180, 180, 180, 255) : IM_COL32(60, 60, 60, 255);
         drawList->AddRectFilled(cursorPos, regionMax, liveCol);
-        drawList->AddRect(cursorPos, regionMax, IM_COL32(60, 60, 60, 255), 0.0f, 0, 1.0f);
+        drawList->AddRect(cursorPos, regionMax, borderCol, 0.0f, 0, 1.0f);
         ImGui::Dummy(gradientSize);
 
         ImGuiIO& ioLocal = ImGui::GetIO();
@@ -181,11 +184,12 @@ void Recorder::drawFullWindow(RecorderState& state,
             const ImVec2 textPos(
                 cursorPos.x + (gradientSize.x - textSize.x) * 0.5f,
                 cursorPos.y + (gradientSize.y - textSize.y) * 0.5f);
+            const ImU32 textCol = isLightMode ? IM_COL32(80, 80, 80, 255) : IM_COL32(160, 160, 160, 255);
             drawList->AddText(
                 font,
                 smallFontSize,
                 textPos,
-                IM_COL32(160, 160, 160, 255),
+                textCol,
                 loadMessage);
         }
     }
@@ -254,41 +258,33 @@ void Recorder::drawFullWindow(RecorderState& state,
         const char* playPauseIcon = isPlaying ? ICON_FA_PAUSE : ICON_FA_PLAY;
 
         ImGui::BeginDisabled(!hasData || state.isRecording);
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                              state.loopEnabled
-                                  ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                                  : ImGui::GetStyleColorVec4(ImGuiCol_Button));
-        if (ImGui::Button(ICON_FA_REPEAT, ImVec2(BUTTON_HEIGHT, BUTTON_HEIGHT))) {
+        
+        if (UI::Utilities::drawToolButton(ICON_FA_REPEAT, 
+                                          state.loopEnabled ? "Loop enabled" : "Loop disabled",
+                                          state.loopEnabled,
+                                          true,
+                                          BUTTON_HEIGHT,
+                                          0.5f)) {
             state.loopEnabled = !state.loopEnabled;
             if (state.audioOutput) {
                 state.audioOutput->setLoopEnabled(state.loopEnabled);
             }
         }
-        ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(state.loopEnabled ? "Loop enabled" : "Loop disabled");
-        }
 
         ImGui::SameLine(0.0f, transportSpacing);
 
-        if (ImGui::Button(ICON_FA_BACKWARD_STEP, ImVec2(BUTTON_HEIGHT, BUTTON_HEIGHT))) {
+        if (UI::Utilities::drawToolButton(ICON_FA_BACKWARD_STEP, "Jump to start", false, true, BUTTON_HEIGHT, -0.5f)) {
             Recorder::seekPlayback(state, 0.0f);
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Jump to start");
-        }
 
         ImGui::SameLine(0.0f, transportSpacing);
 
-        if (ImGui::Button(playPauseIcon, ImVec2(BUTTON_HEIGHT, BUTTON_HEIGHT))) {
+        if (UI::Utilities::drawToolButton(playPauseIcon, isPlaying ? "Pause" : "Play", false, true, BUTTON_HEIGHT, 1.0f)) {
             if (isPlaying) {
                 pausePlayback(state);
             } else {
                 startPlayback(state);
             }
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(isPlaying ? "Pause" : "Play");
         }
         ImGui::EndDisabled();
 
@@ -308,26 +304,17 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::BeginDisabled(!hasData);
 
         const bool trackingActive = state.timeline.trackScrubber;
-        const ImVec4 trackBase = trackingActive
-                                     ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                                     : ImGui::GetStyleColorVec4(ImGuiCol_Button);
-        const ImVec4 trackHover = trackingActive
-                                      ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                                      : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
-        ImGui::PushStyleColor(ImGuiCol_Button, trackBase);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, trackHover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button(ICON_FA_CROSSHAIRS, ImVec2(BUTTON_HEIGHT, BUTTON_HEIGHT))) {
+        if (UI::Utilities::drawToolButton(ICON_FA_CROSSHAIRS, 
+                                          trackingActive ? "Click to stop tracking" : "Click to follow scrubber",
+                                          trackingActive,
+                                          hasData,
+                                          BUTTON_HEIGHT)) {
             state.timeline.trackScrubber = !state.timeline.trackScrubber;
             if (state.timeline.trackScrubber) {
                 state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;
                 state.toolState.activeTool = UI::Utilities::ToolType::Cursor;
             }
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(state.timeline.trackScrubber ? "Click to stop tracking" : "Click to follow scrubber");
-        }
-        ImGui::PopStyleColor(3);
 
         ImGui::SameLine(0.0f, lockToExportSpacing);
 

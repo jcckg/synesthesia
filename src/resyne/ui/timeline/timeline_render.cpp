@@ -6,6 +6,7 @@
 #include "timeline_labels.h"
 #include "timeline_gradient.h"
 #include "timeline_viewport.h"
+#include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace ReSyne::Timeline::Render {
 
@@ -274,10 +275,11 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         Viewport::computeViewWindow(state, visibleFraction, viewStart, viewEnd, viewSpan);
     }
 
-    const ImU32 frameColour = IM_COL32(12, 12, 12, 255);
-    const ImU32 topBarColour = IM_COL32(18, 18, 18, 255);
-    const ImU32 gradientBgColour = IM_COL32(14, 14, 14, 255);
-    const ImU32 frameBorderColour = IM_COL32(46, 46, 46, 255);
+    const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
+    const ImU32 frameColour = isLightMode ? IM_COL32(235, 235, 235, 255) : IM_COL32(12, 12, 12, 255);
+    const ImU32 topBarColour = isLightMode ? IM_COL32(225, 225, 225, 255) : IM_COL32(18, 18, 18, 255);
+    const ImU32 gradientBgColour = isLightMode ? IM_COL32(240, 240, 240, 255) : IM_COL32(14, 14, 14, 255);
+    const ImU32 frameBorderColour = isLightMode ? IM_COL32(215, 215, 215, 255) : IM_COL32(46, 46, 46, 255);
 
     drawList->AddRectFilled(cursorPos, regionMax, frameColour, 4.0f);
     drawList->AddRectFilled(topMin, topMax, topBarColour, 4.0f, ImDrawFlags_RoundCornersTop);
@@ -294,9 +296,9 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
 
     drawList->AddLine(ImVec2(gradientMin.x, gradientMin.y),
                       ImVec2(gradientMax.x, gradientMin.y),
-                      IM_COL32(58, 58, 58, 255),
+                      isLightMode ? IM_COL32(215, 215, 215, 255) : IM_COL32(58, 58, 58, 255),
                       1.0f);
-    drawList->AddRect(gradientMin, gradientMax, IM_COL32(38, 38, 38, 255));
+    drawList->AddRect(gradientMin, gradientMax, isLightMode ? IM_COL32(210, 210, 210, 255) : IM_COL32(38, 38, 38, 255));
 
     const double duration = std::max(context.durationSeconds, 0.0);
     const double viewSpanNormalised = static_cast<double>(viewEnd - viewStart);
@@ -326,7 +328,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
 
             drawList->AddLine(ImVec2(x, topMin.y + 2.0f),
                               ImVec2(x, topMax.y),
-                              IM_COL32(180, 180, 180, 220),
+                              isLightMode ? IM_COL32(100, 100, 100, 200) : IM_COL32(180, 180, 180, 220),
                               1.0f);
 
             if (minorDivisions > 1 && majorStep > 0.0) {
@@ -343,7 +345,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                     const float mx = topMin.x + std::clamp(minorLocal, 0.0f, 1.0f) * size.x;
                     drawList->AddLine(ImVec2(mx, topMax.y - topBarHeight * 0.45f),
                                       ImVec2(mx, topMax.y - 2.0f),
-                                      IM_COL32(90, 90, 90, 180),
+                                      isLightMode ? IM_COL32(140, 140, 140, 160) : IM_COL32(90, 90, 90, 180),
                                       1.0f);
                 }
             }
@@ -352,7 +354,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
             ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
             ImVec2 textPos(x - textSize.x * 0.5f, topMin.y + 4.0f);
             textPos.x = std::clamp(textPos.x, topMin.x + 4.0f, topMax.x - textSize.x - 4.0f);
-            drawList->AddText(textPos, IM_COL32(215, 215, 215, 255), label.c_str());
+            drawList->AddText(textPos, isLightMode ? IM_COL32(60, 60, 60, 255) : IM_COL32(215, 215, 215, 255), label.c_str());
         }
     }
 
@@ -389,8 +391,8 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     ImVec2 handleMin(scrubberX - handleHalfWidth, topMin.y + 3.0f);
     ImVec2 handleMax(scrubberX + handleHalfWidth, handleMin.y + handleHeight);
 
-    const ImU32 scrubberShadow = IM_COL32(0, 0, 0, 140);
-    const ImU32 scrubberLight = IM_COL32(230, 230, 230, 220);
+    const ImU32 scrubberShadow = isLightMode ? IM_COL32(0, 0, 0, 60) : IM_COL32(0, 0, 0, 140);
+    const ImU32 scrubberLight = IM_COL32(255, 255, 255, 240);
     drawList->AddLine(ImVec2(scrubberX, topMax.y),
                       ImVec2(scrubberX, gradientMax.y),
                       scrubberShadow,
@@ -400,8 +402,8 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                       scrubberLight,
                       2.0f);
 
-    drawList->AddRectFilled(handleMin, handleMax, IM_COL32(200, 200, 200, 235), 3.0f);
-    drawList->AddRect(handleMin, handleMax, IM_COL32(60, 60, 60, 255), 3.0f);
+    drawList->AddRectFilled(handleMin, handleMax, isLightMode ? IM_COL32(230, 230, 230, 255) : IM_COL32(200, 200, 200, 235), 3.0f);
+    drawList->AddRect(handleMin, handleMax, isLightMode ? IM_COL32(160, 160, 160, 255) : IM_COL32(60, 60, 60, 255), 3.0f);
 
     const float overlayAlpha = context.showDropOverlay ? state.hoverOverlayAlpha * 0.3f : 0.0f;
     const float combinedAlpha = overlayAlpha + context.dropFlashAlpha * 0.6f;

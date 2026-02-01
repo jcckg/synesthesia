@@ -7,7 +7,9 @@
 #include <imgui.h>
 
 #include "controls.h"
+#include "controls.h"
 #include "device_manager.h"
+#include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace Sidebar {
 namespace {
@@ -72,21 +74,39 @@ void renderViewTabs(RenderArgs& args) {
     ImGui::PushID("SidebarViewTabs");
     for (int i = 0; i < 2; ++i) {
         const bool isActive = args.uiState.visualSettings.activeView == tabs[i].view;
-        const ImVec4 baseColour = isActive ? ImVec4(0.25f, 0.25f, 0.25f, 1.0f)
-                                           : ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
-        const ImVec4 hoverColour = isActive ? ImVec4(0.32f, 0.32f, 0.32f, 1.0f)
-                                            : ImVec4(0.18f, 0.18f, 0.18f, 1.0f);
-        const ImVec4 activeColour = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
+
+        ImVec4 baseColour;
+        ImVec4 hoverColour;
+        ImVec4 activeColour;
+        ImVec4 textColour;
+
+        if (isLightMode) {
+             baseColour = isActive ? ImVec4(0.85f, 0.85f, 0.85f, 1.0f)
+                                   : ImVec4(0.96f, 0.96f, 0.96f, 1.0f);
+             hoverColour = isActive ? ImVec4(0.80f, 0.80f, 0.80f, 1.0f)
+                                    : ImVec4(0.92f, 0.92f, 0.92f, 1.0f);
+             activeColour = ImVec4(0.75f, 0.75f, 0.75f, 1.0f);
+             textColour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
+        } else {
+             baseColour = isActive ? ImVec4(0.25f, 0.25f, 0.25f, 1.0f)
+                                   : ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
+             hoverColour = isActive ? ImVec4(0.32f, 0.32f, 0.32f, 1.0f)
+                                    : ImVec4(0.18f, 0.18f, 0.18f, 1.0f);
+             activeColour = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
+             textColour = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+        }
 
         ImGui::PushStyleColor(ImGuiCol_Button, baseColour);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoverColour);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, activeColour);
+        ImGui::PushStyleColor(ImGuiCol_Text, textColour);
 
         if (ImGui::Button(tabs[i].label, ImVec2(buttonWidth, TAB_HEIGHT))) {
             args.uiState.visualSettings.activeView = tabs[i].view;
         }
 
-        ImGui::PopStyleColor(3);
+        ImGui::PopStyleColor(4);
 
         if (i + 1 < 2) {
             ImGui::SameLine();
@@ -148,10 +168,13 @@ void renderReSyneSections(const RenderArgs& args) {
                                std::clamp(colour[2], 0.0f, 1.0f),
                                1.0f);
 
+        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
+        const ImU32 borderCol = isLightMode ? IM_COL32(180, 180, 180, 255) : IM_COL32(90, 90, 90, 255);
+
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         const ImVec2 squareMax(squarePos.x + squareSize, squarePos.y + squareSize);
         drawList->AddRectFilled(squarePos, squareMax, ImGui::ColorConvertFloat4ToU32(colourVec));
-        drawList->AddRect(squarePos, squareMax, IM_COL32(90, 90, 90, 255), 0.0f, 0, 1.0f);
+        drawList->AddRect(squarePos, squareMax, borderCol, 0.0f, 0, 1.0f);
         ImGui::Spacing();
     }
 

@@ -778,6 +778,9 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
 	if (!hasPlaybackData && !hasMicInput) {
 		processIdleState(clear_colour, deltaTime);
+		currentDisplayR = clear_colour[0];
+		currentDisplayG = clear_colour[1];
+		currentDisplayB = clear_colour[2];
 	}
 
 	if (state.visibility.showUI) {

@@ -1,6 +1,7 @@
 #include "resyne/recorder/recorder.h"
 
 #include "imgui.h"
+#include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace ReSyne {
 
@@ -21,7 +22,9 @@ void Recorder::drawLoadingDialog(RecorderState& state) {
         ImGui::Text("Importing file:");
         ImGui::Spacing();
 
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.85f, 0.85f, 0.85f, 1.0f));
+        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
+        const ImVec4 filenameCol = isLightMode ? ImVec4(0.25f, 0.25f, 0.25f, 1.0f) : ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_Text, filenameCol);
         ImGui::TextWrapped("%s", state.loadingFilename.c_str());
         ImGui::PopStyleColor();
 
@@ -34,7 +37,8 @@ void Recorder::drawLoadingDialog(RecorderState& state) {
 
         if (!state.loadingOperationStatus.empty()) {
             ImGui::Spacing();
-            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.7f, 0.7f, 0.7f, 1.0f));
+            const ImVec4 statusCol = isLightMode ? ImVec4(0.4f, 0.4f, 0.4f, 1.0f) : ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
+            ImGui::PushStyleColor(ImGuiCol_Text, statusCol);
             ImGui::TextWrapped("%s", state.loadingOperationStatus.c_str());
             ImGui::PopStyleColor();
         }

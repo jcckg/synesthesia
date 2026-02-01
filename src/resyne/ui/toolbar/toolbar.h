@@ -16,6 +16,13 @@ struct ToolbarRenderResult {
     ImVec2 size = ImVec2(0.0f, 0.0f);
 };
 
+bool drawToolButton(const char* label,
+                    const char* tooltip,
+                    bool active,
+                    bool enabled,
+                    float height,
+                    float opticalOffsetX = 0.0f);
+
 ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& context);
 
 }
