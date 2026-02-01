@@ -1,4 +1,5 @@
 #include "import_handler.h"
+#include "imgui_internal.h"
 
 #include <filesystem>
 #include <memory>
@@ -121,6 +122,8 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 			recorderState.showLoadingDialog = false;
 			recorderState.pendingImportPath.clear();
 			recorderState.importPhase = 0;
+			ImGui::ClearActiveID();
+			recorderState.focusRequested = true;
 		}
 	}
 }

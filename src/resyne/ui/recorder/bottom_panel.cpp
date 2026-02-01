@@ -35,6 +35,11 @@ void Recorder::drawBottomPanel(RecorderState& state,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
+    if (state.focusRequested) {
+        ImGui::SetWindowFocus();
+        state.focusRequested = false;
+    }
+
     const float buttonHeight = 25.0f;
     const float buttonWidth = 80.0f;
     const float controlsRowHeight = buttonHeight * 2 + 32.0f;

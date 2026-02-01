@@ -98,6 +98,7 @@ struct RecorderState {
 
     bool loopEnabled = true;
     bool showExportDialog = false;
+    bool focusRequested = false;
     int outputDeviceIndex = -1;
 
     int videoWidth = 1920;

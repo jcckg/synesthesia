@@ -38,6 +38,11 @@ void Recorder::drawFullWindow(RecorderState& state,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
+    if (state.focusRequested) {
+        ImGui::SetWindowFocus();
+        state.focusRequested = false;
+    }
+
     constexpr float CONTROL_HEIGHT = 30.0f;
     size_t sampleCount = 0;
     double duration = 0.0;

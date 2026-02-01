@@ -1,4 +1,5 @@
 #include "resyne/recorder/recorder.h"
+#include "imgui_internal.h"
 
 #include <algorithm>
 #include <utility>
@@ -189,6 +190,7 @@ void Recorder::handleKeyboardShortcuts(RecorderState& state,
     }
 
     if (hasPlaybackData && !state.isRecording && pressed(ImGuiKey_Space)) {
+        ImGui::ClearActiveID();
         const bool isPlaying = state.audioOutput && state.audioOutput->isPlaying();
         if (isPlaying) {
             pausePlayback(state);

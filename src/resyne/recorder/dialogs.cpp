@@ -225,6 +225,8 @@ void Recorder::handleLoadDialog(RecorderState& state) {
     if (!result.empty() && !result[0].empty()) {
         state.pendingImportPath = result[0];
         state.importPhase = 1;
+    } else {
+        state.focusRequested = true;
     }
 }
 
