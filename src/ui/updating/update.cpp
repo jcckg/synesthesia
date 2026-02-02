@@ -8,8 +8,9 @@
 #include <cstdlib>
 #include <memory>
 #include <array>
-#include <algorithm> 
+#include <algorithm>
 #include <vector>
+#include <iostream>
 
 #ifdef _WIN32
     #define NOMINMAX
@@ -22,19 +23,145 @@
     #include <ApplicationServices/ApplicationServices.h>
     #include <unistd.h>
     #include <sys/wait.h>
+    #include <fcntl.h>
+    #include <signal.h>
 #endif
 
 #include <nlohmann/json.hpp>
+
+namespace {
+
+bool isValidGitHubUrl(const std::string& url) {
+    if (url.length() > 2048) {
+        std::cerr << "[UpdateChecker] URL rejected: exceeds maximum length" << std::endl;
+        return false;
+    }
+
+    for (char c : url) {
+        if (c == '\r' || c == '\n' || c == '\0') {
+            std::cerr << "[UpdateChecker] URL rejected: contains control characters" << std::endl;
+            return false;
+        }
+    }
+
+    static const std::regex githubReleasesPattern(
+        R"(^https://github\.com/[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+/releases/)"
+    );
+
+    if (!std::regex_search(url, githubReleasesPattern)) {
+        std::cerr << "[UpdateChecker] URL rejected: not a valid GitHub releases URL" << std::endl;
+        return false;
+    }
+
+    return true;
+}
+
+#ifdef __APPLE__
+std::pair<bool, std::string> executeProcessSafely(
+    const std::vector<std::string>& args,
+    int timeoutSeconds = 10
+) {
+    if (args.empty()) {
+        return {false, ""};
+    }
+
+    int pipefd[2];
+    if (pipe(pipefd) != 0) {
+        std::cerr << "[UpdateChecker] Failed to create pipe" << std::endl;
+        return {false, ""};
+    }
+
+    pid_t pid = fork();
+    if (pid < 0) {
+        std::cerr << "[UpdateChecker] Failed to fork process" << std::endl;
+        close(pipefd[0]);
+        close(pipefd[1]);
+        return {false, ""};
+    }
+
+    if (pid == 0) {
+        close(pipefd[0]);
+        dup2(pipefd[1], STDOUT_FILENO);
+        close(pipefd[1]);
+
+        int devnull = open("/dev/null", O_WRONLY);
+        if (devnull >= 0) {
+            dup2(devnull, STDERR_FILENO);
+            close(devnull);
+        }
+
+        std::vector<char*> argv;
+        for (const auto& arg : args) {
+            argv.push_back(const_cast<char*>(arg.c_str()));
+        }
+        argv.push_back(nullptr);
+
+        execvp(argv[0], argv.data());
+        _exit(127);
+    }
+
+    close(pipefd[1]);
+
+    int flags = fcntl(pipefd[0], F_GETFL);
+    fcntl(pipefd[0], F_SETFL, flags | O_NONBLOCK);
+
+    std::string output;
+    char buffer[4096];
+    int elapsedMs = 0;
+    const int pollIntervalMs = 50;
+    const int timeoutMs = timeoutSeconds * 1000;
+
+    while (elapsedMs < timeoutMs) {
+        int status;
+        pid_t result = waitpid(pid, &status, WNOHANG);
+
+        if (result == pid) {
+            ssize_t bytesRead;
+            while ((bytesRead = read(pipefd[0], buffer, sizeof(buffer) - 1)) > 0) {
+                buffer[bytesRead] = '\0';
+                output += buffer;
+            }
+            close(pipefd[0]);
+            return {WIFEXITED(status) && WEXITSTATUS(status) == 0, output};
+        }
+
+        if (result < 0) {
+            close(pipefd[0]);
+            return {false, ""};
+        }
+
+        ssize_t bytesRead = read(pipefd[0], buffer, sizeof(buffer) - 1);
+        if (bytesRead > 0) {
+            buffer[bytesRead] = '\0';
+            output += buffer;
+        }
+
+        usleep(pollIntervalMs * 1000);
+        elapsedMs += pollIntervalMs;
+    }
+
+    std::cerr << "[UpdateChecker] Process timed out after " << timeoutSeconds << " seconds" << std::endl;
+    kill(pid, SIGKILL);
+    waitpid(pid, nullptr, 0);
+    close(pipefd[0]);
+    return {false, ""};
+}
+#endif
+
+}
 
 struct UpdateChecker::Impl {
     std::atomic<bool> requestInProgress{false};
     std::atomic<bool> updateCheckComplete{false};
     std::atomic<bool> shutdownRequested{false};
     std::mutex dataMutex;
-    
+
     std::string latestVersionFound;
     std::string downloadUrlFound;
     bool updateFoundFlag = false;
+
+    UpdateError lastError = UpdateError::None;
+    std::string lastErrorMessage;
 
     std::thread updateThread;
     std::mutex threadMutex;
@@ -142,26 +269,52 @@ void UpdateChecker::checkForUpdates(const std::string& repoOwner, const std::str
             
             performHttpRequest(apiUrl, [implPtr](const std::string& response) {
                 if (implPtr->shutdownRequested) return;
-                
+
                 std::lock_guard<std::mutex> lock(implPtr->dataMutex);
-                
+
                 if (implPtr->shutdownRequested) return;
-                
+
+                if (response.empty()) {
+                    std::cerr << "[UpdateChecker] Empty response from API" << std::endl;
+                    implPtr->lastError = UpdateError::NetworkError;
+                    implPtr->lastErrorMessage = "Failed to fetch update information";
+                    implPtr->updateFoundFlag = false;
+                    implPtr->updateCheckComplete = true;
+                    implPtr->requestInProgress = false;
+                    return;
+                }
+
                 try {
                     auto json = nlohmann::json::parse(response);
-                    
+
                     if (json.contains("tag_name") && json.contains("html_url")) {
                         std::string latestVersion = json["tag_name"];
                         std::string htmlUrl = json["html_url"];
-                        
-                        implPtr->latestVersionFound = latestVersion;
-                        implPtr->downloadUrlFound = htmlUrl;
-                        implPtr->updateFoundFlag = true;
+
+                        if (!isValidGitHubUrl(htmlUrl)) {
+                            implPtr->lastError = UpdateError::InvalidUrl;
+                            implPtr->lastErrorMessage = "Invalid download URL in response";
+                            implPtr->updateFoundFlag = false;
+                        } else {
+                            implPtr->latestVersionFound = latestVersion;
+                            implPtr->downloadUrlFound = htmlUrl;
+                            implPtr->updateFoundFlag = true;
+                            implPtr->lastError = UpdateError::None;
+                            implPtr->lastErrorMessage.clear();
+                        }
+                    } else {
+                        std::cerr << "[UpdateChecker] Response missing required fields" << std::endl;
+                        implPtr->lastError = UpdateError::InvalidResponse;
+                        implPtr->lastErrorMessage = "Invalid response format";
+                        implPtr->updateFoundFlag = false;
                     }
                 } catch (const std::exception& e) {
+                    std::cerr << "[UpdateChecker] JSON parse error: " << e.what() << std::endl;
+                    implPtr->lastError = UpdateError::InvalidResponse;
+                    implPtr->lastErrorMessage = std::string("Parse error: ") + e.what();
                     implPtr->updateFoundFlag = false;
                 }
-                
+
                 implPtr->updateCheckComplete = true;
                 implPtr->requestInProgress = false;
             });
@@ -169,106 +322,105 @@ void UpdateChecker::checkForUpdates(const std::string& repoOwner, const std::str
     }
 }
 
-std::string executeCommand(const char* cmd) {
-    std::array<char, 128> buffer;
-    std::string result;
-    
-#ifdef _WIN32
-    std::unique_ptr<FILE, decltype(&_pclose)> pipe(_popen(cmd, "r"), _pclose);
-#else
-    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd, "r"), pclose);
-#endif
-    
-    if (!pipe) {
-        return "";
-    }
-    
-    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
-        result += buffer.data();
-    }
-    
-    return result;
-}
 
 void UpdateChecker::performHttpRequest(const std::string& url, std::function<void(const std::string&)> callback) {
 #ifdef _WIN32
-    HINTERNET hSession = WinHttpOpen(L"UpdateChecker/1.0", 
+    HINTERNET hSession = WinHttpOpen(L"UpdateChecker/1.0",
                                      WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                     WINHTTP_NO_PROXY_NAME, 
+                                     WINHTTP_NO_PROXY_NAME,
                                      WINHTTP_NO_PROXY_BYPASS, 0);
-    
+
     if (!hSession) {
+        std::cerr << "[UpdateChecker] Failed to open WinHttp session" << std::endl;
         callback("");
         return;
     }
-    
+
+    DWORD timeout = 10000;
+    WinHttpSetOption(hSession, WINHTTP_OPTION_CONNECT_TIMEOUT, &timeout, sizeof(timeout));
+    WinHttpSetOption(hSession, WINHTTP_OPTION_SEND_TIMEOUT, &timeout, sizeof(timeout));
+    WinHttpSetOption(hSession, WINHTTP_OPTION_RECEIVE_TIMEOUT, &timeout, sizeof(timeout));
+
+    DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+    WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+
     std::wstring wUrl(url.begin(), url.end());
     URL_COMPONENTS urlComp = {0};
     urlComp.dwStructSize = sizeof(urlComp);
-    
+
     wchar_t hostname[256] = {0};
     wchar_t path[1024] = {0};
-    
+
     urlComp.lpszHostName = hostname;
     urlComp.dwHostNameLength = sizeof(hostname)/sizeof(wchar_t);
     urlComp.lpszUrlPath = path;
     urlComp.dwUrlPathLength = sizeof(path)/sizeof(wchar_t);
-    
+
     if (!WinHttpCrackUrl(wUrl.c_str(), 0, 0, &urlComp)) {
+        std::cerr << "[UpdateChecker] Failed to parse URL" << std::endl;
         WinHttpCloseHandle(hSession);
         callback("");
         return;
     }
-    
+
     HINTERNET hConnect = WinHttpConnect(hSession, hostname, urlComp.nPort, 0);
     if (!hConnect) {
+        std::cerr << "[UpdateChecker] Failed to connect to server" << std::endl;
         WinHttpCloseHandle(hSession);
         callback("");
         return;
     }
-    
-    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path, NULL, 
-                                           WINHTTP_NO_REFERER, 
+
+    HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", path, NULL,
+                                           WINHTTP_NO_REFERER,
                                            WINHTTP_DEFAULT_ACCEPT_TYPES,
                                            WINHTTP_FLAG_SECURE);
-    
+
     if (!hRequest) {
+        std::cerr << "[UpdateChecker] Failed to open request" << std::endl;
         WinHttpCloseHandle(hConnect);
         WinHttpCloseHandle(hSession);
         callback("");
         return;
     }
-    
-    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, 
+
+    if (WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
         WinHttpReceiveResponse(hRequest, NULL)) {
-        
+
         std::string response;
         DWORD bytesAvailable = 0;
-        
+
         do {
             if (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
                 std::vector<char> buffer(bytesAvailable, 0);
                 DWORD bytesRead = 0;
-                
+
                 if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead)) {
                     response.append(buffer.data(), bytesRead);
                 }
             }
         } while (bytesAvailable > 0);
-        
+
         callback(response);
     } else {
+        std::cerr << "[UpdateChecker] HTTP request failed" << std::endl;
         callback("");
     }
-    
+
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
     WinHttpCloseHandle(hSession);
-    
+
 #elif __APPLE__
-    std::string command = "curl -s -L --max-time 10 \"" + url + "\"";
-    std::string response = executeCommand(command.c_str());
+    std::vector<std::string> args = {
+        "/usr/bin/curl", "-s", "-L", "--max-time", "10", "--", url
+    };
+
+    auto [success, response] = executeProcessSafely(args, 10);
+    if (!success) {
+        std::cerr << "[UpdateChecker] curl request failed" << std::endl;
+    }
     callback(response);
 #endif
 }
@@ -276,10 +428,13 @@ void UpdateChecker::performHttpRequest(const std::string& url, std::function<voi
 void UpdateChecker::update(UpdateState& state) {
     if (pImpl->updateCheckComplete.load()) {
         std::lock_guard<std::mutex> lock(pImpl->dataMutex);
-        
+
+        state.lastError = pImpl->lastError;
+        state.lastErrorMessage = pImpl->lastErrorMessage;
+
         if (pImpl->updateFoundFlag) {
             bool isNewer = isNewerVersion(state.currentVersion, pImpl->latestVersionFound);
-            
+
             if (isNewer) {
                 state.updateAvailable = true;
                 state.latestVersion = pImpl->latestVersionFound;
@@ -288,11 +443,13 @@ void UpdateChecker::update(UpdateState& state) {
                 state.updatePromptVisible = true;
             }
         }
-        
+
         pImpl->updateCheckComplete = false;
         pImpl->updateFoundFlag = false;
+        pImpl->lastError = UpdateError::None;
+        pImpl->lastErrorMessage.clear();
     }
-    
+
     state.checkingForUpdate = pImpl->requestInProgress.load();
 }
 
@@ -305,8 +462,8 @@ void UpdateChecker::drawUpdateBanner(UpdateState& state, float, float) {
         return;
     }
 
-    const float popupWidth = 280.0f;
-    const float popupHeight = 70.0f;
+    const float popupWidth = 220.0f;
+    const float popupHeight = 110.0f;
     const float marginRight = 20.0f;
     const float marginBottom = 53.0f;
 
@@ -317,41 +474,34 @@ void UpdateChecker::drawUpdateBanner(UpdateState& state, float, float) {
     ImGui::SetNextWindowPos(ImVec2(posX, posY));
     ImGui::SetNextWindowSize(ImVec2(popupWidth, popupHeight));
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
+    bgColor.w = 0.97f;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12, 10));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.15f, 0.25f, 0.45f, 0.95f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, bgColor);
 
     ImGui::Begin("##UpdateBanner", nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
                 ImGuiWindowFlags_NoCollapse);
 
-    ImGui::SetCursorPosY(8.0f);
     ImGui::Text("Update Available");
-
-    ImGui::SetCursorPosY(26.0f);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.8f, 0.85f, 0.9f, 1.0f));
+    ImGui::Spacing();
     ImGui::TextWrapped("Version %s is available", state.latestVersion.c_str());
-    ImGui::PopStyleColor();
+    ImGui::Spacing();
 
-    ImGui::SetCursorPosY(popupHeight - 28.0f);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.3f, 0.5f, 0.8f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.4f, 0.6f, 0.9f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.2f, 0.4f, 0.7f, 1.0f));
-
-    if (ImGui::Button("Download", ImVec2(100, 20))) {
+    if (ImGui::Button("Download", ImVec2(100, 22))) {
         openDownloadUrl(state.downloadUrl);
     }
-    ImGui::PopStyleColor(3);
 
-    ImGui::SameLine();
-    ImGui::SetCursorPosX(popupWidth - 70);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.3f, 0.4f, 0.6f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.4f, 0.5f, 0.8f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.15f, 0.25f, 0.35f, 1.0f));
+    ImGui::SameLine(0, 8);
 
-    if (ImGui::Button("Dismiss", ImVec2(60, 20))) {
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.5f, 0.5f, 0.3f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.5f, 0.5f, 0.5f, 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.5f, 0.5f, 0.7f));
+    if (ImGui::Button("Dismiss", ImVec2(70, 22))) {
         state.updatePromptVisible = false;
         state.shouldShowBanner = false;
     }
@@ -364,12 +514,19 @@ void UpdateChecker::drawUpdateBanner(UpdateState& state, float, float) {
 }
 
 void UpdateChecker::openDownloadUrl(const std::string& url) {
+    if (!isValidGitHubUrl(url)) {
+        std::cerr << "[UpdateChecker] Refusing to open invalid URL" << std::endl;
+        return;
+    }
+
 #ifdef _WIN32
     ShellExecuteA(NULL, "open", url.c_str(), NULL, NULL, SW_SHOWNORMAL);
 #elif __APPLE__
-    std::string command = "open \"" + url + "\"";
-    int result = system(command.c_str());
-    if (result != 0) {
+    std::vector<std::string> args = {"/usr/bin/open", "--", url};
+
+    auto [success, output] = executeProcessSafely(args, 5);
+    if (!success) {
+        std::cerr << "[UpdateChecker] Failed to open URL in browser" << std::endl;
     }
 #endif
 }

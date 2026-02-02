@@ -5,6 +5,14 @@
 #include <memory>
 #include "version.h"
 
+enum class UpdateError {
+    None,
+    NetworkError,
+    InvalidResponse,
+    InvalidUrl,
+    Timeout
+};
+
 struct UpdateState {
     bool updateAvailable = false;
     bool checkingForUpdate = false;
@@ -13,9 +21,12 @@ struct UpdateState {
     std::string latestVersion;
     std::string downloadUrl;
     std::string currentVersion = SYNESTHESIA_VERSION_STRING;
-    
+
     bool shouldShowBanner = false;
     float bannerHeight = 35.0f;
+
+    UpdateError lastError = UpdateError::None;
+    std::string lastErrorMessage;
 };
 
 class UpdateChecker {
