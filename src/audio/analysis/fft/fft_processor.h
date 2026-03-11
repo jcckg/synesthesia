@@ -80,6 +80,7 @@ public:
 	void reset();
 	void setEQGains(float low, float mid, float high);
 	void setCriticalBandSmoothingEnabled(bool enabled);
+	void setMelWeightingEnabled(bool enabled);
 	bool getCriticalBandSmoothingEnabled() const { return criticalBandSmoothingEnabled; }
 	const std::vector<CriticalBand>& getCriticalBands() const { return criticalBands; }
 
@@ -96,6 +97,11 @@ public:
 	static float calculateERB(float frequency);
 	static float frequencyToERBScale(float frequency);
 	static float erbScaleToFrequency(float erbScale);
+	static void prepareMagnitudesForDisplay(std::vector<float>& magnitudes,
+										   float sampleRate,
+										   float lowGain,
+										   float midGain,
+										   float highGain);
 
 private:
 	kiss_fftr_cfg fft_cfg;
@@ -136,6 +142,7 @@ private:
 
 	std::vector<CriticalBand> criticalBands;
 	bool criticalBandSmoothingEnabled;
+	bool melWeightingEnabled;
 	static constexpr float LOUDNESS_SMOOTHING = 0.3f;
 	static constexpr size_t FLUX_HISTORY_SIZE = 10;
 	static constexpr float ONSET_THRESHOLD_MULTIPLIER = 1.5f;

@@ -99,6 +99,12 @@ public:
 
 	static void interpolateCIE(float wavelength, float& X, float& Y, float& Z);
 
+	// Nayatani (1997) Helmholtz-Kohlrausch VCC correction for luminous colours
+	// Returns the ratio of perceived brightness to CIE luminance
+	// Values > 1 indicate the colour appears brighter than its luminance suggests
+	// strength [0,1] controls blend: 0 = no correction, 1 = full Nayatani VCC
+	static float helmholtzKohlrauschCorrection(float X, float Y, float Z, float strength = 0.35f);
+
 private:
 	static bool isValidFrequencyMagnitudePair(float frequency, float magnitude) {
 		return std::isfinite(frequency) && std::isfinite(magnitude) &&

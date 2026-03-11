@@ -50,6 +50,7 @@ void applyImportedSequence(RecorderState& state,
     }
     metadata.numBins = metadata.numBins == 0 ? static_cast<size_t>(metadata.fftSize / 2 + 1) : metadata.numBins;
 
+    Recorder::clearLoadedAudio(state);
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         state.samples = std::move(samples);
@@ -57,29 +58,11 @@ void applyImportedSequence(RecorderState& state,
 
     state.metadata = std::move(metadata);
     state.isRecording = false;
-    state.isPlaybackInitialised = false;
-    state.reconstructedAudio.clear();
-
-    if (state.audioOutput) {
-        state.audioOutput->stop();
-        state.audioOutput->clearAudioData();
-    }
-
     state.fallbackSampleRate = state.metadata.sampleRate;
     state.fallbackFftSize = state.metadata.fftSize;
     state.fallbackHopSize = state.metadata.hopSize;
     state.dropFlashAlpha = 1.0f;
     state.statusMessageTimer = STATUS_MESSAGE_DURATION;
-    state.timeline.scrubberNormalisedPosition = 0.0f;
-    state.timeline.isScrubberDragging = false;
-    state.timeline.hoverOverlayAlpha = 0.0f;
-    state.timeline.gradientRegionValid = false;
-    state.timeline.zoomFactor = 1.0f;
-    state.timeline.viewCentreNormalised = 0.5f;
-    state.timeline.grabStartViewCentre = 0.5f;
-    state.timeline.trackScrubber = false;
-    state.timeline.isZoomGestureActive = false;
-    state.timeline.isGrabGestureActive = false;
 
     RecorderColourCache::rebuildCache(state);
 }

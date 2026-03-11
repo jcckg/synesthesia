@@ -6,6 +6,9 @@ struct SmoothingSignalFeatures {
     float spectralFlatness = 0.0f;
     float loudnessNormalised = 0.0f;
     float brightnessNormalised = 0.0f;
+    float spectralSpreadNorm = 0.0f;   // [0,1] — spread/centroid ratio, normalised
+    float spectralRolloffNorm = 0.0f;  // [0,1] — log-normalised rolloff frequency
+    float spectralCrestNorm = 0.0f;    // [0,1] — log2(crestFactor), normalised
 };
 
 class SpringSmoother {

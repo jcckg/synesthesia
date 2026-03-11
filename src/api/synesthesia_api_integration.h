@@ -52,7 +52,7 @@ private:
     mutable std::mutex spectral_data_mutex_;
     std::vector<API::SpectralBin> last_spectral_data_;
     uint32_t last_sample_rate_{44100};
-    uint32_t last_fft_size_{1024};
+    uint32_t last_fft_size_{2048};
     uint64_t last_timestamp_{0};
     
     bool smoothing_enabled_{true};

@@ -1,6 +1,7 @@
 #if defined(__APPLE__) || defined(__linux__)
 #include "cli.h"
 #include "headless.h"
+#include "batch_exporter.h"
 #endif
 
 #include <iostream>
@@ -19,6 +20,22 @@ int main(int argc, char* argv[]) {
     if (args.showVersion) {
         CLI::Arguments::printVersion();
         return 0;
+    }
+
+    if (args.exportGradients) {
+        if (args.inputDir.empty()) {
+            std::cerr << "Error: --export-gradients requires --input <dir>\n";
+            std::cerr << "Use --help for usage information.\n";
+            return 1;
+        }
+        if (args.outputDir.empty()) {
+            std::cerr << "Error: --export-gradients requires --output <dir>\n";
+            std::cerr << "Use --help for usage information.\n";
+            return 1;
+        }
+        return CLI::BatchExporter::run(args.inputDir, args.outputDir, args.copyAudio,
+                                       args.gradientWidth, args.gradientHeight, args.trueSize,
+                                       args.noSmoothing, args.noMelWeighting, args.numWorkers);
     }
 
     if (args.headless) {

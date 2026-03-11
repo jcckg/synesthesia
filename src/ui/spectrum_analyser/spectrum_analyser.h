@@ -32,6 +32,7 @@ private:
     std::vector<std::vector<float>> previousFrameData;
     std::vector<std::vector<float>> smoothingBuffer1;
     std::vector<std::vector<float>> smoothingBuffer2;
+    std::vector<float> smoothingScratchBuffer;
     std::vector<float> gaussianWeights;
     std::vector<float> cachedFrequencies;
     float lastCachedSampleRate = 0.0f;

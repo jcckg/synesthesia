@@ -73,7 +73,9 @@ set(SOURCES
     ${SRC_DIR}/resyne/ui/timeline/timeline_viewport.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline_render.cpp
     ${SRC_DIR}/resyne/controller/controller.cpp
+    ${SRC_DIR}/utilities/cli/batch_exporter.cpp
 )
+
 
 function(add_api_sources)
     if(ENABLE_API_SERVER)

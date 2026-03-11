@@ -30,7 +30,8 @@ FFTProcessor::FFTProcessor()
 	  fluxHistory(FLUX_HISTORY_SIZE, 0.0f),
 	  fluxHistoryIndex(0),
 	  frameCounter(0),
-	  criticalBandSmoothingEnabled(true) {
+	  criticalBandSmoothingEnabled(true),
+	  melWeightingEnabled(true) {
 	fft_cfg = kiss_fftr_alloc(FFT_SIZE, 0, nullptr, nullptr);
 	if (!fft_cfg) {
 		throw std::runtime_error("Error allocating FFTR configuration.");
@@ -262,10 +263,12 @@ void FFTProcessor::processMagnitudes(std::vector<float>& magnitudes, const float
 	// Reference: Malcolm Slaney, "Auditory Toolbox: A MATLAB Toolbox for Auditory
 	// Modeling Work", Technical Report #1998-010, Interval Research Corporation, 1998.
 	// https://engineering.purdue.edu/~malcolm/apple/tr45/AuditoryToolboxTechReport.pdf
-	for (size_t i = minBinIndex; i <= maxBinIndex; ++i) {
-		const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
-		const float melWeight = calculateMelWeight(freq);
-		magnitudes[i] *= melWeight;
+	if (melWeightingEnabled) {
+		for (size_t i = minBinIndex; i <= maxBinIndex; ++i) {
+			const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
+			const float melWeight = calculateMelWeight(freq);
+			magnitudes[i] *= melWeight;
+		}
 	}
 
 	equaliser.applyEQ(magnitudes, sampleRate, FFT_SIZE);
@@ -458,6 +461,11 @@ void FFTProcessor::setCriticalBandSmoothingEnabled(const bool enabled) {
 	criticalBandSmoothingEnabled = enabled;
 }
 
+void FFTProcessor::setMelWeightingEnabled(const bool enabled) {
+	std::lock_guard<std::mutex> lock(processingMutex);
+	melWeightingEnabled = enabled;
+}
+
 void FFTProcessor::initialiseCriticalBands(const float sampleRate) {
 	criticalBands.clear();
 
@@ -494,6 +502,56 @@ void FFTProcessor::initialiseCriticalBands(const float sampleRate) {
 			band.rawMagnitude = 0.0f;
 
 			criticalBands.push_back(band);
+		}
+	}
+}
+
+void FFTProcessor::prepareMagnitudesForDisplay(std::vector<float>& magnitudes,
+												 float sampleRate,
+												 float lowGain,
+												 float midGain,
+												 float highGain) {
+	if (magnitudes.empty() || sampleRate <= 0.0f) {
+		return;
+	}
+
+	float maxMagnitude = 0.0f;
+	for (const float magnitude : magnitudes) {
+		if (std::isfinite(magnitude)) {
+			maxMagnitude = std::max(maxMagnitude, magnitude);
+		}
+	}
+
+	if (maxMagnitude <= MAGNITUDE_EPSILON) {
+		std::ranges::fill(magnitudes, 0.0f);
+		return;
+	}
+
+	const size_t minBinIndex =
+		std::max(static_cast<size_t>(1), static_cast<size_t>(MIN_FREQ * FFT_SIZE / sampleRate));
+	const size_t maxBinIndex = std::min(
+		static_cast<size_t>(MAX_FREQ * FFT_SIZE / sampleRate) + 1,
+		magnitudes.size() - 1);
+	const float normalisationFactor = 1.0f / maxMagnitude;
+
+	for (size_t i = 0; i < magnitudes.size(); ++i) {
+		if (i < minBinIndex || i > maxBinIndex || !std::isfinite(magnitudes[i])) {
+			magnitudes[i] = 0.0f;
+			continue;
+		}
+
+		magnitudes[i] *= normalisationFactor;
+		const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
+		magnitudes[i] *= calculateMelWeight(freq);
+	}
+
+	Equaliser equaliser;
+	equaliser.setGains(lowGain, midGain, highGain);
+	equaliser.applyEQ(magnitudes, sampleRate, FFT_SIZE);
+
+	for (float& magnitude : magnitudes) {
+		if (!std::isfinite(magnitude) || magnitude < 0.0f) {
+			magnitude = 0.0f;
 		}
 	}
 }

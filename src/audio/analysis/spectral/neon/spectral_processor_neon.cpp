@@ -193,14 +193,15 @@ void calculateSpectralFlatness(
 		float32x4_t mag = vld1q_f32(&magnitudes[i]);
 		uint32x4_t valid = vcgtq_f32(mag, v_threshold);
 
+		// Use safe input for log: invalid lanes get 1.0f so log(1.0f) = 0.0f
+		// This avoids calling log(0.0f) which produces -inf and can raise FE_DIVBYZERO
+		float32x4_t safe_mag = vbslq_f32(valid, mag, vdupq_n_f32(1.0f));
 		float log_values[4];
-		vst1q_f32(log_values, mag);
+		vst1q_f32(log_values, safe_mag);
 		for (int j = 0; j < 4; ++j) {
 			log_values[j] = std::log(log_values[j]);
 		}
-		float32x4_t log_mag = vld1q_f32(log_values);
-
-		float32x4_t masked_log = vbslq_f32(valid, log_mag, vdupq_n_f32(0.0f));
+		float32x4_t masked_log = vld1q_f32(log_values);
 		float32x4_t masked_mag = vbslq_f32(valid, mag, vdupq_n_f32(0.0f));
 		int32x4_t masked_count = vbslq_s32(valid, v_one, vdupq_n_s32(0));
 

@@ -3,13 +3,13 @@
 #include "resyne/decoding/audio_decoder.h"
 #include "resyne/encoding/formats/exporter.h"
 #include "audio/analysis/fft/fft_processor.h"
-#include "audio/analysis/eq/equaliser.h"
 #include "colour/colour_mapper.h"
 #include "constants.h"
 
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <span>
 
 namespace ReSyne::ImportHelpers {
@@ -30,7 +30,9 @@ bool importAudioFile(
     AudioMetadata& metadata,
     std::string& errorMessage,
     const ProgressCallback& onProgress,
-    const PreviewCallback& onPreview
+    const PreviewCallback& onPreview,
+    const bool enableSmoothing,
+    const bool enableMelWeighting
 ) {
     (void)gamma;
     (void)colourSpace;
@@ -56,18 +58,24 @@ bool importAudioFile(
         return false;
     }
 
-    std::vector<FFTProcessor> processors(numChannels);
+    const int resolvedHopSize = FFTProcessor::HOP_SIZE;
+
+    std::vector<std::unique_ptr<FFTProcessor>> processors;
+    processors.reserve(numChannels);
+    for (uint32_t ch = 0; ch < numChannels; ++ch) {
+        processors.push_back(std::make_unique<FFTProcessor>());
+    }
     for (auto& processor : processors) {
-        processor.setEQGains(importLowGain, importMidGain, importHighGain);
+        processor->setEQGains(importLowGain, importMidGain, importHighGain);
+        processor->setCriticalBandSmoothingEnabled(enableSmoothing);
+        processor->setMelWeightingEnabled(enableMelWeighting);
     }
 
-    Equaliser equaliser;
-    equaliser.setGains(importLowGain, importMidGain, importHighGain);
     samples.clear();
-    samples.reserve(decoded.channelSamples[0].size() / FFTProcessor::HOP_SIZE + 1);
+    samples.reserve(decoded.channelSamples[0].size() / static_cast<size_t>(resolvedHopSize) + 1);
 
     const float sampleRate = static_cast<float>(decoded.sampleRate);
-    const size_t chunkSize = static_cast<size_t>(FFTProcessor::HOP_SIZE) * 8;
+    const size_t chunkSize = static_cast<size_t>(resolvedHopSize) * 8;
     size_t offset = 0;
     uint64_t frameIndex = 0;
 
@@ -101,7 +109,7 @@ bool importAudioFile(
                 }
             }
 
-            sample.timestamp = static_cast<double>(frameIndex * FFTProcessor::HOP_SIZE) /
+            sample.timestamp = (static_cast<double>(frameIndex) * static_cast<double>(resolvedHopSize)) /
                                static_cast<double>(decoded.sampleRate);
             samples.push_back(std::move(sample));
             ++frameIndex;
@@ -117,10 +125,10 @@ bool importAudioFile(
 
         std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
         for (uint32_t ch = 0; ch < numChannels; ++ch) {
-            processors[ch].processBuffer(
+            processors[ch]->processBuffer(
                 std::span<const float>(decoded.channelSamples[ch].data() + offset, chunk),
                 sampleRate);
-            channelFrames[ch] = processors[ch].getBufferedFrames();
+            channelFrames[ch] = processors[ch]->getBufferedFrames();
         }
 
         offset += chunk;
@@ -129,7 +137,7 @@ bool importAudioFile(
         const float processProgress = static_cast<float>(offset) / static_cast<float>(decoded.channelSamples[0].size());
         if (onProgress) onProgress(0.2f + (processProgress * 0.6f));
 
-        if (onPreview && (samples.size() % 500 < chunkSize / FFTProcessor::HOP_SIZE ||
+        if (onPreview && (samples.size() % 500 < chunkSize / static_cast<size_t>(resolvedHopSize) ||
             offset >= decoded.channelSamples[0].size())) {
             onPreview(samples);
         }
@@ -138,7 +146,7 @@ bool importAudioFile(
     if (samples.size() < RecorderState::MAX_SAMPLES) {
         std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
         for (uint32_t ch = 0; ch < numChannels; ++ch) {
-            channelFrames[ch] = processors[ch].getBufferedFrames();
+            channelFrames[ch] = processors[ch]->getBufferedFrames();
         }
         consumeFrames(std::move(channelFrames));
     }
@@ -156,7 +164,7 @@ bool importAudioFile(
         }
     }
 
-    const double overlapBufferOffsetSeconds = static_cast<double>(FFTProcessor::HOP_SIZE) /
+    const double overlapBufferOffsetSeconds = static_cast<double>(resolvedHopSize) /
                                                static_cast<double>(decoded.sampleRate);
 
     if (firstValidFrame > 0) {
@@ -164,7 +172,7 @@ bool importAudioFile(
     }
 
     for (size_t i = 0; i < samples.size(); ++i) {
-        samples[i].timestamp -= static_cast<double>(firstValidFrame * FFTProcessor::HOP_SIZE) /
+        samples[i].timestamp -= (static_cast<double>(firstValidFrame) * static_cast<double>(resolvedHopSize)) /
                                  static_cast<double>(decoded.sampleRate);
         samples[i].timestamp -= overlapBufferOffsetSeconds;
         if (samples[i].timestamp < 0.0) {
@@ -174,7 +182,7 @@ bool importAudioFile(
 
     metadata.sampleRate = sampleRate;
     metadata.fftSize = FFTProcessor::FFT_SIZE;
-    metadata.hopSize = FFTProcessor::HOP_SIZE;
+    metadata.hopSize = resolvedHopSize;
     metadata.windowType = "hann";
     metadata.numFrames = samples.size();
     metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
@@ -202,6 +210,9 @@ bool importResyneFile(
     (void)gamma;
     (void)colourSpace;
     (void)applyGamutMapping;
+    (void)importLowGain;
+    (void)importMidGain;
+    (void)importHighGain;
     if (onProgress) onProgress(0.05f);
 
     ProgressCallback fileProgress;
@@ -246,9 +257,6 @@ bool importResyneFile(
     if (metadata.windowType.empty()) {
         metadata.windowType = "hann";
     }
-
-    Equaliser equaliser;
-    equaliser.setGains(importLowGain, importMidGain, importHighGain);
 
     const double hopSizeAsDouble = static_cast<double>(resolvedHopSize);
     const size_t totalFrames = samples.size();

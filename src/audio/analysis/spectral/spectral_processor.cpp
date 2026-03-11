@@ -142,22 +142,58 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 		chromaZ = Z_total * invWeight;
 	}
 
+	// Inharmonicity-gated desaturation: only noise-like signals lose saturation
+	// PMC/12673365 (2025): harmonic richness INCREASES saturation — a violin with many
+	// harmonics appears more vivid, not less. Only percussive/inharmonic content desaturates.
+	// spectralFlatness reliably separates tonal (0) from noisy (1); spectralSpread alone cannot
+	// distinguish "wide harmonics" (vivid) from "wide noise" (pastel).
+	// Gate: desaturation = flatness * spread, so tonal wide-spread signals stay vivid.
+	{
+		constexpr float NOISE_DESATURATION_STRENGTH = 0.35f;
+		constexpr float REF_X_OVER_Y = synesthesia::constants::CIE_D65_REF_X / synesthesia::constants::CIE_D65_REF_Y;
+		constexpr float REF_Z_OVER_Y = synesthesia::constants::CIE_D65_REF_Z / synesthesia::constants::CIE_D65_REF_Y;
+
+		const float flatness = std::clamp(result.spectralFlatness, 0.0f, 1.0f);
+		const float spreadRatio = (result.spectralCentroid > 100.0f)
+			? result.spectralSpread / result.spectralCentroid
+			: 0.0f;
+		const float normSpread = std::clamp(spreadRatio, 0.0f, 2.0f) * 0.5f;
+
+		// Only desaturate when BOTH noisy AND spectrally wide
+		const float desatAmount = flatness * normSpread * NOISE_DESATURATION_STRENGTH;
+		const float saturation = std::clamp(1.0f - desatAmount, 0.4f, 1.0f);
+
+		const float neutralX = chromaY * REF_X_OVER_Y;
+		const float neutralZ = chromaY * REF_Z_OVER_Y;
+		chromaX = std::lerp(neutralX, chromaX, saturation);
+		chromaZ = std::lerp(neutralZ, chromaZ, saturation);
+	}
+
 	const float scaledX = chromaX * brightnessGain;
 	const float scaledY = chromaY * brightnessGain;
 	const float scaledZ = chromaZ * brightnessGain;
 
-	result.X = scaledX;
-	result.Y = scaledY;
-	result.Z = scaledZ;
+	// Nayatani (1997) Helmholtz-Kohlrausch correction
+	// Saturated colours appear brighter than their CIE luminance suggests;
+	// dividing by the VCC factor reduces luminance for high-chroma colours
+	// so that perceived brightness is uniform across hues at equal loudness
+	const float hkFactor = ColourMapper::helmholtzKohlrauschCorrection(scaledX, scaledY, scaledZ);
+	const float hkX = scaledX / hkFactor;
+	const float hkY = scaledY / hkFactor;
+	const float hkZ = scaledZ / hkFactor;
+
+	result.X = hkX;
+	result.Y = hkY;
+	result.Z = hkZ;
 	result.loudnessDb = clampedLoudnessDb;
 	result.loudnessNormalised = loudnessNormalised;
 	result.brightnessNormalised = brightnessGain;
 	result.estimatedSPL = estimatedSPL;
 	result.luminanceCdM2 = luminanceCdM2;
 
-	ColourMapper::XYZtoRGB(scaledX, scaledY, scaledZ, result.r, result.g, result.b, colourSpace, true, applyGamutMapping);
+	ColourMapper::XYZtoRGB(hkX, hkY, hkZ, result.r, result.g, result.b, colourSpace, true, applyGamutMapping);
 
-	ColourMapper::XYZtoLab(scaledX, scaledY, scaledZ, result.L, result.a, result.b_comp);
+	ColourMapper::XYZtoLab(hkX, hkY, hkZ, result.L, result.a, result.b_comp);
 
 	result.dominantFrequency = result.spectralCentroid;
 	result.dominantWavelength = ColourMapper::logFrequencyToWavelength(result.dominantFrequency);
@@ -480,7 +516,46 @@ void SpectralProcessor::integrateSpectrumCIE(
 	Y_total = 0.0f;
 	Z_total = 0.0f;
 
-	for (size_t i = 0; i < magnitudes.size(); ++i) {
+	const size_t count = magnitudes.size();
+
+#if defined(USE_NEON_OPTIMISATIONS) || defined(USE_SSE_OPTIMISATIONS)
+	const bool useSIMD =
+#ifdef USE_NEON_OPTIMISATIONS
+		SpectralProcessorNEON::isNEONAvailable()
+#elif defined(USE_SSE_OPTIMISATIONS)
+		SpectralProcessorSSE::isSSEAvailable()
+#endif
+		&& count >= 4;
+
+	if (useSIMD) {
+		// Pre-compute CIE XYZ values for each bin (CIE lookup is not vectorisable)
+		thread_local std::vector<float> xVals, yVals, zVals;
+		xVals.assign(count, 0.0f);
+		yVals.assign(count, 0.0f);
+		zVals.assign(count, 0.0f);
+
+		for (size_t i = 0; i < count; ++i) {
+			const float frequency = frequencies[i];
+			const float magnitude = magnitudes[i];
+			if (frequency < MIN_FREQ || frequency > MAX_FREQ || magnitude <= 1e-6f) {
+				continue;
+			}
+			const float wavelength = ColourMapper::logFrequencyToWavelength(frequency);
+			ColourMapper::interpolateCIE(wavelength, xVals[i], yVals[i], zVals[i]);
+		}
+
+#ifdef USE_NEON_OPTIMISATIONS
+		SpectralProcessorNEON::integrateSpectrumCIE(
+			magnitudes, xVals, yVals, zVals, count, X_total, Y_total, Z_total);
+#elif defined(USE_SSE_OPTIMISATIONS)
+		SpectralProcessorSSE::integrateSpectrumCIE(
+			magnitudes, xVals, yVals, zVals, count, X_total, Y_total, Z_total);
+#endif
+		return;
+	}
+#endif
+
+	for (size_t i = 0; i < count; ++i) {
 		const float magnitude = magnitudes[i];
 		const float frequency = frequencies[i];
 

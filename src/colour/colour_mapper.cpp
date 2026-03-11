@@ -387,6 +387,62 @@ void ColourMapper::OklabtoRGB(const float L, const float a, const float b_comp, 
 	b = encodeValue(definition.transfer, linearB);
 }
 
+// Nayatani (1997) "Simple estimation methods for the Helmholtz-Kohlrausch effect"
+// VCC (Variable-Chromatic-Color) method for luminous colours
+// Color Research & Application, 22(6), 385-401
+// Reference implementation: https://github.com/ilia3101/HKE (Unlicense)
+float ColourMapper::helmholtzKohlrauschCorrection(const float X, const float Y, const float Z, const float strength) {
+	const float sum = X + 15.0f * Y + 3.0f * Z;
+	if (sum <= EPSILON_TINY) {
+		return 1.0f;
+	}
+
+	// CIE 1976 u'v' chromaticity
+	const float uPrime = 4.0f * X / sum;
+	const float vPrime = 9.0f * Y / sum;
+
+	// Distance from D65 white point in u'v'
+	const float du = uPrime - synesthesia::constants::CIE_D65_U_PRIME;
+	const float dv = vPrime - synesthesia::constants::CIE_D65_V_PRIME;
+
+	// CIE 1976 saturation
+	const float suv = 13.0f * std::sqrt(du * du + dv * dv);
+	if (suv < EPSILON_SMALL) {
+		return 1.0f;
+	}
+
+	// Hue angle relative to D65 white point
+	const float theta = std::atan2(dv, du);
+
+	// Nayatani q(θ) Fourier series - hue-dependent chromatic strength function
+	const float cosT = std::cos(theta);
+	const float sinT = std::sin(theta);
+	const float cos2T = 2.0f * cosT * cosT - 1.0f;
+	const float sin2T = 2.0f * sinT * cosT;
+	const float cos3T = cosT * cos2T - sinT * sin2T;
+	const float sin3T = sinT * cos2T + cosT * sin2T;
+	const float cos4T = cos2T * cos2T - sin2T * sin2T;
+	const float sin4T = 2.0f * sin2T * cos2T;
+
+	const float q = -0.01585f
+		- 0.03017f * cosT  - 0.04556f * cos2T - 0.02667f * cos3T - 0.00295f * cos4T
+		+ 0.14592f * sinT  + 0.05084f * sin2T - 0.01900f * sin3T - 0.00764f * sin4T;
+
+	// Adapting luminance factor K_Br
+	// LaPow = std::pow(HK_ADAPTING_LUMINANCE, 0.4495f) = std::pow(100.0f, 0.4495f)
+	constexpr float LaPow = 7.9250f;
+	constexpr float KBr = 0.2717f * (6.469f + 6.362f * LaPow) / (6.469f + LaPow);
+
+	// VCC correction for luminous colours
+	const float inner = 1.0f + (-0.8660f * q + 0.0872f * KBr) * suv + 0.3086f;
+	const float vcc = 0.4462f * inner * inner * inner;
+
+	// Clamp full VCC to reasonable range, then blend with strength
+	const float clampedVcc = std::clamp(vcc, 0.5f, 3.0f);
+	const float clampedStrength = std::clamp(strength, 0.0f, 1.0f);
+	return 1.0f + clampedStrength * (clampedVcc - 1.0f);
+}
+
 void ColourMapper::gamutMapRGB(float& r, float& g, float& b) {
 	const bool isOutOfGamut = r < 0.0f || r > 1.0f || g < 0.0f || g > 1.0f || b < 0.0f || b > 1.0f;
 	if (!isOutOfGamut) {

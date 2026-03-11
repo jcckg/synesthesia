@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 
+#include "audio/analysis/fft/fft_processor.h"
 #include "audio/analysis/loudness/loudness_meter.h"
 #include "colour/colour_mapper.h"
 #include "constants.h"
@@ -17,7 +18,7 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 		return;
 	}
 
-	const int fftSize = metadata.fftSize > 0 ? metadata.fftSize : 2048;
+	const int fftSize = metadata.fftSize > 0 ? metadata.fftSize : FFTProcessor::FFT_SIZE;
 	const int hopSize = metadata.hopSize > 0 ? metadata.hopSize : (fftSize / 2);
 
 	const uint32_t numChannels = !samples.empty() ? samples.front().channels : 1;

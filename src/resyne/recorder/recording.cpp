@@ -7,6 +7,23 @@
 
 namespace ReSyne {
 
+namespace {
+
+void resetTimelineState(RecorderState& state) {
+    state.timeline.scrubberNormalisedPosition = 0.0f;
+    state.timeline.isScrubberDragging = false;
+    state.timeline.hoverOverlayAlpha = 0.0f;
+    state.timeline.gradientRegionValid = false;
+    state.timeline.zoomFactor = 1.0f;
+    state.timeline.viewCentreNormalised = 0.5f;
+    state.timeline.grabStartViewCentre = 0.5f;
+    state.timeline.trackScrubber = false;
+    state.timeline.isZoomGestureActive = false;
+    state.timeline.isGrabGestureActive = false;
+}
+
+}
+
 RecorderState::~RecorderState() {
     if (importThread.joinable()) {
         importThread.join();
@@ -14,6 +31,44 @@ RecorderState::~RecorderState() {
     if (exportThread.joinable()) {
         exportThread.join();
     }
+}
+
+bool Recorder::hasLoadedAudio(RecorderState& state) {
+    std::lock_guard<std::mutex> lock(state.samplesMutex);
+    return !state.samples.empty() ||
+           !state.previewSamples.empty() ||
+           !state.reconstructedAudio.empty() ||
+           (state.audioOutput && state.audioOutput->getTotalSamples() > 0);
+}
+
+void Recorder::clearLoadedAudio(RecorderState& state) {
+    state.isRecording = false;
+    if (state.audioOutput) {
+        state.audioOutput->stop();
+        state.audioOutput->clearAudioData();
+    }
+
+    std::lock_guard<std::mutex> lock(state.samplesMutex);
+    state.samples.clear();
+    state.previewSamples.clear();
+    state.importedSamples.clear();
+    state.importedMetadata = {};
+    state.importErrorMessage.clear();
+    state.sampleColourCache.clear();
+    state.colourCacheDirty = true;
+    state.reconstructedAudio.clear();
+    state.metadata = {};
+    state.firstFrameCounter = 0;
+    state.fallbackSampleRate = 0.0f;
+    state.fallbackFftSize = 0;
+    state.fallbackHopSize = 0;
+    state.isPlaybackInitialised = false;
+    state.dropFlashAlpha = 0.0f;
+    state.statusMessage.clear();
+    state.statusMessageTimer = 0.0f;
+    state.loadingOperationStatus.clear();
+    state.previewReady.store(false, std::memory_order_release);
+    resetTimelineState(state);
 }
 
 void Recorder::updateFromFFTProcessor(RecorderState& state,
@@ -34,14 +89,24 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
         return;
     }
 
-    auto frames = audioProcessor.getFFTProcessor(0).getBufferedFrames();
-    if (frames.empty()) {
+    std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
+    size_t frameCount = 0;
+    for (size_t ch = 0; ch < numChannels; ++ch) {
+        channelFrames[ch] = audioProcessor.getFFTProcessor(ch).getBufferedFrames();
+        if (channelFrames[ch].empty()) {
+            return;
+        }
+        frameCount = ch == 0 ? channelFrames[ch].size() : std::min(frameCount, channelFrames[ch].size());
+    }
+
+    if (frameCount == 0) {
         return;
     }
 
     std::lock_guard<std::mutex> lock(state.samplesMutex);
 
-    for (const auto& frame : frames) {
+    for (size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
+        const auto& frame = channelFrames[0][frameIndex];
         if (state.samples.size() >= RecorderState::MAX_SAMPLES) {
             state.isRecording = false;
             return;
@@ -61,26 +126,20 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
         sample.loudnessLUFS = frame.loudnessLUFS;
         sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
 
+        bool channelsAligned = true;
         for (size_t ch = 0; ch < numChannels; ++ch) {
-            auto channelFrames = audioProcessor.getFFTProcessor(ch).getBufferedFrames();
-            if (!channelFrames.empty() && frame.frameCounter < channelFrames.size()) {
-                bool foundMatch = false;
-                for (const auto& chFrame : channelFrames) {
-                    if (chFrame.frameCounter == frame.frameCounter) {
-                        sample.magnitudes[ch] = chFrame.magnitudes;
-                        sample.phases[ch] = chFrame.phases;
-                        foundMatch = true;
-                        break;
-                    }
-                }
-                if (!foundMatch) {
-                    sample.magnitudes[ch] = channelFrames[0].magnitudes;
-                    sample.phases[ch] = channelFrames[0].phases;
-                }
-            } else {
-                sample.magnitudes[ch] = std::vector<float>();
-                sample.phases[ch] = std::vector<float>();
+            const auto& channelFrame = channelFrames[ch][frameIndex];
+            if (channelFrame.frameCounter != frame.frameCounter) {
+                channelsAligned = false;
+                break;
             }
+
+            sample.magnitudes[ch] = channelFrame.magnitudes;
+            sample.phases[ch] = channelFrame.phases;
+        }
+
+        if (!channelsAligned) {
+            continue;
         }
 
         uint64_t relativeFrame = frame.frameCounter - state.firstFrameCounter;
@@ -96,31 +155,11 @@ void Recorder::startRecording(RecorderState& state,
                                          FFTProcessor& fftProcessor,
                                          int fftSize,
                                          int hopSize) {
-    if (state.audioOutput) {
-        state.audioOutput->stop();
-        state.audioOutput->clearAudioData();
-    }
-
     fftProcessor.getBufferedFrames();
+    clearLoadedAudio(state);
 
     std::lock_guard<std::mutex> lock(state.samplesMutex);
     state.isRecording = true;
-    state.firstFrameCounter = 0;
-    state.samples.clear();
-    state.sampleColourCache.clear();
-    state.colourCacheDirty = true;
-    state.isPlaybackInitialised = false;
-    state.reconstructedAudio.clear();
-    state.timeline.scrubberNormalisedPosition = 0.0f;
-    state.timeline.isScrubberDragging = false;
-    state.timeline.hoverOverlayAlpha = 0.0f;
-    state.timeline.zoomFactor = 1.0f;
-    state.timeline.viewCentreNormalised = 0.5f;
-    state.timeline.grabStartViewCentre = 0.5f;
-    state.timeline.trackScrubber = false;
-    state.timeline.isZoomGestureActive = false;
-    state.timeline.isGrabGestureActive = false;
-
     state.metadata.version = "3.0.0";
     state.metadata.sampleRate = 0.0f;
     state.metadata.fftSize = fftSize;

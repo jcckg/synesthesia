@@ -233,6 +233,45 @@ void calculateSpectralFlatness(
 	}
 }
 
+void integrateSpectrumCIE(
+	std::span<const float> magnitudes,
+	std::span<const float> X_values,
+	std::span<const float> Y_values,
+	std::span<const float> Z_values,
+	const size_t count,
+	float& X_total,
+	float& Y_total,
+	float& Z_total
+) {
+	const size_t simdCount = count & ~size_t{3};
+
+	__m128 xAcc = _mm_setzero_ps();
+	__m128 yAcc = _mm_setzero_ps();
+	__m128 zAcc = _mm_setzero_ps();
+
+	for (size_t i = 0; i < simdCount; i += 4) {
+		__m128 mag = _mm_loadu_ps(&magnitudes[i]);
+		__m128 x = _mm_loadu_ps(&X_values[i]);
+		__m128 y = _mm_loadu_ps(&Y_values[i]);
+		__m128 z = _mm_loadu_ps(&Z_values[i]);
+
+		xAcc = _mm_add_ps(xAcc, _mm_mul_ps(mag, x));
+		yAcc = _mm_add_ps(yAcc, _mm_mul_ps(mag, y));
+		zAcc = _mm_add_ps(zAcc, _mm_mul_ps(mag, z));
+	}
+
+	horizontalAdd(xAcc, X_total);
+	horizontalAdd(yAcc, Y_total);
+	horizontalAdd(zAcc, Z_total);
+
+	for (size_t i = simdCount; i < count; ++i) {
+		const float mag = magnitudes[i];
+		X_total += mag * X_values[i];
+		Y_total += mag * Y_values[i];
+		Z_total += mag * Z_values[i];
+	}
+}
+
 }
 
 #endif

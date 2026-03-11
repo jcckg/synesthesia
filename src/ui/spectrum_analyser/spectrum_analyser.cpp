@@ -44,22 +44,19 @@ void SpectrumAnalyser::drawSpectrumWindow(
     }
 
     float sampleRate = getSampleRate(devices, selectedDeviceIndex);
-    
-    std::vector<std::vector<float>> xData(numChannels, std::vector<float>(LINE_COUNT));
-    std::vector<std::vector<float>> yData(numChannels, std::vector<float>(LINE_COUNT));
 
     for (size_t ch = 0; ch < numChannels; ++ch) {
-         prepareSpectrumData(xData[ch], yData[ch], smoothedMagnitudes[ch], sampleRate);
+         prepareSpectrumData(smoothingBuffer1[ch], smoothingBuffer2[ch], smoothedMagnitudes[ch], sampleRate);
 
          if (previousFrameData[ch].size() != LINE_COUNT) previousFrameData[ch].resize(LINE_COUNT, 0.0f);
          for (size_t i = 0; i < LINE_COUNT; ++i) {
-            yData[ch][i] = TEMPORAL_SMOOTHING_FACTOR * previousFrameData[ch][i] +
-                           (1.0f - TEMPORAL_SMOOTHING_FACTOR) * yData[ch][i];
-            previousFrameData[ch][i] = yData[ch][i];
+            smoothingBuffer2[ch][i] = TEMPORAL_SMOOTHING_FACTOR * previousFrameData[ch][i] +
+                                      (1.0f - TEMPORAL_SMOOTHING_FACTOR) * smoothingBuffer2[ch][i];
+            previousFrameData[ch][i] = smoothingBuffer2[ch][i];
          }
 
-         smoothData(yData[ch]);
-         applyDynamicRangeCompensation(yData[ch]);
+         smoothData(smoothingBuffer2[ch]);
+         applyDynamicRangeCompensation(smoothingBuffer2[ch]);
     }
 
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));
@@ -94,10 +91,10 @@ void SpectrumAnalyser::drawSpectrumWindow(
             fillColour.w = 0.1f;
 
             ImPlot::SetNextFillStyle(fillColour);
-            ImPlot::PlotShaded(("##Fill" + std::to_string(ch)).c_str(), xData[ch].data(), yData[ch].data(), LINE_COUNT, 0.0);
+            ImPlot::PlotShaded(("##Fill" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT, 0.0);
 
             ImPlot::SetNextLineStyle(SPECTRUM_COLOUR, 1.5f);
-            ImPlot::PlotLine(("##Line" + std::to_string(ch)).c_str(), xData[ch].data(), yData[ch].data(), LINE_COUNT);
+            ImPlot::PlotLine(("##Line" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT);
         }
         
         ImPlot::EndPlot();
@@ -194,7 +191,11 @@ void SpectrumAnalyser::smoothData(std::vector<float>& yData) {
 }
 
 void SpectrumAnalyser::applyGaussianSmoothing(std::vector<float>& yData) {
-    std::vector<float> tempBuffer(LINE_COUNT, 0.0f);
+    if (smoothingScratchBuffer.size() != LINE_COUNT) {
+        smoothingScratchBuffer.assign(LINE_COUNT, 0.0f);
+    } else {
+        std::fill(smoothingScratchBuffer.begin(), smoothingScratchBuffer.end(), 0.0f);
+    }
     
     for (size_t i = 0; i < LINE_COUNT; ++i) {
         int windowSize = getFrequencyDependentWindowSize(static_cast<int>(i));
@@ -210,10 +211,10 @@ void SpectrumAnalyser::applyGaussianSmoothing(std::vector<float>& yData) {
             totalWeight += weight;
         }
         
-        tempBuffer[i] = totalWeight > 0.0f ? weightedSum / totalWeight : yData[i];
+        smoothingScratchBuffer[i] = totalWeight > 0.0f ? weightedSum / totalWeight : yData[i];
     }
     
-    yData = std::move(tempBuffer);
+    yData.assign(smoothingScratchBuffer.begin(), smoothingScratchBuffer.end());
 }
 
 int SpectrumAnalyser::getFrequencyDependentWindowSize(int index) {
@@ -270,8 +271,15 @@ void SpectrumAnalyser::initialiseBuffers(size_t numChannels) {
 
     smoothingBuffer1.resize(numChannels);
     smoothingBuffer2.resize(numChannels);
+    for (auto& buf : smoothingBuffer1) {
+        buf.resize(LINE_COUNT, 0.0f);
+    }
+    for (auto& buf : smoothingBuffer2) {
+        buf.resize(LINE_COUNT, 0.0f);
+    }
     
     cachedFrequencies.resize(LINE_COUNT);
+    smoothingScratchBuffer.resize(LINE_COUNT, 0.0f);
     precomputeGaussianWeights();
     buffersInitialised = true;
 }

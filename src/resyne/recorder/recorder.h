@@ -153,6 +153,8 @@ public:
                                bool applyGamutMapping);
 
     static bool isSupportedImportFile(const std::string& filepath);
+    static bool hasLoadedAudio(RecorderState& state);
+    static void clearLoadedAudio(RecorderState& state);
 
     static void startRecording(RecorderState& state,
                                FFTProcessor& fftProcessor,

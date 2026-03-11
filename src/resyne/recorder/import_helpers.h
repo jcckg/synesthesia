@@ -29,7 +29,9 @@ bool importAudioFile(
     AudioMetadata& metadata,
     std::string& errorMessage,
     const ProgressCallback& onProgress = nullptr,
-    const PreviewCallback& onPreview = nullptr
+    const PreviewCallback& onPreview = nullptr,
+    bool enableSmoothing = true,
+    bool enableMelWeighting = true
 );
 
 bool importResyneFile(

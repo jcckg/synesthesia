@@ -25,5 +25,12 @@ constexpr float MAX_USABLE_WAVELENGTH_NM = 700.0f;
 constexpr float REFERENCE_SPL_AT_0_LUFS = 83.0f;
 constexpr float REFERENCE_WHITE_LUMINANCE_CDM2 = 100.0f;
 
+// Nayatani (1997) Helmholtz-Kohlrausch VCC correction constants
+// CIE D65 white point in CIE 1976 u'v' UCS coordinates
+// u' = 4x / (-2x + 12y + 3), v' = 9y / (-2x + 12y + 3) where x=0.31271, y=0.32902
+constexpr float CIE_D65_U_PRIME = 0.19784f;
+constexpr float CIE_D65_V_PRIME = 0.46835f;
+constexpr float HK_ADAPTING_LUMINANCE = 100.0f;
+
 }
 }

@@ -13,7 +13,6 @@
 #include "audio_input.h"
 #include "controls.h"
 #include "colour_mapper.h"
-#include "equaliser.h"
 #include "fft_processor.h"
 #include "smoothing.h"
 #include "styling.h"
@@ -50,6 +49,20 @@ void initialiseApp(UIState& state) {
 }
 
 namespace {
+
+void populateSpectralNorms(const ColourMapper::ColourResult& result, SmoothingSignalFeatures& features) {
+	constexpr float kMinCentroid = 100.0f;
+	constexpr float kMinRolloff = 20.0f;
+	constexpr float kRolloffLogMin = 4.32f;   // log2(20)
+	constexpr float kRolloffLogMax = 14.29f;  // log2(20000)
+	constexpr float kCrestLogScale = 4.0f;
+
+	const float centroid = std::max(result.spectralCentroid, kMinCentroid);
+	features.spectralSpreadNorm = std::clamp(result.spectralSpread / centroid * 0.5f, 0.0f, 1.0f);
+	const float rolloffLog = std::log2(std::max(result.spectralRolloff, kMinRolloff));
+	features.spectralRolloffNorm = std::clamp((rolloffLog - kRolloffLogMin) / (kRolloffLogMax - kRolloffLogMin), 0.0f, 1.0f);
+	features.spectralCrestNorm = std::clamp(std::log2(std::max(result.spectralCrestFactor, 1.0f)) / kCrestLogScale, 0.0f, 1.0f);
+}
 
 struct ColourUpdateContext {
 	float deltaTime;
@@ -261,6 +274,8 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 			playbackSignalFeatures.brightnessNormalised =
 				std::clamp(playbackColourResult.brightnessNormalised, 0.0f, 1.0f);
 
+			populateSpectralNorms(playbackColourResult, playbackSignalFeatures);
+
 #ifdef ENABLE_API_SERVER
 			auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
 			api.updateColourData(currentMagnitudes, currentPhases, playbackColourResult.dominantFrequency,
@@ -343,33 +358,12 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 						sampleRate = UIConstants::DEFAULT_SAMPLE_RATE;
 					}
 
-					constexpr float MIN_FREQ = 20.0f;
-					constexpr float MAX_FREQ = 20000.0f;
-					constexpr size_t FFT_SIZE = 2048;
-
-					const float normalisationFactor = 1.0f / maxMagnitude;
-					const size_t minBinIndex = std::max(
-						static_cast<size_t>(1),
-						static_cast<size_t>(MIN_FREQ * FFT_SIZE / sampleRate));
-					const size_t maxBinIndex = std::min(
-						static_cast<size_t>(MAX_FREQ * FFT_SIZE / sampleRate) + 1,
-						processedMagnitudes.size() - 1);
-
-					if (minBinIndex <= maxBinIndex) {
-						for (size_t i = minBinIndex; i <= maxBinIndex; ++i) {
-							processedMagnitudes[i] *= normalisationFactor;
-							const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
-							const float melWeight = FFTProcessor::calculateMelWeight(freq);
-							processedMagnitudes[i] *= melWeight;
-						}
-					}
-
-					static Equaliser playbackEqualiser;
-					playbackEqualiser.setGains(
+					FFTProcessor::prepareMagnitudesForDisplay(
+						processedMagnitudes,
+						sampleRate,
 						state.audioSettings.lowGain,
 						state.audioSettings.midGain,
 						state.audioSettings.highGain);
-					playbackEqualiser.applyEQ(processedMagnitudes, sampleRate, FFT_SIZE);
 
 					sanitiseMagnitudes(processedMagnitudes);
 
@@ -422,19 +416,20 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 	recorderState.importLowGain = state.audioSettings.lowGain;
 	recorderState.importMidGain = state.audioSettings.midGain;
 	recorderState.importHighGain = state.audioSettings.highGain;
-
-	audioInput.getFFTProcessor().setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
 	audioInput.setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
 
-	const size_t numChannels = audioInput.getAudioProcessor().getChannelCount();
-	const size_t numBins = FFTProcessor::FFT_SIZE / 2 + 1;
+	const auto spectralData = audioInput.getSpectralData();
+	const size_t numChannels = spectralData.magnitudes.size();
+	const size_t numBins = numChannels > 0
+		? spectralData.magnitudes[0].size()
+		: static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
 	std::vector<float> magnitudes(numBins, 0.0f);
 	std::vector<float> phases(numBins, 0.0f);
 
 	if (numChannels > 0) {
 		for (size_t ch = 0; ch < numChannels; ++ch) {
-			const auto& chMags = audioInput.getFFTProcessor(ch).getMagnitudesBuffer();
-			const auto& chPhases = audioInput.getFFTProcessor(ch).getPhaseBuffer();
+			const auto& chMags = spectralData.magnitudes[ch];
+			const auto& chPhases = spectralData.phases[ch];
 			
 			if (chMags.size() == numBins) {
 				for (size_t i = 0; i < numBins; ++i) {
@@ -498,6 +493,8 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 		liveFeatures.spectralFlatness = colourResult.spectralFlatness;
 		liveFeatures.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
 		liveFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
+
+		populateSpectralNorms(colourResult, liveFeatures);
 
 		applyColourSmoothing(displayR, displayG, displayB,
 							currentDisplayR, currentDisplayG, currentDisplayB, ctx, &liveFeatures);

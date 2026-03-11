@@ -36,6 +36,17 @@ namespace SpectralProcessorSSE {
 		int& validCount
 	);
 
+	void integrateSpectrumCIE(
+		std::span<const float> magnitudes,
+		std::span<const float> X_values,
+		std::span<const float> Y_values,
+		std::span<const float> Z_values,
+		size_t count,
+		float& X_total,
+		float& Y_total,
+		float& Z_total
+	);
+
 	bool isSSEAvailable();
 }
 

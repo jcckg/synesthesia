@@ -135,6 +135,11 @@ bool SpringSmoother::update(const float deltaTime, const SmoothingSignalFeatures
     const float noiseSuppression = 1.0f - clampedFlatness * FLATNESS_SUPPRESSION;
     adaptiveStiffness *= std::clamp(noiseSuppression, 0.35f, 1.0f);
 
+    // Spectral crest factor → stiffness: peaky spectrum (bell, snare) = crisper colour snap
+    // Complements onset detection — crest detects spectral peakiness even without a temporal onset
+    constexpr float CREST_STIFFNESS_GAIN = 0.35f;
+    adaptiveStiffness *= (1.0f + features.spectralCrestNorm * CREST_STIFFNESS_GAIN);
+
     constexpr float PSYCHOACOUSTIC_RANGE = 0.5f;
     const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
     const float brightness = std::clamp(features.brightnessNormalised, 0.0f, 1.0f);
@@ -146,7 +151,13 @@ bool SpringSmoother::update(const float deltaTime, const SmoothingSignalFeatures
     m_stiffness = adaptiveStiffness;
     constexpr float BASE_DAMPING_RATIO = 0.65f;
     constexpr float DAMPING_RANGE = 0.25f;
-    const float dampingRatio = std::clamp(BASE_DAMPING_RATIO + (1.0f - loudness) * DAMPING_RANGE, 0.55f, 0.9f);
+    // Spectral rolloff → damping: bright timbre (high rolloff) = more responsive colour;
+    // warm timbre (low rolloff) = more sluggish, smoother transitions
+    constexpr float ROLLOFF_DAMPING_RANGE = 0.15f;
+    const float rolloffDampingOffset = (0.5f - features.spectralRolloffNorm) * ROLLOFF_DAMPING_RANGE;
+    const float dampingRatio = std::clamp(
+        BASE_DAMPING_RATIO + (1.0f - loudness) * DAMPING_RANGE + rolloffDampingOffset,
+        0.45f, 0.95f);
     m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * dampingRatio;
 
     return update(deltaTime);
@@ -158,5 +169,6 @@ bool SpringSmoother::update(const float deltaTime, const bool onsetDetected,
     features.onsetDetected = onsetDetected;
     features.spectralFlux = spectralFlux;
     features.spectralFlatness = spectralFlatness;
+    features.spectralRolloffNorm = 0.5f;  // neutral: no damping offset when rolloff is unavailable
     return update(deltaTime, features);
 }
