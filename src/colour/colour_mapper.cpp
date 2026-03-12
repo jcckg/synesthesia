@@ -24,6 +24,18 @@ struct ColourSpaceDefinition {
 	TransferFunction transfer;
 };
 
+constexpr std::array<float, 9> XYZ_TO_OKLAB_LMS{
+	0.8190224379967030f, 0.3619062600528904f, -0.1288737815209879f,
+	0.0329836539323885f, 0.9292868615863434f, 0.0361446663506424f,
+	0.0481771893596242f, 0.2642395317527308f, 0.6335478284694309f
+};
+
+constexpr std::array<float, 9> OKLAB_LMS_TO_XYZ{
+	1.2268798758459243f, -0.5578149944602171f, 0.2813910456659647f,
+	-0.0405757452148008f, 1.1122868032803170f, -0.0717110580655164f,
+	-0.0763729366746601f, -0.4214933324022432f, 1.5869240198367816f
+};
+
 constexpr ColourSpaceDefinition REC2020_DEFINITION{
 	.xyzToRgb = {1.7166512f, -0.35567078f, -0.25336629f,
 				 -0.66668433f, 1.6164813f, 0.01576854f,
@@ -73,6 +85,25 @@ std::array<float, 3> multiplyMatrix(const std::array<float, 9>& matrix,
 		matrix[3] * x + matrix[4] * y + matrix[5] * z,
 		matrix[6] * x + matrix[7] * y + matrix[8] * z
 	};
+}
+
+std::array<float, 3> xyzToOklab(const float X, const float Y, const float Z) {
+	const auto lms = multiplyMatrix(XYZ_TO_OKLAB_LMS, X, Y, Z);
+	const float l = std::cbrt(lms[0]);
+	const float m = std::cbrt(lms[1]);
+	const float s = std::cbrt(lms[2]);
+	return {
+		0.2104542683093140f * l + 0.7936177747023054f * m - 0.0040720430116193f * s,
+		1.9779985324311684f * l - 2.4285922420485799f * m + 0.4505937096174110f * s,
+		0.0259040424655478f * l + 0.7827717124575296f * m - 0.8086757549230774f * s
+	};
+}
+
+std::array<float, 3> oklabToXyz(const float L, const float a, const float b) {
+	const float l = L + 0.3963377773761749f * a + 0.2158037573099136f * b;
+	const float m = L - 0.1055613458156586f * a - 0.0638541728258133f * b;
+	const float s = L - 0.0894841775298119f * a - 1.2914855480194092f * b;
+	return multiplyMatrix(OKLAB_LMS_TO_XYZ, l * l * l, m * m * m, s * s * s);
 }
 
 void mixTowardsWhite(float& r, float& g, float& b) {
@@ -210,31 +241,19 @@ void ColourMapper::interpolateCIE(float wavelength, float& X, float& Y, float& Z
 void ColourMapper::XYZtoRGB(const float X, const float Y, const float Z, float& r, float& g,
 							float& b, const ColourSpace colourSpace, const bool applyGamma,
 							const bool applyGamutMapping) {
-	const auto& definition = getDefinition(colourSpace);
-	const auto linearRgb = multiplyMatrix(definition.xyzToRgb, X, Y, Z);
+	float outR;
+	float outG;
+	float outB;
+	XYZtoLinearRGB(X, Y, Z, outR, outG, outB, colourSpace);
 
-	float outR = linearRgb[0];
-	float outG = linearRgb[1];
-	float outB = linearRgb[2];
+	if (applyGamma) {
+		encodeRGB(outR, outG, outB, r, g, b, colourSpace, applyGamutMapping);
+		return;
+	}
 
 	if (applyGamutMapping) {
 		mixTowardsWhite(outR, outG, outB);
 		gamutMapRGB(outR, outG, outB);
-		outR = std::clamp(outR, 0.0f, 1.0f);
-		outG = std::clamp(outG, 0.0f, 1.0f);
-		outB = std::clamp(outB, 0.0f, 1.0f);
-	}
-
-	if (applyGamma) {
-		outR = encodeValue(definition.transfer, outR);
-		outG = encodeValue(definition.transfer, outG);
-		outB = encodeValue(definition.transfer, outB);
-	}
-
-	if (applyGamutMapping && applyGamma) {
-		outR = std::clamp(outR, 0.0f, 1.0f);
-		outG = std::clamp(outG, 0.0f, 1.0f);
-		outB = std::clamp(outB, 0.0f, 1.0f);
 	}
 
 	r = outR;
@@ -244,16 +263,11 @@ void ColourMapper::XYZtoRGB(const float X, const float Y, const float Z, float& 
 
 void ColourMapper::RGBtoXYZ(const float r, const float g, const float b, float& X, float& Y,
 							float& Z, const ColourSpace colourSpace) {
-	const auto& definition = getDefinition(colourSpace);
-
-	const float linearR = decodeValue(definition.transfer, r);
-	const float linearG = decodeValue(definition.transfer, g);
-	const float linearB = decodeValue(definition.transfer, b);
-
-	const auto xyz = multiplyMatrix(definition.rgbToXyz, linearR, linearG, linearB);
-	X = xyz[0];
-	Y = xyz[1];
-	Z = xyz[2];
+	float linearR;
+	float linearG;
+	float linearB;
+	decodeRGB(r, g, b, linearR, linearG, linearB, colourSpace);
+	linearRGBToXYZ(linearR, linearG, linearB, X, Y, Z, colourSpace);
 }
 
 // CIE 15:2004 - Colorimetry, 3rd edition - CIE LAB colour space
@@ -281,10 +295,6 @@ void ColourMapper::XYZtoLab(const float X, const float Y, const float Z, float& 
 	L = 116.0f * fy - 16.0f;
 	a = 500.0f * (fx - fy);
 	b = 200.0f * (fy - fz);
-
-	L = std::clamp(L, 0.0f, 100.0f);
-	a = std::clamp(a, -128.0f, 127.0f);
-	b = std::clamp(b, -128.0f, 127.0f);
 }
 
 // CIE 15:2004 - Colorimetry, 3rd edition - CIE LAB colour space
@@ -293,10 +303,6 @@ void ColourMapper::XYZtoLab(const float X, const float Y, const float Z, float& 
 // Uses inverse threshold δ = 6/29, where δ³ = ε (epsilon from XYZ to LAB)
 // http://www.brucelindbloom.com/index.html?Eqn_Lab_to_XYZ.html
 void ColourMapper::LabtoXYZ(float L, float a, float b, float& X, float& Y, float& Z) {
-	L = std::clamp(L, 0.0f, 100.0f);
-	a = std::clamp(a, -128.0f, 127.0f);
-	b = std::clamp(b, -128.0f, 127.0f);
-
 	const float fY = (L + 16.0f) / 116.0f;
 	const float fX = fY + a / 500.0f;
 	const float fZ = fY - b / 200.0f;
@@ -311,10 +317,6 @@ void ColourMapper::LabtoXYZ(float L, float a, float b, float& X, float& Y, float
 	X = REF_X * fInv(fX);
 	Y = REF_Y * fInv(fY);
 	Z = REF_Z * fInv(fZ);
-
-	X = std::max(0.0f, X);
-	Y = std::max(0.0f, Y);
-	Z = std::max(0.0f, Z);
 }
 
 void ColourMapper::RGBtoLab(const float r, const float g, const float b, float& L, float& a,
@@ -331,60 +333,88 @@ void ColourMapper::LabtoRGB(const float L, const float a, const float b_comp, fl
 	XYZtoRGB(X, Y, Z, r, g, b, colourSpace, true, false);
 }
 
-// Oklab: Björn Ottosson (2020) - https://bottosson.github.io/posts/oklab/
-// Perceptually uniform colour space with better hue linearity than CIELAB
-// M1: sRGB to approximate cone responses, M2: after cube root to Lab
 void ColourMapper::RGBtoOklab(const float r, const float g, const float b, float& L, float& a,
 							  float& b_comp, const ColourSpace colourSpace) {
-	const auto& definition = getDefinition(colourSpace);
-
-	const float linearR = decodeValue(definition.transfer, r);
-	const float linearG = decodeValue(definition.transfer, g);
-	const float linearB = decodeValue(definition.transfer, b);
-
-	const float l = 0.4122214708f * linearR + 0.5363325363f * linearG + 0.0514459929f * linearB;
-	const float m = 0.2119034982f * linearR + 0.6806995451f * linearG + 0.1073969566f * linearB;
-	const float s = 0.0883024619f * linearR + 0.2817188376f * linearG + 0.6299787005f * linearB;
-
-	const float l_ = std::cbrt(std::max(0.0f, l));
-	const float m_ = std::cbrt(std::max(0.0f, m));
-	const float s_ = std::cbrt(std::max(0.0f, s));
-
-	L = 0.2104542553f * l_ + 0.7936177850f * m_ - 0.0040720468f * s_;
-	a = 1.9779984951f * l_ - 2.4285922050f * m_ + 0.4505937099f * s_;
-	b_comp = 0.0259040371f * l_ + 0.7827717662f * m_ - 0.8086757660f * s_;
-
-	L = std::clamp(L * 100.0f, 0.0f, 100.0f);
-	a = std::clamp(a * 100.0f, -100.0f, 100.0f);
-	b_comp = std::clamp(b_comp * 100.0f, -100.0f, 100.0f);
+	float X, Y, Z;
+	RGBtoXYZ(r, g, b, X, Y, Z, colourSpace);
+	XYZtoOklab(X, Y, Z, L, a, b_comp);
 }
 
 void ColourMapper::OklabtoRGB(const float L, const float a, const float b_comp, float& r, float& g,
 							  float& b, const ColourSpace colourSpace) {
-	const float L_norm = std::clamp(L / 100.0f, 0.0f, 1.0f);
-	const float a_norm = std::clamp(a / 100.0f, -1.0f, 1.0f);
-	const float b_norm = std::clamp(b_comp / 100.0f, -1.0f, 1.0f);
+	float X, Y, Z;
+	OklabtoXYZ(L, a, b_comp, X, Y, Z);
+	XYZtoRGB(X, Y, Z, r, g, b, colourSpace, true, true);
+}
 
-	const float l_ = L_norm + 0.3963377774f * a_norm + 0.2158037573f * b_norm;
-	const float m_ = L_norm - 0.1055613458f * a_norm - 0.0638541728f * b_norm;
-	const float s_ = L_norm - 0.0894841775f * a_norm - 1.2914855480f * b_norm;
+void ColourMapper::XYZtoOklab(const float X, const float Y, const float Z, float& L, float& a,
+							  float& b_comp) {
+	const auto oklab = xyzToOklab(X, Y, Z);
+	L = oklab[0] * 100.0f;
+	a = oklab[1] * 100.0f;
+	b_comp = oklab[2] * 100.0f;
+}
 
-	const float l = l_ * l_ * l_;
-	const float m = m_ * m_ * m_;
-	const float s = s_ * s_ * s_;
+void ColourMapper::OklabtoXYZ(const float L, const float a, const float b_comp, float& X, float& Y,
+							  float& Z) {
+	const auto xyz = oklabToXyz(L / 100.0f, a / 100.0f, b_comp / 100.0f);
+	X = xyz[0];
+	Y = xyz[1];
+	Z = xyz[2];
+}
 
-	float linearR = +4.0767416621f * l - 3.3077115913f * m + 0.2309699292f * s;
-	float linearG = -1.2684380046f * l + 2.6097574011f * m - 0.3413193965f * s;
-	float linearB = -0.0041960863f * l - 0.7034186147f * m + 1.7076147010f * s;
+void ColourMapper::decodeRGB(const float r, const float g, const float b, float& linearR,
+							 float& linearG, float& linearB, const ColourSpace colourSpace) {
+	const auto& definition = getDefinition(colourSpace);
+	linearR = decodeValue(definition.transfer, r);
+	linearG = decodeValue(definition.transfer, g);
+	linearB = decodeValue(definition.transfer, b);
+}
 
-	linearR = std::clamp(linearR, 0.0f, 1.0f);
-	linearG = std::clamp(linearG, 0.0f, 1.0f);
-	linearB = std::clamp(linearB, 0.0f, 1.0f);
+void ColourMapper::encodeRGB(float linearR, float linearG, float linearB, float& r, float& g, float& b,
+							 const ColourSpace colourSpace, const bool applyGamutMapping) {
+	if (applyGamutMapping) {
+		mixTowardsWhite(linearR, linearG, linearB);
+		gamutMapRGB(linearR, linearG, linearB);
+		linearR = std::clamp(linearR, 0.0f, 1.0f);
+		linearG = std::clamp(linearG, 0.0f, 1.0f);
+		linearB = std::clamp(linearB, 0.0f, 1.0f);
+	}
 
 	const auto& definition = getDefinition(colourSpace);
 	r = encodeValue(definition.transfer, linearR);
 	g = encodeValue(definition.transfer, linearG);
 	b = encodeValue(definition.transfer, linearB);
+
+	if (applyGamutMapping) {
+		r = std::clamp(r, 0.0f, 1.0f);
+		g = std::clamp(g, 0.0f, 1.0f);
+		b = std::clamp(b, 0.0f, 1.0f);
+	}
+}
+
+void ColourMapper::linearRGBToXYZ(const float linearR, const float linearG, const float linearB, float& X,
+								  float& Y, float& Z, const ColourSpace colourSpace) {
+	const auto xyz = multiplyMatrix(getRGBtoXYZMatrix(colourSpace), linearR, linearG, linearB);
+	X = xyz[0];
+	Y = xyz[1];
+	Z = xyz[2];
+}
+
+void ColourMapper::XYZtoLinearRGB(const float X, const float Y, const float Z, float& linearR,
+								  float& linearG, float& linearB, const ColourSpace colourSpace) {
+	const auto linearRgb = multiplyMatrix(getXYZtoRGBMatrix(colourSpace), X, Y, Z);
+	linearR = linearRgb[0];
+	linearG = linearRgb[1];
+	linearB = linearRgb[2];
+}
+
+const std::array<float, 9>& ColourMapper::getRGBtoXYZMatrix(const ColourSpace colourSpace) {
+	return getDefinition(colourSpace).rgbToXyz;
+}
+
+const std::array<float, 9>& ColourMapper::getXYZtoRGBMatrix(const ColourSpace colourSpace) {
+	return getDefinition(colourSpace).xyzToRgb;
 }
 
 // Nayatani (1997) "Simple estimation methods for the Helmholtz-Kohlrausch effect"
@@ -764,6 +794,9 @@ const float overrideLoudnessDb
 	result.r = spectralResult.r;
 	result.g = spectralResult.g;
 	result.b = spectralResult.b;
+	result.X = spectralResult.X;
+	result.Y = spectralResult.Y;
+	result.Z = spectralResult.Z;
 	result.L = spectralResult.L;
 	result.a = spectralResult.a;
 	result.b_comp = spectralResult.b_comp;

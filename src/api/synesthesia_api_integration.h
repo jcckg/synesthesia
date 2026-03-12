@@ -25,7 +25,7 @@ public:
     void stopServer();
     bool isServerRunning() const;
     
-    void updateColourData(const std::vector<float>& magnitudes, const std::vector<float>& phases, float spectralCentroid, float sampleRate, float r, float g, float b, float L, float a, float b_comp);
+    void updateColourData(const std::vector<float>& magnitudes, const std::vector<float>& phases, float spectralCentroid, float sampleRate, float r, float g, float b, float X, float Y, float Z, float L, float a, float b_comp);
     
     void updateSmoothingConfig(bool enabled, float factor);
     void updateFrequencyRange(uint32_t min_freq, uint32_t max_freq);

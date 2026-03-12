@@ -15,7 +15,8 @@ using ColourSpace = ::ColourSpace;
 
     void labToRgb(std::span<const float> L, std::span<const float> a, std::span<const float> b_comp,
                   std::span<float> r, std::span<float> g, std::span<float> b, size_t count,
-                  ColourSpace colourSpace = ColourSpace::Rec2020);
+                  ColourSpace colourSpace = ColourSpace::Rec2020,
+                  bool applyGamutMapping = true);
 
     void rgbToOklab(std::span<const float> r, std::span<const float> g, std::span<const float> b,
                     std::span<float> L, std::span<float> a, std::span<float> b_comp, size_t count,
@@ -27,7 +28,8 @@ using ColourSpace = ::ColourSpace;
 
     void xyzToRgb(std::span<const float> X, std::span<const float> Y, std::span<const float> Z,
                   std::span<float> r, std::span<float> g, std::span<float> b, size_t count,
-                  ColourSpace colourSpace = ColourSpace::Rec2020);
+                  ColourSpace colourSpace = ColourSpace::Rec2020,
+                  bool applyGamutMapping = true);
 
     void rgbToXyz(std::span<const float> r, std::span<const float> g, std::span<const float> b,
                   std::span<float> X, std::span<float> Y, std::span<float> Z, size_t count,

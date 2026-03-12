@@ -292,7 +292,8 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                            context.samples,
                            viewStart,
                            viewEnd,
-                           context.colourSpace);
+                           context.colourSpace,
+                           context.applyGamutMapping);
 
     drawList->AddLine(ImVec2(gradientMin.x, gradientMin.y),
                       ImVec2(gradientMax.x, gradientMin.y),

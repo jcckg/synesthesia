@@ -68,7 +68,7 @@ bool SynesthesiaAPIIntegration::isServerRunning() const {
 }
 
 
-void SynesthesiaAPIIntegration::updateColourData(const std::vector<float>& magnitudes, const std::vector<float>& phases, float spectralCentroid, float sampleRate, float r, float g, float b, float L, float a, float b_comp) {
+void SynesthesiaAPIIntegration::updateColourData(const std::vector<float>& magnitudes, const std::vector<float>& phases, float spectralCentroid, float sampleRate, float r, float g, float b, float X, float Y, float Z, float L, float a, float b_comp) {
     if (!api_server_ || !api_server_->isRunning()) {
         return;
     }
@@ -128,10 +128,9 @@ void SynesthesiaAPIIntegration::updateColourData(const std::vector<float>& magni
             break;
 
             case ColourSpace::XYZ: {
-                // Fall back to RGB for now
-                data.r = r;
-                data.g = g;
-                data.b = b;
+                data.r = X;
+                data.g = Y;
+                data.b = Z;
                 break;
             }
         }

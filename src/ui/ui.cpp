@@ -211,7 +211,8 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 				makeSample(sampleIndex),
 				makeSample(std::min(sampleIndex + 1, recorderState.samples.size() - 1)),
 				t,
-				recorderState.importColourSpace);
+				recorderState.importColourSpace,
+				recorderState.importGamutMapping);
 		}
 
 		const auto& currentSample = recorderState.samples[clampedIndex];
@@ -280,6 +281,7 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 			auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
 			api.updateColourData(currentMagnitudes, currentPhases, playbackColourResult.dominantFrequency,
 								 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB,
+								 playbackColourResult.X, playbackColourResult.Y, playbackColourResult.Z,
 								 playbackColourResult.L, playbackColourResult.a, playbackColourResult.b_comp);
 #endif
 		}
@@ -504,6 +506,7 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 	auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
 	api.updateColourData(magnitudes, phases, colourResult.dominantFrequency, audioInput.getSampleRate(),
 						 currentDisplayR, currentDisplayG, currentDisplayB,
+						 colourResult.X, colourResult.Y, colourResult.Z,
 						 colourResult.L, colourResult.a, colourResult.b_comp);
 #endif
 

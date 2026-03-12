@@ -58,6 +58,7 @@ include(cmake/ffmpeg.cmake)
 configure_include_directories()
 apply_neon_optimisations()
 apply_sse_optimisations()
+apply_colour_accuracy_flags()
 
 target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
     SYNESTHESIA_VERSION_MAJOR=${SYNESTHESIA_VERSION_MAJOR}

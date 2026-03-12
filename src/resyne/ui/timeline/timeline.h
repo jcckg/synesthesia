@@ -60,6 +60,7 @@ struct RenderContext {
     float dropFlashAlpha = 0.0f;
     float deltaTime = 0.0f;
     ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    bool applyGamutMapping = true;
     std::optional<float> playbackNormalisedPosition;
     bool allowScrubbing = false;
     bool showDropOverlay = false;
@@ -80,6 +81,7 @@ RenderResult renderTimeline(TimelineState& state, const RenderContext& context);
 
 ImVec4 getColourAt(const std::vector<TimelineSample>& samples,
                    float normalisedPosition,
-                   ColourMapper::ColourSpace colourSpace);
+                   ColourMapper::ColourSpace colourSpace,
+                   bool applyGamutMapping = true);
 
 }

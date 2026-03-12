@@ -105,3 +105,36 @@ function(apply_sse_optimisations)
         message(STATUS "Applied SSE/AVX-specific compiler optimisations")
     endif()
 endfunction()
+
+function(apply_colour_accuracy_flags)
+    set(COLOUR_SOURCE_FILES
+        ${SRC_DIR}/colour/colour_mapper.cpp
+        ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
+    )
+
+    if(NEON_AVAILABLE AND ENABLE_NEON_OPTIMISATIONS)
+        list(APPEND COLOUR_SOURCE_FILES
+            ${SRC_DIR}/colour/neon/colour_mapper_neon.cpp
+            ${SRC_DIR}/audio/analysis/spectral/neon/spectral_processor_neon.cpp
+        )
+    endif()
+
+    if(SSE_AVAILABLE)
+        list(APPEND COLOUR_SOURCE_FILES
+            ${SRC_DIR}/colour/sse/colour_mapper_sse.cpp
+            ${SRC_DIR}/audio/analysis/spectral/sse/spectral_processor_sse.cpp
+        )
+    endif()
+
+    if(MSVC)
+        foreach(source_file IN LISTS COLOUR_SOURCE_FILES)
+            set_property(SOURCE ${source_file} APPEND_STRING PROPERTY COMPILE_FLAGS " /fp:precise")
+        endforeach()
+    else()
+        foreach(source_file IN LISTS COLOUR_SOURCE_FILES)
+            set_property(SOURCE ${source_file} APPEND_STRING PROPERTY COMPILE_FLAGS " -fno-fast-math -ffp-contract=off")
+        endforeach()
+    endif()
+
+    message(STATUS "Applied strict floating-point flags to colour-critical files")
+endfunction()

@@ -20,6 +20,9 @@ public:
 		float r;
 		float g;
 		float b;
+		float X;
+		float Y;
+		float Z;
 		float dominantWavelength;
 		float dominantFrequency;
 		float colourIntensity;
@@ -92,6 +95,23 @@ public:
 						 bool applyGamutMapping = true);
 	static void RGBtoXYZ(float r, float g, float b, float& X, float& Y, float& Z,
 						 ColourSpace colourSpace);
+	static void XYZtoOklab(float X, float Y, float Z, float& L, float& a, float& b_comp);
+	static void OklabtoXYZ(float L, float a, float b_comp, float& X, float& Y, float& Z);
+	static void decodeRGB(float r, float g, float b,
+						  float& linearR, float& linearG, float& linearB,
+						  ColourSpace colourSpace);
+	static void encodeRGB(float linearR, float linearG, float linearB,
+						  float& r, float& g, float& b,
+						  ColourSpace colourSpace,
+						  bool applyGamutMapping = true);
+	static void linearRGBToXYZ(float linearR, float linearG, float linearB,
+							   float& X, float& Y, float& Z,
+							   ColourSpace colourSpace);
+	static void XYZtoLinearRGB(float X, float Y, float Z,
+							   float& linearR, float& linearG, float& linearB,
+							   ColourSpace colourSpace);
+	static const std::array<float, 9>& getRGBtoXYZMatrix(ColourSpace colourSpace);
+	static const std::array<float, 9>& getXYZtoRGBMatrix(ColourSpace colourSpace);
 	static void gamutMapRGB(float& r, float& g, float& b);
 
 	static SpectralCharacteristics calculateSpectralCharacteristics(

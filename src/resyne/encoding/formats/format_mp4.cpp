@@ -42,6 +42,13 @@ struct RGB {
     float b;
 };
 
+struct VideoColourProfile {
+    const char* filter;
+    const char* space;
+    const char* primaries;
+    const char* trc;
+};
+
 struct TempFile {
     fs::path path;
     ~TempFile() {
@@ -74,6 +81,33 @@ int closePipe(FILE* handle) {
 
 inline uint8_t toByte(float value) {
     return static_cast<uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+}
+
+VideoColourProfile getVideoColourProfile(const ColourMapper::ColourSpace colourSpace) {
+    switch (colourSpace) {
+        case ColourMapper::ColourSpace::DisplayP3:
+            return {
+                "colorspace=ispace=gbr:iprimaries=smpte432:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=smpte432:trc=iec61966-2-1:range=tv:format=yuv420p",
+                "bt709",
+                "smpte432",
+                "iec61966-2-1"
+            };
+        case ColourMapper::ColourSpace::Rec2020:
+            return {
+                "colorspace=ispace=gbr:iprimaries=bt2020:itrc=bt2020-10:irange=pc:space=bt2020ncl:primaries=bt2020:trc=bt2020-10:range=tv:format=yuv420p",
+                "bt2020nc",
+                "bt2020",
+                "bt2020-10"
+            };
+        case ColourMapper::ColourSpace::SRGB:
+        default:
+            return {
+                "colorspace=ispace=gbr:iprimaries=bt709:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=bt709:trc=iec61966-2-1:range=tv:format=yuv420p",
+                "bt709",
+                "bt709",
+                "iec61966-2-1"
+            };
+    }
 }
 
 class ColourTimelineSampler {
@@ -282,8 +316,10 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
                                const fs::path& stderrPath,
                                int width,
                                int height,
-                               int fps) {
+                               int fps,
+                               const ColourMapper::ColourSpace colourSpace) {
     const std::string videoEncoder = determineVideoEncoder();
+    const VideoColourProfile colourProfile = getVideoColourProfile(colourSpace);
 
     std::ostringstream oss;
     oss << '"' << ffmpegPath << '"'
@@ -294,11 +330,16 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
         << " -i -"
         << " -i " << '"' << audioPath.string() << '"'
         << " -map 0:v:0 -map 1:a:0"
+        << " -vf \"" << colourProfile.filter << '"'
         << " -c:v " << videoEncoder;
 
     appendEncoderParameters(oss, videoEncoder);
 
-    oss << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts make_zero"
+    oss << " -color_primaries " << colourProfile.primaries
+        << " -color_trc " << colourProfile.trc
+        << " -colorspace " << colourProfile.space
+        << " -color_range tv"
+        << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts make_zero"
         << " \"" << outputPath << "\"";
 
 #ifdef _WIN32
@@ -486,7 +527,8 @@ bool exportToMP4(const std::string& outputPath,
                                                    stderrTemp.path,
                                                    width,
                                                    height,
-                                                   fps);
+                                                   fps,
+                                                   options.colourSpace);
 
     std::vector<RGB> gradientHistory;
     const bool success = renderVideo(command,
@@ -517,7 +559,8 @@ bool exportToMP4(const std::string& outputPath,
                                                                gradientStderrTemp.path,
                                                                width,
                                                                height,
-                                                               fps);
+                                                               fps,
+                                                               options.colourSpace);
 
         const int totalFrames = static_cast<int>(gradientHistory.size());
         const int lineStride = width * 3;

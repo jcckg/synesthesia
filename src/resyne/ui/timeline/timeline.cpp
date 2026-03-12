@@ -15,7 +15,8 @@ RenderResult renderTimeline(TimelineState& state, const RenderContext& context) 
 
 ImVec4 getColourAt(const std::vector<TimelineSample>& samples,
                    float normalisedPosition,
-                   ColourMapper::ColourSpace colourSpace) {
+                   ColourMapper::ColourSpace colourSpace,
+                   const bool applyGamutMapping) {
     if (samples.empty()) {
         return ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
     }
@@ -28,7 +29,7 @@ ImVec4 getColourAt(const std::vector<TimelineSample>& samples,
     const size_t index2 = std::min(index1 + 1, samples.size() - 1);
     const float t = position - static_cast<float>(index1);
 
-    return Gradient::interpolateColour(samples[index1], samples[index2], t, colourSpace);
+    return Gradient::interpolateColour(samples[index1], samples[index2], t, colourSpace, applyGamutMapping);
 }
 
 }

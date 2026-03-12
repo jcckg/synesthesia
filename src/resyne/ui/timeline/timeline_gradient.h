@@ -10,7 +10,8 @@ namespace ReSyne::Timeline::Gradient {
 ImVec4 interpolateColour(const TimelineSample& a,
                          const TimelineSample& b,
                          float t,
-                         ColourMapper::ColourSpace colourSpace);
+                         ColourMapper::ColourSpace colourSpace,
+                         bool applyGamutMapping = true);
 
 void drawGradient(ImDrawList* drawList,
                   const ImVec2& min,
@@ -18,6 +19,7 @@ void drawGradient(ImDrawList* drawList,
                   const std::vector<TimelineSample>& samples,
                   float visibleStart,
                   float visibleEnd,
-                  ColourMapper::ColourSpace colourSpace);
+                  ColourMapper::ColourSpace colourSpace,
+                  bool applyGamutMapping = true);
 
 }
