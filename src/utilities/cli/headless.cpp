@@ -11,8 +11,8 @@
 
 #include "colour_mapper.h"
 
-#ifdef ENABLE_API_SERVER
-#include "synesthesia_api_integration.h"
+#ifdef ENABLE_OSC
+#include "synesthesia_osc_integration.h"
 #endif
 
 namespace CLI {
@@ -20,7 +20,7 @@ namespace CLI {
 HeadlessInterface* HeadlessInterface::instance = nullptr;
 
 HeadlessInterface::HeadlessInterface() 
-    : running(false), deviceSelected(false), selectedDeviceIndex(-1), apiEnabled(false) {
+    : running(false), deviceSelected(false), selectedDeviceIndex(-1), oscEnabled(false) {
     instance = this;
     devices = AudioInput::getInputDevices();
 }
@@ -61,9 +61,12 @@ void HeadlessInterface::restoreTerminal() {
     tcsetattr(STDIN_FILENO, TCSANOW, &term);
 }
 
-void HeadlessInterface::run(bool enableAPI, const std::string& preferredDevice) {
+void HeadlessInterface::run(bool enableOSC, const std::string& preferredDevice,
+                            const uint16_t oscSendPort, const uint16_t oscReceivePort) {
     running = true;
-    apiEnabled = enableAPI;
+    oscEnabled = enableOSC;
+    oscSendPort_ = oscSendPort;
+    oscReceivePort_ = oscReceivePort;
     
     setupTerminal();
 
@@ -85,11 +88,14 @@ void HeadlessInterface::run(bool enableAPI, const std::string& preferredDevice) 
         }
     }
     
-#ifdef ENABLE_API_SERVER
-    if (apiEnabled) {
-        auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-        api.startServer();
-        std::cout << "API Server started" << std::endl;
+#ifdef ENABLE_OSC
+    if (oscEnabled) {
+        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+        Synesthesia::OSC::OSCConfig config;
+        config.transmitPort = oscSendPort_;
+        config.receivePort = oscReceivePort_;
+        osc.start(config);
+        std::cout << "OSC transport started" << std::endl;
     }
 #endif
     
@@ -110,10 +116,10 @@ void HeadlessInterface::run(bool enableAPI, const std::string& preferredDevice) 
     
     std::cout << "\033[?25h\033[2J\033[H";
     
-#ifdef ENABLE_API_SERVER
-    if (apiEnabled) {
-        auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-        api.stopServer();
+#ifdef ENABLE_OSC
+    if (oscEnabled) {
+        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+        osc.stop();
     }
 #endif
     
@@ -149,8 +155,8 @@ void HeadlessInterface::displayDeviceSelection() {
     std::cout << "Controls:\n";
     std::cout << "  ↑/↓ - Navigate devices\n";
     std::cout << "  Enter - Select device\n";
-#ifdef ENABLE_API_SERVER
-    std::cout << "  'a' - Toggle API server (" << (apiEnabled ? "ON" : "OFF") << ")\n";
+#ifdef ENABLE_OSC
+    std::cout << "  'o' - Toggle OSC transport (" << (oscEnabled ? "ON" : "OFF") << ")\n";
 #endif
     std::cout << "  'q' - Quit\n";
     
@@ -169,7 +175,7 @@ void HeadlessInterface::displayFrequencyInfo() {
 	if (!magnitudes.empty() && !phases.empty()) {
 		auto colourResult = ColourMapper::spectrumToColour(
 			magnitudes, phases, {}, audioInput.getSampleRate(), 2.2f,
-			ColourMapper::ColourSpace::Rec2020, true,
+			oscColourSpace, oscGamutMappingEnabled,
 			loudnessDb);
 
 		currentDominantFreq = colourResult.dominantFrequency;
@@ -177,6 +183,21 @@ void HeadlessInterface::displayFrequencyInfo() {
 		currentG = colourResult.g;
 		currentB = colourResult.b;
 		currentLoudnessDb = colourResult.loudnessDb;
+
+#ifdef ENABLE_OSC
+        if (oscEnabled) {
+            auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+            const auto pendingSettings = osc.consumePendingSettings();
+            if (pendingSettings.colourSpace.has_value()) {
+                oscColourSpace = *pendingSettings.colourSpace;
+            }
+            if (pendingSettings.gamutMappingEnabled.has_value()) {
+                oscGamutMappingEnabled = *pendingSettings.gamutMappingEnabled;
+            }
+            osc.updateColourData(magnitudes, phases, currentDominantFreq, audioInput.getSampleRate(),
+                                 currentR, currentG, currentB);
+        }
+#endif
 	}
 
 	bool needsRedraw = (abs(currentDominantFreq - lastDominantFreq) > 0.1f) ||
@@ -204,18 +225,19 @@ void HeadlessInterface::displayFrequencyInfo() {
             std::cout << "\n(No significant frequencies detected)\n";
         }
         
-#ifdef ENABLE_API_SERVER
-        if (apiEnabled) {
-            auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-            std::cout << "\nAPI Server: " << (api.isServerRunning() ? "Running" : "Stopped");
-            std::cout << " | Clients: " << api.getConnectedClients().size();
-            std::cout << " | FPS: " << api.getCurrentFPS() << "\n";
+#ifdef ENABLE_OSC
+        if (oscEnabled) {
+            auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+            const auto stats = osc.getStats();
+            std::cout << "\nOSC: " << (osc.isRunning() ? "Running" : "Stopped");
+            std::cout << " | Received: " << stats.messagesReceived;
+            std::cout << " | FPS: " << stats.currentFps << "\n";
         }
 #endif
         
         std::cout << "\nControls: 'b' - Back | ";
-#ifdef ENABLE_API_SERVER
-        std::cout << "'a' - Toggle API (" << (apiEnabled ? "ON" : "OFF") << ") | ";
+#ifdef ENABLE_OSC
+        std::cout << "'o' - Toggle OSC (" << (oscEnabled ? "ON" : "OFF") << ") | ";
 #endif
         std::cout << "'q' - Quit\n";
         
@@ -256,14 +278,17 @@ void HeadlessInterface::handleKeypress() {
                     }
                 }
             }
-#ifdef ENABLE_API_SERVER
-            else if (ch == 'a' || ch == 'A') {
-                apiEnabled = !apiEnabled;
-                auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-                if (apiEnabled) {
-                    api.startServer();
+#ifdef ENABLE_OSC
+            else if (ch == 'o' || ch == 'O') {
+                oscEnabled = !oscEnabled;
+                auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+                if (oscEnabled) {
+                    Synesthesia::OSC::OSCConfig config;
+                    config.transmitPort = oscSendPort_;
+                    config.receivePort = oscReceivePort_;
+                    osc.start(config);
                 } else {
-                    api.stopServer();
+                    osc.stop();
                 }
             }
 #endif
@@ -272,14 +297,17 @@ void HeadlessInterface::handleKeypress() {
                 deviceSelected = false;
                 selectedDeviceIndex = 0;
             }
-#ifdef ENABLE_API_SERVER
-            else if (ch == 'a' || ch == 'A') {
-                apiEnabled = !apiEnabled;
-                auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-                if (apiEnabled) {
-                    api.startServer();
+#ifdef ENABLE_OSC
+            else if (ch == 'o' || ch == 'O') {
+                oscEnabled = !oscEnabled;
+                auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+                if (oscEnabled) {
+                    Synesthesia::OSC::OSCConfig config;
+                    config.transmitPort = oscSendPort_;
+                    config.receivePort = oscReceivePort_;
+                    osc.start(config);
                 } else {
-                    api.stopServer();
+                    osc.stop();
                 }
             }
 #endif

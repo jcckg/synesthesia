@@ -30,8 +30,8 @@
 #ifdef ENABLE_MIDI
 #include "ui/handlers/midi_handler.h"
 #endif
-#ifdef ENABLE_API_SERVER
-#include "synesthesia_api_integration.h"
+#ifdef ENABLE_OSC
+#include "synesthesia_osc_integration.h"
 #endif
 
 void initialiseApp(UIState& state) {
@@ -40,10 +40,10 @@ void initialiseApp(UIState& state) {
         state.updateState.hasCheckedThisSession = true;
     }
     
-#ifdef ENABLE_API_SERVER
-    auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-    if (api.isServerRunning() && !state.apiServerEnabled) {
-        api.stopServer();
+#ifdef ENABLE_OSC
+    auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+    if (osc.isRunning() && !state.oscEnabled) {
+        osc.stop();
     }
 #endif
 }
@@ -277,12 +277,10 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 
 			populateSpectralNorms(playbackColourResult, playbackSignalFeatures);
 
-#ifdef ENABLE_API_SERVER
-			auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-			api.updateColourData(currentMagnitudes, currentPhases, playbackColourResult.dominantFrequency,
-								 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB,
-								 playbackColourResult.X, playbackColourResult.Y, playbackColourResult.Z,
-								 playbackColourResult.L, playbackColourResult.a, playbackColourResult.b_comp);
+#ifdef ENABLE_OSC
+			auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+			osc.updateColourData(currentMagnitudes, currentPhases, playbackColourResult.dominantFrequency,
+                                 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB);
 #endif
 		}
 		if (currentMagnitudes.empty()) {
@@ -502,12 +500,10 @@ void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::Recor
 							currentDisplayR, currentDisplayG, currentDisplayB, ctx, &liveFeatures);
 	}
 
-#ifdef ENABLE_API_SERVER
-	auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
-	api.updateColourData(magnitudes, phases, colourResult.dominantFrequency, audioInput.getSampleRate(),
-						 currentDisplayR, currentDisplayG, currentDisplayB,
-						 colourResult.X, colourResult.Y, colourResult.Z,
-						 colourResult.L, colourResult.a, colourResult.b_comp);
+#ifdef ENABLE_OSC
+	auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+	osc.updateColourData(magnitudes, phases, colourResult.dominantFrequency, audioInput.getSampleRate(),
+                         currentDisplayR, currentDisplayG, currentDisplayB);
 #endif
 
 	ReSyne::updateFromFFT(
@@ -617,6 +613,28 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			  ) {
 	initialiseApp(state);
 	state.updateChecker.update(state.updateState);
+
+#ifdef ENABLE_OSC
+    {
+        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+        const auto pendingSettings = osc.consumePendingSettings();
+        if (pendingSettings.smoothingEnabled.has_value()) {
+            state.visualSettings.smoothingEnabled = *pendingSettings.smoothingEnabled;
+        }
+        if (pendingSettings.colourSmoothingSpeed.has_value()) {
+            state.visualSettings.colourSmoothingSpeed = *pendingSettings.colourSmoothingSpeed;
+        }
+        if (pendingSettings.spectrumSmoothingAmount.has_value()) {
+            state.audioSettings.spectrumSmoothingFactor = *pendingSettings.spectrumSmoothingAmount;
+        }
+        if (pendingSettings.colourSpace.has_value()) {
+            state.visualSettings.colourSpace = *pendingSettings.colourSpace;
+        }
+        if (pendingSettings.gamutMappingEnabled.has_value()) {
+            state.visualSettings.gamutMappingEnabled = *pendingSettings.gamutMappingEnabled;
+        }
+    }
+#endif
 
 #ifdef ENABLE_MIDI
 	UIHandlers::MIDIHandler::update(state, io.DeltaTime, midiInput, midiDevices);

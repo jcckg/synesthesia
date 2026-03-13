@@ -222,10 +222,10 @@ void render(RenderArgs& args) {
         renderVisualisationSections(args, hasLiveInput);
     }
 
-    Controls::renderAdvancedSettingsPanel(args.uiState, args.layout.contentWidth
+    Controls::renderAdvancedSettingsPanel(args.uiState
 #ifdef ENABLE_MIDI
-                                           , args.midiInput
-                                           , args.midiDevices
+                                         , args.midiInput
+                                         , args.midiDevices
 #endif
                                            );
 

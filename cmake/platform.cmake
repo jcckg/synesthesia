@@ -127,10 +127,11 @@ elseif(APPLE)
 
     set_property(SOURCE ${SRC_DIR}/ui/ui.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/ui/controls/controls.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
-    set_property(SOURCE ${SRC_DIR}/api/common/serialisation.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
-    set_property(SOURCE ${SRC_DIR}/api/common/transport.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
-    set_property(SOURCE ${SRC_DIR}/api/server/api_server.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
-    set_property(SOURCE ${SRC_DIR}/api/synesthesia_api_integration.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
+    set_property(SOURCE ${SRC_DIR}/osc/osc_packet_listener.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
+    set_property(SOURCE ${SRC_DIR}/osc/osc_receiver.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
+    set_property(SOURCE ${SRC_DIR}/osc/osc_runtime.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
+    set_property(SOURCE ${SRC_DIR}/osc/osc_sender.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
+    set_property(SOURCE ${SRC_DIR}/osc/synesthesia_osc_integration.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/utilities/cli/headless.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
 else()
     target_compile_options(${EXECUTABLE_NAME} PRIVATE
@@ -163,6 +164,7 @@ if(APPLE)
         vendor_implot
         vendor_kissfft
         vendor_lodepng
+        vendor_oscpack
         vendor_imgui_backends
         m
     )
@@ -181,6 +183,7 @@ elseif(WIN32)
             vendor_implot
             vendor_kissfft
             vendor_lodepng
+            vendor_oscpack
             vendor_imgui_backends
         )
     else()
@@ -193,6 +196,7 @@ elseif(WIN32)
             vendor_implot
             vendor_kissfft
             vendor_lodepng
+            vendor_oscpack
             vendor_imgui_backends
             windowsapp
         )
@@ -212,6 +216,7 @@ else()
         vendor_implot
         vendor_kissfft
         vendor_lodepng
+        vendor_oscpack
         vendor_imgui_backends
         dl
         pthread

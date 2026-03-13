@@ -9,6 +9,7 @@
 #include "colour/colour_mapper.h"
 #include "spectrum_analyser.h"
 #include "imgui.h"
+#include <array>
 #include <vector>
 
 #ifdef ENABLE_MIDI
@@ -49,8 +50,13 @@ struct UIVisibility {
     bool showUI = true;
     bool showSpectrumAnalyser = true;
     bool showAdvancedSettings = false;
-    bool showAPISettings = false;
+    bool showOSCSettings = false;
     bool sidebarOnLeft = true;
+};
+
+struct OSCSettings {
+    int transmitPort = 7000;
+    int receivePort = 7001;
 };
 
 struct UIState {
@@ -71,8 +77,9 @@ struct UIState {
     StyleState styleState;
     UpdateState updateState;
     UpdateChecker updateChecker;
+    OSCSettings oscSettings;
 
-    bool apiServerEnabled = false;
+    bool oscEnabled = false;
     ReSyne::State resyneState;
 
     using View = VisualSettings::View;

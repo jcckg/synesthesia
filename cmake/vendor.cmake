@@ -68,6 +68,35 @@ add_vendor_library(
 )
 
 if(WIN32)
+    set(OSCPACK_PLATFORM_SOURCES
+        ${OSCPACK_DIR}/ip/win32/NetworkingUtils.cpp
+        ${OSCPACK_DIR}/ip/win32/UdpSocket.cpp
+    )
+else()
+    set(OSCPACK_PLATFORM_SOURCES
+        ${OSCPACK_DIR}/ip/posix/NetworkingUtils.cpp
+        ${OSCPACK_DIR}/ip/posix/UdpSocket.cpp
+    )
+endif()
+
+add_vendor_library(
+    TARGET vendor_oscpack
+    SOURCES
+        ${OSCPACK_DIR}/ip/IpEndpointName.cpp
+        ${OSCPACK_DIR}/osc/OscOutboundPacketStream.cpp
+        ${OSCPACK_DIR}/osc/OscPrintReceivedElements.cpp
+        ${OSCPACK_DIR}/osc/OscReceivedElements.cpp
+        ${OSCPACK_DIR}/osc/OscTypes.cpp
+        ${OSCPACK_PLATFORM_SOURCES}
+    INCLUDE_DIRS
+        ${OSCPACK_DIR}
+)
+
+if(WIN32)
+    target_link_libraries(vendor_oscpack PRIVATE Ws2_32 winmm)
+endif()
+
+if(WIN32)
     if(VULKAN_WINDOWS)
         add_vendor_library(
             TARGET vendor_imgui_backends

@@ -4,6 +4,7 @@
 #include "batch_exporter.h"
 #endif
 
+#include <cstdint>
 #include <iostream>
 
 int app_main(int argc, char** argv);
@@ -41,7 +42,12 @@ int main(int argc, char* argv[]) {
     if (args.headless) {
         try {
             CLI::HeadlessInterface interface;
-            interface.run(args.enableAPI, args.audioDevice);
+            interface.run(
+                args.enableOSC,
+                args.audioDevice,
+                static_cast<uint16_t>(args.oscSendPort),
+                static_cast<uint16_t>(args.oscReceivePort)
+            );
             return 0;
         } catch (const std::exception& e) {
             std::cerr << "Error in headless mode: " << e.what() << std::endl;

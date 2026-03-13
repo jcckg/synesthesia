@@ -6,10 +6,12 @@ namespace CLI {
 
 struct Arguments {
     bool headless = false;
-    bool enableAPI = false;
+    bool enableOSC = false;
     bool showHelp = false;
     bool showVersion = false;
     std::string audioDevice;
+    int oscSendPort = 7000;
+    int oscReceivePort = 7001;
 
     bool exportGradients = false;
     std::string inputDir;

@@ -38,10 +38,10 @@ namespace Controls {
                               float buttonHeight,
                               float contentWidth);
 
-    void renderAdvancedSettingsPanel(UIState& state, float contentWidth
+    void renderAdvancedSettingsPanel(UIState& state
 #ifdef ENABLE_MIDI
-                                      , MIDIInput* midiInput = nullptr
-                                      , const std::vector<MIDIInput::DeviceInfo>* midiDevices = nullptr
+                                  , MIDIInput* midiInput = nullptr
+                                  , const std::vector<MIDIInput::DeviceInfo>* midiDevices = nullptr
 #endif
-                                      );
+                                  );
 }

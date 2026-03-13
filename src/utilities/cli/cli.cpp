@@ -1,5 +1,6 @@
 #include "cli.h"
 
+#include <algorithm>
 #include <iostream>
 #include <cstring>
 #include <cstdlib>
@@ -14,8 +15,8 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         if (strcmp(argv[i], "--headless") == 0 || strcmp(argv[i], "-h") == 0) {
             args.headless = true;
         }
-        else if (strcmp(argv[i], "--enable-api") == 0) {
-            args.enableAPI = true;
+        else if (strcmp(argv[i], "--enable-osc") == 0) {
+            args.enableOSC = true;
         }
         else if (strcmp(argv[i], "--help") == 0) {
             args.showHelp = true;
@@ -26,6 +27,18 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--device") == 0 || strcmp(argv[i], "-d") == 0) {
             if (i + 1 < argc) {
                 args.audioDevice = argv[++i];
+            }
+        }
+        else if (strcmp(argv[i], "--osc-send-port") == 0) {
+            if (i + 1 < argc) {
+                args.oscSendPort = std::atoi(argv[++i]);
+                args.oscSendPort = std::clamp(args.oscSendPort, 1, 65535);
+            }
+        }
+        else if (strcmp(argv[i], "--osc-receive-port") == 0) {
+            if (i + 1 < argc) {
+                args.oscReceivePort = std::atoi(argv[++i]);
+                args.oscReceivePort = std::clamp(args.oscReceivePort, 1, 65535);
             }
         }
         else if (strcmp(argv[i], "--export-gradients") == 0) {
@@ -85,8 +98,10 @@ void Arguments::printHelp() {
     std::cout << "Usage: Synesthesia [OPTIONS]\n\n";
     std::cout << "Options:\n";
     std::cout << "  --headless, -h          Run in headless mode (no GUI)\n";
-    std::cout << "  --enable-api            Start API server automatically\n";
+    std::cout << "  --enable-osc            Start OSC transport automatically\n";
     std::cout << "  --device, -d <name>     Use specific audio device\n";
+    std::cout << "  --osc-send-port <port>  OSC destination port (default: 7000)\n";
+    std::cout << "  --osc-receive-port <p>  OSC receive port (default: 7001)\n";
     std::cout << "  --version, -v           Show version information\n";
     std::cout << "  --help                  Show this help message\n\n";
     std::cout << "Batch export:\n";
@@ -117,10 +132,10 @@ void Arguments::printVersion() {
 #ifdef USE_SSE_OPTIMISATIONS
     std::cout << "SSE/AVX optimisations: Enabled" << std::endl;
 #endif
-#ifdef ENABLE_API_SERVER
-    std::cout << "API Server: Enabled" << std::endl;
+#ifdef ENABLE_OSC
+    std::cout << "OSC Transport: Enabled" << std::endl;
 #else
-    std::cout << "API Server: Disabled" << std::endl;
+    std::cout << "OSC Transport: Disabled" << std::endl;
 #endif
 }
 

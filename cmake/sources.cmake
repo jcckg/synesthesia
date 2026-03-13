@@ -77,16 +77,18 @@ set(SOURCES
 )
 
 
-function(add_api_sources)
-    if(ENABLE_API_SERVER)
+function(add_osc_sources)
+    if(ENABLE_OSC)
         list(APPEND SOURCES
-            ${SRC_DIR}/api/common/serialisation.cpp
-            ${SRC_DIR}/api/common/transport.cpp
-            ${SRC_DIR}/api/server/api_server.cpp
-            ${SRC_DIR}/api/synesthesia_api_integration.cpp
+            ${SRC_DIR}/osc/osc_command_queue.cpp
+            ${SRC_DIR}/osc/osc_packet_listener.cpp
+            ${SRC_DIR}/osc/osc_receiver.cpp
+            ${SRC_DIR}/osc/osc_runtime.cpp
+            ${SRC_DIR}/osc/osc_sender.cpp
+            ${SRC_DIR}/osc/synesthesia_osc_integration.cpp
         )
         set(SOURCES ${SOURCES} PARENT_SCOPE)
-        message(STATUS "Added API server sources to build")
+        message(STATUS "Added OSC sources to build")
     endif()
 endfunction()
 
@@ -165,13 +167,10 @@ function(configure_include_directories)
         /opt/homebrew/include
     )
 
-    if(ENABLE_API_SERVER)
+    if(ENABLE_OSC)
         target_include_directories(${EXECUTABLE_NAME} PRIVATE
-            ${SRC_DIR}/api
-            ${SRC_DIR}/api/common
-            ${SRC_DIR}/api/server
-            ${SRC_DIR}/api/client
-            ${SRC_DIR}/api/protocol
+            ${SRC_DIR}/osc
+            ${OSCPACK_DIR}
         )
     endif()
 endfunction()

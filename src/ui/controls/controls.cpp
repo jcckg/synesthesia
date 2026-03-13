@@ -9,8 +9,8 @@
 #include "colour_mapper.h"
 #include "ui.h"
 #include "resyne/recorder/recorder.h"
-#ifdef ENABLE_API_SERVER
-#include "synesthesia_api_integration.h"
+#ifdef ENABLE_OSC
+#include "synesthesia_osc_integration.h"
 #endif
 #ifdef ENABLE_MIDI
 #include "midi_device_manager.h"
@@ -188,7 +188,7 @@ void renderEQControlsPanel(float& lowGain,
     }
 }
 
-void renderAdvancedSettingsPanel(UIState& state, float contentWidth
+void renderAdvancedSettingsPanel(UIState& state
 #ifdef ENABLE_MIDI
                                   , MIDIInput* midiInput
                                   , const std::vector<MIDIInput::DeviceInfo>* midiDevices
@@ -282,102 +282,72 @@ void renderAdvancedSettingsPanel(UIState& state, float contentWidth
 			ImGui::Unindent(10);
         }
         
-#ifdef ENABLE_API_SERVER
-        if (ImGui::CollapsingHeader("API Settings")) {
+#ifdef ENABLE_OSC
+        if (ImGui::CollapsingHeader("OSC")) {
 			ImGui::Indent(10);
-            auto& api = Synesthesia::SynesthesiaAPIIntegration::getInstance();
+            auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+            const auto stats = osc.getStats();
+            bool configChanged = false;
 
-            ImGui::Text("Server Status: %s", api.isServerRunning() ? "Running" : "Stopped");
+            ImGui::Text("Destination");
+            char destinationHost[] = "127.0.0.1";
+            ImGui::BeginDisabled();
+            ImGui::InputText("##OSCDestination", destinationHost, sizeof(destinationHost), ImGuiInputTextFlags_ReadOnly);
+            ImGui::EndDisabled();
+
+            ImGui::Text("Transmit Port");
+            configChanged |= ImGui::InputInt("##OSCTransmitPort", &state.oscSettings.transmitPort);
+
+            ImGui::Text("Receive Port");
+            configChanged |= ImGui::InputInt("##OSCReceivePort", &state.oscSettings.receivePort);
+
+            state.oscSettings.transmitPort = std::clamp(state.oscSettings.transmitPort, 1, 65535);
+            state.oscSettings.receivePort = std::clamp(state.oscSettings.receivePort, 1, 65535);
+
+            ImGui::Spacing();
+            ImGui::Text("Transport Status: %s", osc.isRunning() ? "Running" : "Stopped");
+            ImGui::Text("Frames Sent: %llu", static_cast<unsigned long long>(stats.framesSent));
+            ImGui::Text("Messages Received: %llu", static_cast<unsigned long long>(stats.messagesReceived));
             
-            auto clients = api.getConnectedClients();
-            ImGui::Text("Connected Clients: %zu", clients.size());
-            
-            if (!clients.empty()) {
-                ImGui::Indent();
-                for (size_t i = 0; i < clients.size() && i < 5; ++i) {
-                    const auto& clientName = clients[i];
-                    if (clientName.length() > 25) {
-                        const std::string truncated = clientName.substr(0, 22) + "...";
-                        ImGui::Text("• %s", truncated.c_str());
-                    } else {
-                        ImGui::Text("• %s", clientName.c_str());
-                    }
-                }
-                if (clients.size() > 5) {
-                    ImGui::Text("... and %zu more", clients.size() - 5);
-                }
-                ImGui::Unindent();
-            }
-            
-            ImGui::Text("Data Points: %zu", api.getLastDataSize());
-            
-            if (api.isServerRunning()) {
+            if (osc.isRunning()) {
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Text("Performance");
                 ImGui::Spacing();
                 
-                uint32_t current_fps = api.getCurrentFPS();
-                bool high_perf = api.isHighPerformanceMode();
-                float avg_frame_time = api.getAverageFrameTime();
-                
                 ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
 
-                ImGui::Text("FPS: %u", current_fps);
-                ImGui::Text("Mode: %s", high_perf ? "High Perf" : "Standard");
-                if (avg_frame_time > 0) {
-                    ImGui::Text("Frame Time: %.2fms", static_cast<double>(avg_frame_time));
-                    float estimated_latency = avg_frame_time;
-                    ImGui::Text("Latency: ~%.1fms", static_cast<double>(estimated_latency));
-                    
-                    if (estimated_latency < 5.0f) {
-                        ImGui::TextColored(ImVec4(0.0f, 1.0f, 0.0f, 1.0f), "✓ Ultra-Low");
-                    } else if (estimated_latency < 10.0f) {
-                        ImGui::TextColored(ImVec4(0.5f, 1.0f, 0.0f, 1.0f), "✓ Low");
-                    } else if (estimated_latency < 20.0f) {
-                        ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.0f, 1.0f), "⚠ Moderate");
-                    } else {
-                        ImGui::TextColored(ImVec4(1.0f, 0.0f, 0.0f, 1.0f), "⚠ High");
-                    }
+                ImGui::Text("FPS: %u", stats.currentFps);
+                if (stats.averageSendTimeMs > 0.0f) {
+                    ImGui::Text("Average Send Time: %.2fms", static_cast<double>(stats.averageSendTimeMs));
                 }
-                
-                ImGui::Text("Total Frames: %llu", api.getTotalFramesSent());
-                
                 ImGui::PopTextWrapPos();
                 ImGui::Separator();
             }
             
             ImGui::Spacing();
-            bool serverRunning = api.isServerRunning();
-            
-            float buttonWidth = (contentWidth - ImGui::GetStyle().ItemSpacing.x) / 2;
-            ImGui::PushItemWidth(buttonWidth);
-            
-            if (!serverRunning) {
-                if (ImGui::Button("Enable", ImVec2(buttonWidth, 0))) {
-                    state.apiServerEnabled = true;
-                    api.startServer();
-                }
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.6f, 0.6f, 0.4f));
-                ImGui::Button("Enable", ImVec2(buttonWidth, 0));
-                ImGui::PopStyleColor();
-            }
-            
-            ImGui::SameLine();
-            
-            if (serverRunning) {
-                if (ImGui::Button("Disable", ImVec2(buttonWidth, 0))) {
-                    state.apiServerEnabled = false;
-                    api.stopServer();
-                }
-            } else {
-                ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.6f, 0.6f, 0.4f));
-                ImGui::Button("Disable", ImVec2(buttonWidth, 0));
-                ImGui::PopStyleColor();
+            bool transportRunning = osc.isRunning();
+
+            if (configChanged && transportRunning) {
+                Synesthesia::OSC::OSCConfig config;
+                config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
+                config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);
+                osc.updateConfig(config);
             }
 
-			ImGui::PopItemWidth();
+            const float buttonWidth = ImGui::GetContentRegionAvail().x;
+            if (ImGui::Button(transportRunning ? "Disable" : "Enable", ImVec2(buttonWidth, 0))) {
+                if (transportRunning) {
+                    state.oscEnabled = false;
+                    osc.stop();
+                } else {
+                    state.oscEnabled = true;
+                    Synesthesia::OSC::OSCConfig config;
+                    config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
+                    config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);
+                    osc.start(config);
+                }
+            }
 
 			ImGui::Unindent(10);
         }
