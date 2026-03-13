@@ -1,10 +1,12 @@
 #include "controls.h"
 
 #include <imgui.h>
-#include <vector>
+#include <array>
 #include <algorithm>
-#include <mutex>
 #include <cmath>
+#include <cstdio>
+#include <mutex>
+#include <vector>
 
 #include "colour_mapper.h"
 #include "ui.h"
@@ -24,6 +26,18 @@ void sanitiseMagnitudes(std::vector<float>& magnitudes) {
 			value = 0.0f;
 		}
 	}
+}
+
+void renderWrappedStatusText(const char* text, const ImVec4* colour = nullptr) {
+    ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
+    if (colour != nullptr) {
+        ImGui::PushStyleColor(ImGuiCol_Text, *colour);
+    }
+    ImGui::TextUnformatted(text);
+    if (colour != nullptr) {
+        ImGui::PopStyleColor();
+    }
+    ImGui::PopTextWrapPos();
 }
 
 }
@@ -287,29 +301,43 @@ void renderAdvancedSettingsPanel(UIState& state
 			ImGui::Indent(10);
             auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
             const auto stats = osc.getStats();
-            bool configChanged = false;
+            const bool transportRunning = osc.isRunning();
+            const Synesthesia::OSC::OSCConfig currentConfig = osc.getConfig();
+            const auto destinationValidation = Synesthesia::OSC::validateOSCDestination(state.oscSettings.destinationHost);
 
-            ImGui::Text("Destination");
-            char destinationHost[] = "127.0.0.1";
-            ImGui::BeginDisabled();
-            ImGui::InputText("##OSCDestination", destinationHost, sizeof(destinationHost), ImGuiInputTextFlags_ReadOnly);
-            ImGui::EndDisabled();
+	            ImGui::Text("Destination");
+	            std::array<char, 16> destinationHost{};
+	            std::snprintf(destinationHost.data(), destinationHost.size(), "%s", state.oscSettings.destinationHost.c_str());
+	            if (ImGui::InputText("##OSCDestination", destinationHost.data(), destinationHost.size())) {
+	                state.oscSettings.destinationHost = destinationHost.data();
+	            }
+	            if (!destinationValidation.valid) {
+	                const ImVec4 errorColour(1.0f, 0.3f, 0.3f, 1.0f);
+	                renderWrappedStatusText(destinationValidation.errorMessage.c_str(), &errorColour);
+	            } else {
+	                renderWrappedStatusText("Loopback or RFC1918 private IPv4 only");
+	            }
 
-            ImGui::Text("Transmit Port");
-            configChanged |= ImGui::InputInt("##OSCTransmitPort", &state.oscSettings.transmitPort);
+	            ImGui::Text("Transmit Port");
+	            ImGui::InputInt("##OSCTransmitPort", &state.oscSettings.transmitPort);
 
-            ImGui::Text("Receive Port");
-            configChanged |= ImGui::InputInt("##OSCReceivePort", &state.oscSettings.receivePort);
+	            ImGui::Text("Receive Port");
+	            ImGui::InputInt("##OSCReceivePort", &state.oscSettings.receivePort);
 
-            state.oscSettings.transmitPort = std::clamp(state.oscSettings.transmitPort, 1, 65535);
-            state.oscSettings.receivePort = std::clamp(state.oscSettings.receivePort, 1, 65535);
+	            state.oscSettings.transmitPort = std::clamp(state.oscSettings.transmitPort, 1, 65535);
+	            state.oscSettings.receivePort = std::clamp(state.oscSettings.receivePort, 1, 65535);
 
-            ImGui::Spacing();
-            ImGui::Text("Transport Status: %s", osc.isRunning() ? "Running" : "Stopped");
+	            ImGui::Spacing();
+            ImGui::Text("Transport Status: %s", transportRunning ? "Running" : "Stopped");
             ImGui::Text("Frames Sent: %llu", static_cast<unsigned long long>(stats.framesSent));
             ImGui::Text("Messages Received: %llu", static_cast<unsigned long long>(stats.messagesReceived));
+
+            const std::string lastError = osc.getLastError();
+            if (!lastError.empty()) {
+                ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastError.c_str());
+            }
             
-            if (osc.isRunning()) {
+            if (transportRunning) {
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Text("Performance");
@@ -326,28 +354,45 @@ void renderAdvancedSettingsPanel(UIState& state
             }
             
             ImGui::Spacing();
-            bool transportRunning = osc.isRunning();
+            const std::string desiredDestination = destinationValidation.valid
+                ? destinationValidation.canonicalHost
+                : state.oscSettings.destinationHost;
+            const bool hasPendingConfigChanges =
+                desiredDestination != currentConfig.destinationHost ||
+                static_cast<uint16_t>(state.oscSettings.transmitPort) != currentConfig.transmitPort ||
+                static_cast<uint16_t>(state.oscSettings.receivePort) != currentConfig.receivePort;
 
-            if (configChanged && transportRunning) {
-                Synesthesia::OSC::OSCConfig config;
-                config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
-                config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);
-                osc.updateConfig(config);
+            if (transportRunning && hasPendingConfigChanges) {
+                ImGui::BeginDisabled(!destinationValidation.valid);
+                if (ImGui::Button("Apply Settings", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
+                    Synesthesia::OSC::OSCConfig config;
+                    config.destinationHost = state.oscSettings.destinationHost;
+                    config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
+                    config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);
+                    osc.updateConfig(config);
+                    state.oscEnabled = osc.isRunning();
+                    state.oscSettings.destinationHost = osc.getConfig().destinationHost;
+                }
+                ImGui::EndDisabled();
+                ImGui::Spacing();
             }
 
             const float buttonWidth = ImGui::GetContentRegionAvail().x;
+            ImGui::BeginDisabled(!transportRunning && !destinationValidation.valid);
             if (ImGui::Button(transportRunning ? "Disable" : "Enable", ImVec2(buttonWidth, 0))) {
                 if (transportRunning) {
                     state.oscEnabled = false;
                     osc.stop();
                 } else {
-                    state.oscEnabled = true;
                     Synesthesia::OSC::OSCConfig config;
+                    config.destinationHost = state.oscSettings.destinationHost;
                     config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
                     config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);
-                    osc.start(config);
+                    state.oscEnabled = osc.start(config);
+                    state.oscSettings.destinationHost = osc.getConfig().destinationHost;
                 }
             }
+            ImGui::EndDisabled();
 
 			ImGui::Unindent(10);
         }

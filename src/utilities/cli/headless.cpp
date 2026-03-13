@@ -62,9 +62,11 @@ void HeadlessInterface::restoreTerminal() {
 }
 
 void HeadlessInterface::run(bool enableOSC, const std::string& preferredDevice,
+                            const std::string& oscDestination,
                             const uint16_t oscSendPort, const uint16_t oscReceivePort) {
     running = true;
     oscEnabled = enableOSC;
+    oscDestination_ = oscDestination;
     oscSendPort_ = oscSendPort;
     oscReceivePort_ = oscReceivePort;
     
@@ -90,12 +92,7 @@ void HeadlessInterface::run(bool enableOSC, const std::string& preferredDevice,
     
 #ifdef ENABLE_OSC
     if (oscEnabled) {
-        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-        Synesthesia::OSC::OSCConfig config;
-        config.transmitPort = oscSendPort_;
-        config.receivePort = oscReceivePort_;
-        osc.start(config);
-        std::cout << "OSC transport started" << std::endl;
+        startOSCTransport();
     }
 #endif
     
@@ -118,8 +115,7 @@ void HeadlessInterface::run(bool enableOSC, const std::string& preferredDevice,
     
 #ifdef ENABLE_OSC
     if (oscEnabled) {
-        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-        osc.stop();
+        stopOSCTransport();
     }
 #endif
     
@@ -229,7 +225,9 @@ void HeadlessInterface::displayFrequencyInfo() {
         if (oscEnabled) {
             auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
             const auto stats = osc.getStats();
+            const auto config = osc.getConfig();
             std::cout << "\nOSC: " << (osc.isRunning() ? "Running" : "Stopped");
+            std::cout << " | Dest: " << config.destinationHost << ":" << config.transmitPort;
             std::cout << " | Received: " << stats.messagesReceived;
             std::cout << " | FPS: " << stats.currentFps << "\n";
         }
@@ -281,14 +279,10 @@ void HeadlessInterface::handleKeypress() {
 #ifdef ENABLE_OSC
             else if (ch == 'o' || ch == 'O') {
                 oscEnabled = !oscEnabled;
-                auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
                 if (oscEnabled) {
-                    Synesthesia::OSC::OSCConfig config;
-                    config.transmitPort = oscSendPort_;
-                    config.receivePort = oscReceivePort_;
-                    osc.start(config);
+                    startOSCTransport();
                 } else {
-                    osc.stop();
+                    stopOSCTransport();
                 }
             }
 #endif
@@ -300,19 +294,44 @@ void HeadlessInterface::handleKeypress() {
 #ifdef ENABLE_OSC
             else if (ch == 'o' || ch == 'O') {
                 oscEnabled = !oscEnabled;
-                auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
                 if (oscEnabled) {
-                    Synesthesia::OSC::OSCConfig config;
-                    config.transmitPort = oscSendPort_;
-                    config.receivePort = oscReceivePort_;
-                    osc.start(config);
+                    startOSCTransport();
                 } else {
-                    osc.stop();
+                    stopOSCTransport();
                 }
             }
 #endif
         }
     }
+}
+
+bool HeadlessInterface::startOSCTransport() {
+#ifdef ENABLE_OSC
+    auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+    Synesthesia::OSC::OSCConfig config;
+    config.destinationHost = oscDestination_;
+    config.transmitPort = oscSendPort_;
+    config.receivePort = oscReceivePort_;
+
+    if (!osc.start(config)) {
+        oscEnabled = false;
+        std::cout << "Failed to start OSC transport: " << osc.getLastError() << std::endl;
+        return false;
+    }
+
+    oscDestination_ = osc.getConfig().destinationHost;
+    std::cout << "OSC transport started (" << oscDestination_ << ":" << oscSendPort_ << ")" << std::endl;
+    return true;
+#else
+    return false;
+#endif
+}
+
+void HeadlessInterface::stopOSCTransport() {
+#ifdef ENABLE_OSC
+    auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+    osc.stop();
+#endif
 }
 
 }

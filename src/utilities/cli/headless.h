@@ -18,6 +18,7 @@ public:
     ~HeadlessInterface();
     
     void run(bool enableOSC = false, const std::string& preferredDevice = "",
+             const std::string& oscDestination = "127.0.0.1",
              uint16_t oscSendPort = 7000, uint16_t oscReceivePort = 7001);
     
 private:
@@ -30,6 +31,7 @@ private:
     AudioInput audioInput;
     ColourMapper::ColourSpace oscColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool oscGamutMappingEnabled = true;
+    std::string oscDestination_ = "127.0.0.1";
     uint16_t oscSendPort_ = 7000;
     uint16_t oscReceivePort_ = 7001;
     
@@ -44,6 +46,8 @@ private:
     void displayFrequencyInfo();
     void handleKeypress();
     void processAudioLoop();
+    bool startOSCTransport();
+    void stopOSCTransport();
     
     static void signalHandler(int signal);
     static HeadlessInterface* instance;

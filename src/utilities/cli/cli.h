@@ -10,6 +10,7 @@ struct Arguments {
     bool showHelp = false;
     bool showVersion = false;
     std::string audioDevice;
+    std::string oscDestination = "127.0.0.1";
     int oscSendPort = 7000;
     int oscReceivePort = 7001;
 

@@ -9,6 +9,7 @@
 #include <chrono>
 #include <cstdint>
 #include <mutex>
+#include <string>
 #include <vector>
 
 namespace Synesthesia::OSC {
@@ -21,8 +22,9 @@ public:
     void stop();
     bool isRunning() const;
 
-    void updateConfig(const OSCConfig& config);
+    bool updateConfig(const OSCConfig& config);
     OSCConfig getConfig() const;
+    std::string getLastError() const;
 
     void sendFrame(const OSCFrameData& frame);
     std::vector<OSCCommand> popPendingCommands();
@@ -42,6 +44,7 @@ private:
     float averageSendTimeMs_ = 0.0f;
     uint32_t framesInWindow_ = 0;
     std::chrono::steady_clock::time_point fpsWindowStart_{};
+    std::string lastError_;
 };
 
 }

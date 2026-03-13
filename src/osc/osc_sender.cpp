@@ -10,22 +10,37 @@ namespace Synesthesia::OSC {
 
 OSCSender::~OSCSender() = default;
 
-bool OSCSender::configure(const OSCConfig& config) {
+bool OSCSender::configure(const OSCConfig& config, std::string& errorMessage) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    try {
-        config_ = config;
-        config_.destinationHost = kLoopbackHost;
-        buffer_.assign(config.outputBufferSize, '\0');
-        socket_ = std::make_unique<UdpTransmitSocket>(
-            IpEndpointName(config_.destinationHost.c_str(), static_cast<int>(config_.transmitPort))
-        );
-    } catch (...) {
+    const auto destination = validateOSCDestination(config.destinationHost);
+    if (!destination.valid) {
         socket_.reset();
         buffer_.clear();
+        errorMessage = destination.errorMessage;
         return false;
     }
 
+    try {
+        config_ = config;
+        config_.destinationHost = destination.canonicalHost;
+        buffer_.assign(config.outputBufferSize, '\0');
+        socket_ = std::make_unique<UdpTransmitSocket>(
+            IpEndpointName(static_cast<unsigned long>(destination.address), static_cast<int>(config_.transmitPort))
+        );
+    } catch (const std::exception& exception) {
+        socket_.reset();
+        buffer_.clear();
+        errorMessage = exception.what();
+        return false;
+    } catch (...) {
+        socket_.reset();
+        buffer_.clear();
+        errorMessage = "Failed to create OSC transmit socket";
+        return false;
+    }
+
+    errorMessage.clear();
     return true;
 }
 

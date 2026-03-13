@@ -16,7 +16,7 @@ public:
     OSCSender() = default;
     ~OSCSender();
 
-    bool configure(const OSCConfig& config);
+    bool configure(const OSCConfig& config, std::string& errorMessage);
     void reset();
     bool sendFrame(const OSCFrameData& frame);
 

@@ -11,12 +11,15 @@ bool OSCRuntime::start() {
         return true;
     }
 
-    if (!sender_.configure(config_)) {
+    std::string errorMessage;
+    if (!sender_.configure(config_, errorMessage)) {
+        lastError_ = errorMessage;
         return false;
     }
 
     if (!receiver_.start(config_.receivePort)) {
         sender_.reset();
+        lastError_ = "Unable to bind OSC receive socket on port " + std::to_string(config_.receivePort);
         return false;
     }
 
@@ -24,6 +27,7 @@ bool OSCRuntime::start() {
     fpsWindowStart_ = std::chrono::steady_clock::now();
     framesInWindow_ = 0;
     currentFps_ = 0;
+    lastError_.clear();
     return true;
 }
 
@@ -40,6 +44,7 @@ void OSCRuntime::stop() {
     running_ = false;
     currentFps_ = 0;
     framesInWindow_ = 0;
+    lastError_.clear();
 }
 
 bool OSCRuntime::isRunning() const {
@@ -47,26 +52,40 @@ bool OSCRuntime::isRunning() const {
     return running_;
 }
 
-void OSCRuntime::updateConfig(const OSCConfig& config) {
-    const bool wasRunning = isRunning();
-    if (wasRunning) {
-        stop();
+bool OSCRuntime::updateConfig(const OSCConfig& config) {
+    const auto destination = validateOSCDestination(config.destinationHost);
+    if (!destination.valid) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        lastError_ = destination.errorMessage;
+        return false;
     }
 
+    OSCConfig normalisedConfig = config;
+    normalisedConfig.destinationHost = destination.canonicalHost;
+
+    const bool wasRunning = isRunning();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        config_ = config;
-        config_.destinationHost = kLoopbackHost;
+        config_ = normalisedConfig;
+        lastError_.clear();
     }
 
     if (wasRunning) {
-        start();
+        stop();
+        return start();
     }
+
+    return true;
 }
 
 OSCConfig OSCRuntime::getConfig() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return config_;
+}
+
+std::string OSCRuntime::getLastError() const {
+    std::lock_guard<std::mutex> lock(mutex_);
+    return lastError_;
 }
 
 void OSCRuntime::sendFrame(const OSCFrameData& frame) {

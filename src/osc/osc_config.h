@@ -15,4 +15,13 @@ struct OSCConfig {
     std::size_t outputBufferSize = 4096;
 };
 
+struct OSCDestinationValidationResult {
+    bool valid = false;
+    uint32_t address = 0;
+    std::string canonicalHost;
+    std::string errorMessage;
+};
+
+OSCDestinationValidationResult validateOSCDestination(const std::string& destinationHost);
+
 }

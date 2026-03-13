@@ -10,6 +10,7 @@
 #include "spectrum_analyser.h"
 #include "imgui.h"
 #include <array>
+#include <string>
 #include <vector>
 
 #ifdef ENABLE_MIDI
@@ -55,6 +56,7 @@ struct UIVisibility {
 };
 
 struct OSCSettings {
+    std::string destinationHost = "127.0.0.1";
     int transmitPort = 7000;
     int receivePort = 7001;
 };

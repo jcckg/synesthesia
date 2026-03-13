@@ -73,7 +73,9 @@ int64_t currentTimestampMicros() {
 }
 
 bool SynesthesiaOSCIntegration::start(const OSCConfig& config) {
-    runtime_.updateConfig(config);
+    if (!runtime_.updateConfig(config)) {
+        return false;
+    }
     return runtime_.start();
 }
 
@@ -85,12 +87,16 @@ bool SynesthesiaOSCIntegration::isRunning() const {
     return runtime_.isRunning();
 }
 
-void SynesthesiaOSCIntegration::updateConfig(const OSCConfig& config) {
-    runtime_.updateConfig(config);
+bool SynesthesiaOSCIntegration::updateConfig(const OSCConfig& config) {
+    return runtime_.updateConfig(config);
 }
 
 OSCConfig SynesthesiaOSCIntegration::getConfig() const {
     return runtime_.getConfig();
+}
+
+std::string SynesthesiaOSCIntegration::getLastError() const {
+    return runtime_.getLastError();
 }
 
 void SynesthesiaOSCIntegration::updateColourData(

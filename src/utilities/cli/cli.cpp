@@ -29,6 +29,11 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
                 args.audioDevice = argv[++i];
             }
         }
+        else if (strcmp(argv[i], "--osc-destination") == 0) {
+            if (i + 1 < argc) {
+                args.oscDestination = argv[++i];
+            }
+        }
         else if (strcmp(argv[i], "--osc-send-port") == 0) {
             if (i + 1 < argc) {
                 args.oscSendPort = std::atoi(argv[++i]);
@@ -100,6 +105,7 @@ void Arguments::printHelp() {
     std::cout << "  --headless, -h          Run in headless mode (no GUI)\n";
     std::cout << "  --enable-osc            Start OSC transport automatically\n";
     std::cout << "  --device, -d <name>     Use specific audio device\n";
+    std::cout << "  --osc-destination <ip>  OSC loopback/private IPv4 destination (default: 127.0.0.1)\n";
     std::cout << "  --osc-send-port <port>  OSC destination port (default: 7000)\n";
     std::cout << "  --osc-receive-port <p>  OSC receive port (default: 7001)\n";
     std::cout << "  --version, -v           Show version information\n";

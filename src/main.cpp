@@ -45,6 +45,7 @@ int main(int argc, char* argv[]) {
             interface.run(
                 args.enableOSC,
                 args.audioDevice,
+                args.oscDestination,
                 static_cast<uint16_t>(args.oscSendPort),
                 static_cast<uint16_t>(args.oscReceivePort)
             );
