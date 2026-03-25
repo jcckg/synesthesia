@@ -37,7 +37,8 @@ struct ColourNativeImage {
 
 class ColourNativeCodec {
 public:
-	static constexpr size_t MAX_BIN_COUNT = 4096;
+	// Maximum supported bins per channel (supports up to 16384-point FFTs).
+	static constexpr size_t MAX_BIN_COUNT = 8193;
 
 	static ColourNativeImage encode(const std::vector<AudioColourSample>& samples,
 								   const AudioMetadata& metadata,

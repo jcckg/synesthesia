@@ -4,19 +4,21 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include <stb_image_write.h>
+#include <lodepng.h>
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "colour/colour_mapper.h"
 #include "resyne/encoding/formats/exporter.h"
+#include "resyne/recorder/colour_cache_utils.h"
 #include "resyne/recorder/import_helpers.h"
 
 namespace fs = std::filesystem;
@@ -53,6 +55,101 @@ struct FrameLab {
     float b;
 };
 
+enum class GradientOutputMode {
+    png,
+    slices,
+    both
+};
+
+GradientOutputMode parseGradientOutputMode(const std::string& value) {
+    const std::string lowered = toLower(value);
+    if (lowered == "png") {
+        return GradientOutputMode::png;
+    }
+    if (lowered == "slices") {
+        return GradientOutputMode::slices;
+    }
+    return GradientOutputMode::both;
+}
+
+bool exportsPreviewPNG(const GradientOutputMode mode) {
+    return mode == GradientOutputMode::png || mode == GradientOutputMode::both;
+}
+
+bool exportsRawSlices(const GradientOutputMode mode) {
+    return mode == GradientOutputMode::slices || mode == GradientOutputMode::both;
+}
+
+bool writeFloat32Npy(const fs::path& outputPath,
+                     const std::vector<float>& values,
+                     const size_t rows,
+                     const size_t cols) {
+    std::ofstream stream(outputPath, std::ios::binary);
+    if (!stream) {
+        return false;
+    }
+
+    const std::string shape =
+        cols == 1
+            ? "(" + std::to_string(rows) + ",)"
+            : "(" + std::to_string(rows) + ", " + std::to_string(cols) + ")";
+    std::string header =
+        "{'descr': '<f4', 'fortran_order': False, 'shape': " + shape + ", }";
+    const size_t preambleSize = 10;
+    const size_t totalSize = preambleSize + header.size() + 1;
+    const size_t padding = (16 - (totalSize % 16)) % 16;
+    header.append(padding, ' ');
+    header.push_back('\n');
+
+    const char magic[] = "\x93NUMPY";
+    stream.write(magic, 6);
+
+    const unsigned char version[2] = {1, 0};
+    stream.write(reinterpret_cast<const char*>(version), 2);
+
+    const uint16_t headerLength = static_cast<uint16_t>(header.size());
+    const char headerLengthBytes[2] = {
+        static_cast<char>(headerLength & 0xff),
+        static_cast<char>((headerLength >> 8) & 0xff)
+    };
+    stream.write(headerLengthBytes, 2);
+    stream.write(header.data(), static_cast<std::streamsize>(header.size()));
+    stream.write(reinterpret_cast<const char*>(values.data()),
+                 static_cast<std::streamsize>(values.size() * sizeof(float)));
+    return stream.good();
+}
+
+bool exportRawGradientSlices(const std::vector<FrameLab>& frameColours,
+                             const fs::path& outputPath) {
+    std::vector<float> values;
+    values.reserve(frameColours.size() * 3);
+
+    for (const auto& frameColour : frameColours) {
+        values.push_back(frameColour.L);
+        values.push_back(frameColour.a);
+        values.push_back(frameColour.b);
+    }
+
+    return writeFloat32Npy(outputPath, values, frameColours.size(), 3);
+}
+
+bool writeGradientMetadata(const fs::path& outputPath,
+                           const size_t frameCount,
+                           const float durationSeconds,
+                           const AudioMetadata& metadata) {
+    std::ofstream stream(outputPath, std::ios::binary);
+    if (!stream) {
+        return false;
+    }
+    stream << "{\n";
+    stream << "  \"frame_count\": " << frameCount << ",\n";
+    stream << "  \"duration_seconds\": " << durationSeconds << ",\n";
+    stream << "  \"sample_rate\": " << metadata.sampleRate << ",\n";
+    stream << "  \"hop_size\": " << metadata.hopSize << "\n";
+    stream << "}\n";
+    return stream.good();
+}
+
 bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
                        const std::string& outputPath,
                        int imageWidth,
@@ -63,7 +160,7 @@ bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
 
     const int numFrames = static_cast<int>(frameColours.size());
 
-    std::vector<uint8_t> pixels(static_cast<size_t>(imageWidth * imageHeight * 3));
+    std::vector<unsigned char> pixels(static_cast<size_t>(imageWidth * imageHeight * 3 * 2));
 
     for (int px = 0; px < imageWidth; ++px) {
         // Map output pixel to fractional frame index
@@ -88,76 +185,35 @@ bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
         g = std::clamp(g, 0.0f, 1.0f);
         b = std::clamp(b, 0.0f, 1.0f);
 
-        const auto ru = static_cast<uint8_t>(r * 255.0f + 0.5f);
-        const auto gu = static_cast<uint8_t>(g * 255.0f + 0.5f);
-        const auto bu = static_cast<uint8_t>(b * 255.0f + 0.5f);
+        const auto ru = static_cast<uint16_t>(std::clamp(r, 0.0f, 1.0f) * 65535.0f + 0.5f);
+        const auto gu = static_cast<uint16_t>(std::clamp(g, 0.0f, 1.0f) * 65535.0f + 0.5f);
+        const auto bu = static_cast<uint16_t>(std::clamp(b, 0.0f, 1.0f) * 65535.0f + 0.5f);
 
         // Fill entire column
         for (int py = 0; py < imageHeight; ++py) {
-            const size_t idx = static_cast<size_t>((py * imageWidth + px) * 3);
-            pixels[idx + 0] = ru;
-            pixels[idx + 1] = gu;
-            pixels[idx + 2] = bu;
+            const size_t idx = static_cast<size_t>((py * imageWidth + px) * 6);
+            pixels[idx + 0] = static_cast<unsigned char>((ru >> 8) & 0xff);
+            pixels[idx + 1] = static_cast<unsigned char>(ru & 0xff);
+            pixels[idx + 2] = static_cast<unsigned char>((gu >> 8) & 0xff);
+            pixels[idx + 3] = static_cast<unsigned char>(gu & 0xff);
+            pixels[idx + 4] = static_cast<unsigned char>((bu >> 8) & 0xff);
+            pixels[idx + 5] = static_cast<unsigned char>(bu & 0xff);
         }
     }
 
-    return stbi_write_png(outputPath.c_str(),
-                          imageWidth,
-                          imageHeight,
-                          3,
-                          pixels.data(),
-                          imageWidth * 3) != 0;
-}
+    lodepng::State state;
+    state.info_raw.colortype = LCT_RGB;
+    state.info_raw.bitdepth = 16;
+    state.info_png.color.colortype = LCT_RGB;
+    state.info_png.color.bitdepth = 16;
+    state.encoder.auto_convert = 0;
 
-void collapseToMonoSpectrum(const AudioColourSample& sample,
-                            std::vector<float>& outMagnitudes,
-                            std::vector<float>& outPhases) {
-    if (sample.magnitudes.empty() || sample.magnitudes[0].empty()) {
-        outMagnitudes.clear();
-        outPhases.clear();
-        return;
+    std::vector<unsigned char> encoded;
+    const unsigned error = lodepng::encode(encoded, pixels, static_cast<unsigned>(imageWidth), static_cast<unsigned>(imageHeight), state);
+    if (error != 0) {
+        return false;
     }
-
-    const size_t numBins = sample.magnitudes[0].size();
-    outMagnitudes.assign(numBins, 0.0f);
-    outPhases.assign(numBins, 0.0f);
-
-    const size_t numChannels = sample.magnitudes.size();
-    for (size_t bin = 0; bin < numBins; ++bin) {
-        float sumReal = 0.0f;
-        float sumImag = 0.0f;
-        size_t usedChannels = 0;
-
-        for (size_t ch = 0; ch < numChannels; ++ch) {
-            if (sample.magnitudes[ch].size() <= bin) {
-                continue;
-            }
-            const float mag = sample.magnitudes[ch][bin];
-            if (!std::isfinite(mag) || mag <= 0.0f) {
-                continue;
-            }
-
-            float phase = 0.0f;
-            if (ch < sample.phases.size() && sample.phases[ch].size() > bin) {
-                phase = sample.phases[ch][bin];
-            }
-
-            sumReal += mag * std::cos(phase);
-            sumImag += mag * std::sin(phase);
-            ++usedChannels;
-        }
-
-        if (usedChannels == 0) {
-            continue;
-        }
-
-        const float invChannels = 1.0f / static_cast<float>(usedChannels);
-        sumReal *= invChannels;
-        sumImag *= invChannels;
-
-        outMagnitudes[bin] = std::sqrt(sumReal * sumReal + sumImag * sumImag);
-        outPhases[bin] = std::atan2(sumImag, sumReal);
-    }
+    return lodepng::save_file(encoded, outputPath) == 0;
 }
 
 struct ExportResult {
@@ -172,9 +228,10 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
                                    bool copyAudio,
                                    int width,
                                    int height,
+                                   GradientOutputMode gradientOutputMode,
+                                   bool writeLabSidecar,
                                    bool trueSize,
-                                   bool noSmoothing,
-                                   bool noMelWeighting) {
+                                   int analysisHop) {
     ExportResult result;
     result.filename = audioPath.filename().string();
     const std::string stem = audioPath.stem().string();
@@ -185,15 +242,14 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
 
     const bool imported = ReSyne::ImportHelpers::importAudioFile(
         audioPath.string(),
-        2.2f,
+        1.0f,
         ColourMapper::ColourSpace::Rec2020,
         true,
+        analysisHop,
         1.0f, 1.0f, 1.0f,
         samples, metadata, errorMessage,
         nullptr,
-        nullptr,
-        !noSmoothing,
-        !noMelWeighting
+        nullptr
     );
 
     if (!imported || samples.empty()) {
@@ -207,25 +263,13 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
     std::vector<FrameLab> frameColours;
     frameColours.reserve(samples.size());
 
-    std::vector<float> mags;
-    std::vector<float> phases;
     for (const auto& sample : samples) {
-        if (sample.magnitudes.empty()) {
-            continue;
-        }
-
-        collapseToMonoSpectrum(sample, mags, phases);
-        if (mags.empty()) {
-            continue;
-        }
-
-        const auto colour = ColourMapper::spectrumToColour(
-            mags, phases, {}, sample.sampleRate, 2.2f,
-            ColourMapper::ColourSpace::Rec2020, true,
-            std::numeric_limits<float>::quiet_NaN()
-        );
-
-        frameColours.push_back({colour.L, colour.a, colour.b_comp});
+        const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
+            sample,
+            1.0f,
+            ColourMapper::ColourSpace::Rec2020,
+            true);
+        frameColours.push_back({entry.labL, entry.labA, entry.labB});
     }
 
     if (frameColours.empty()) {
@@ -233,10 +277,12 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
         return result;
     }
 
-    const float duration = (metadata.sampleRate > 0.0f && metadata.hopSize > 0)
+    const float duration = (metadata.durationSeconds > 0.0)
+        ? static_cast<float>(metadata.durationSeconds)
+        : ((metadata.sampleRate > 0.0f && metadata.hopSize > 0)
         ? static_cast<float>(metadata.numFrames) *
           static_cast<float>(metadata.hopSize) / metadata.sampleRate
-        : static_cast<float>(frameColours.size()) * (1024.0f / 44100.0f);
+        : static_cast<float>(frameColours.size()) * (1024.0f / 44100.0f));
 
     const int imageWidth = trueSize
         ? std::max(1, static_cast<int>(frameColours.size()))
@@ -244,14 +290,45 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
                        : std::max(1, static_cast<int>(std::ceil(duration * kDefaultPixelsPerSecond))));
     const int imageHeight = (height > 0) ? height : kDefaultHeight;
 
-    const fs::path pngPath = gradientsDir / (stem + ".png");
-    if (!renderGradientPNG(frameColours, pngPath.string(), imageWidth, imageHeight)) {
-        result.detail = "failed (PNG write error)";
-        return result;
+    bool exportedPreview = false;
+    bool exportedSlices = false;
+    bool exportedSidecar = false;
+
+    const fs::path slicePath = gradientsDir / (stem + ".lab.npy");
+    if (exportsRawSlices(gradientOutputMode) || (exportsPreviewPNG(gradientOutputMode) && writeLabSidecar)) {
+        if (!exportRawGradientSlices(frameColours, slicePath)) {
+            result.detail = "failed (slice export error)";
+            return result;
+        }
+        fs::path metadataPath = slicePath;
+        metadataPath.replace_extension(".json");
+        if (!writeGradientMetadata(metadataPath, frameColours.size(), duration, metadata)) {
+            result.detail = "failed (slice metadata error)";
+            return result;
+        }
+        exportedSidecar = true;
+        exportedSlices = exportsRawSlices(gradientOutputMode);
+    }
+
+    if (exportsPreviewPNG(gradientOutputMode)) {
+        const fs::path pngPath = gradientsDir / (stem + ".png");
+        if (!renderGradientPNG(frameColours, pngPath.string(), imageWidth, imageHeight)) {
+            result.detail = "failed (PNG write error)";
+            return result;
+        }
+        exportedPreview = true;
     }
 
     result.exported = true;
-    result.detail = "done";
+    if (exportedPreview && exportedSlices) {
+        result.detail = "done (PNG + slices)";
+    } else if (exportedPreview && exportedSidecar) {
+        result.detail = "done (PNG + Lab sidecar)";
+    } else if (exportedSlices) {
+        result.detail = "done (slices)";
+    } else {
+        result.detail = "done (PNG)";
+    }
 
     if (copyAudio) {
         std::error_code ec;
@@ -272,10 +349,21 @@ int BatchExporter::run(const std::string& inputDir,
                        bool copyAudio,
                        int width,
                        int height,
+                       const std::string& gradientFormat,
+                       bool writeLabSidecar,
                        bool trueSize,
-                       bool noSmoothing,
-                       bool noMelWeighting,
-                       int numWorkers) {
+                       int numWorkers,
+                       int analysisHop) {
+    const GradientOutputMode gradientOutputMode = parseGradientOutputMode(gradientFormat);
+    const std::string gradientFormatLowered = toLower(gradientFormat);
+    if (gradientFormatLowered != "png" &&
+        gradientFormatLowered != "slices" &&
+        gradientFormatLowered != "both") {
+        std::cerr << "Error: Unsupported gradient format: " << gradientFormat
+                  << " (expected png, slices, or both)\n";
+        return 1;
+    }
+
     // --- Validate input directory ---
     std::error_code ec;
     if (!fs::exists(inputDir, ec) || !fs::is_directory(inputDir, ec)) {
@@ -311,13 +399,9 @@ int BatchExporter::run(const std::string& inputDir,
     if (trueSize && width > 0) {
         std::cout << "Info: --true-size is enabled; ignoring --width and using analyser frame count.\n\n";
     }
-    if (noSmoothing) {
-        std::cout << "Info: analyser smoothing is disabled for this export.\n\n";
+    if (exportsRawSlices(gradientOutputMode) || writeLabSidecar) {
+        std::cout << "Info: Lab sidecars use exact analyser frame counts and ignore preview sizing.\n\n";
     }
-    if (noMelWeighting) {
-        std::cout << "Info: analyser mel weighting is disabled for this export.\n\n";
-    }
-
     const fs::path gradientsDir = copyAudio
         ? fs::path(outputDir) / "gradients"
         : fs::path(outputDir);
@@ -355,9 +439,10 @@ int BatchExporter::run(const std::string& inputDir,
                 copyAudio,
                 width,
                 height,
+                gradientOutputMode,
+                writeLabSidecar,
                 trueSize,
-                noSmoothing,
-                noMelWeighting
+                analysisHop
             );
 
             std::cout << "[" << (i + 1) << "/" << total << "] "
@@ -393,9 +478,10 @@ int BatchExporter::run(const std::string& inputDir,
                         copyAudio,
                         width,
                         height,
+                        gradientOutputMode,
+                        writeLabSidecar,
                         trueSize,
-                        noSmoothing,
-                        noMelWeighting
+                        analysisHop
                     );
 
                     {

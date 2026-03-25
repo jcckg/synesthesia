@@ -1,5 +1,6 @@
 #include "resyne/recorder/recorder.h"
 #include "resyne/recorder/import_helpers.h"
+#include "audio/analysis/fft/fft_processor.h"
 
 #include <algorithm>
 #include <cctype>
@@ -102,6 +103,7 @@ bool Recorder::importFromFile(RecorderState& state,
         extension == ".oga") {
         success = ImportHelpers::importAudioFile(
             filepath, gamma, colourSpace, applyGamutMapping,
+            FFTProcessor::HOP_SIZE,
             state.importLowGain, state.importMidGain, state.importHighGain,
             importedSamples, metadata, errorMessage,
             [&state](float progress) { state.loadingProgress = progress; },
@@ -202,6 +204,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         setStatus("Processing audio...");
         success = ImportHelpers::importAudioFile(
             filepath, gamma, colourSpace, applyGamutMapping,
+            FFTProcessor::HOP_SIZE,
             state.importLowGain, state.importMidGain, state.importHighGain,
             samples, metadata, errorMessage,
             updateProgress,

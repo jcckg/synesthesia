@@ -60,9 +60,8 @@ public:
 		uint64_t frameCounter;
 		float sampleRate;
 		float loudnessLUFS;
-		bool loudnessAssigned;
 
-		FFTFrame() : frameCounter(0), sampleRate(0.0f), loudnessLUFS(-200.0f), loudnessAssigned(false) {}
+		FFTFrame() : frameCounter(0), sampleRate(0.0f), loudnessLUFS(-200.0f) {}
 	};
 
 	FFTProcessor();
@@ -79,6 +78,8 @@ public:
 	std::vector<float> getPhaseBuffer() const;
 	void reset();
 	void setEQGains(float low, float mid, float high);
+	void setHopSize(int hopSize);
+	int getHopSize() const { return static_cast<int>(analysisHopSize); }
 	void setCriticalBandSmoothingEnabled(bool enabled);
 	void setMelWeightingEnabled(bool enabled);
 	bool getCriticalBandSmoothingEnabled() const { return criticalBandSmoothingEnabled; }
@@ -117,6 +118,8 @@ private:
 	std::vector<float> windowBuffer;
 	std::vector<float> inputAccumulator;
 	size_t accumulatedSamples;
+	size_t analysisHopSize;
+	size_t overlapSize;
 
 	std::vector<float> magnitudesBuffer;
 	std::vector<float> rawMagnitudesBuffer;

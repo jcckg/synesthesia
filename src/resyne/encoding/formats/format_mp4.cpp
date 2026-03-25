@@ -20,6 +20,7 @@
 #endif
 
 #include "colour/colour_mapper.h"
+#include "resyne/recorder/colour_cache_utils.h"
 #include "ui/smoothing/smoothing.h"
 #include "utilities/video/ffmpeg_locator.h"
 
@@ -137,25 +138,15 @@ public:
     RGB colourAt(double timeSeconds) {
         timeSeconds = std::max(timeSeconds, 0.0);
         const AudioColourSample& sample = sampleForTime(timeSeconds);
-        const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
-            ? sample.loudnessLUFS
-            : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-        const auto& magnitudes = !sample.magnitudes.empty() ? sample.magnitudes[0] : std::vector<float>();
-        const auto& phases = !sample.phases.empty() ? sample.phases[0] : std::vector<float>();
-        const std::vector<float>& frequencies = !sample.frequencies.empty() ? sample.frequencies[0] : std::vector<float>();
-        const auto colour = ColourMapper::spectrumToColour(
-            magnitudes,
-            phases,
-            frequencies,
-            sample.sampleRate,
+        const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
+            sample,
             gamma_,
             colourSpace_,
-            gamut_,
-            loudnessOverride);
+            gamut_);
 
-        RGB rgb{std::clamp(colour.r, 0.0f, 1.0f),
-                std::clamp(colour.g, 0.0f, 1.0f),
-                std::clamp(colour.b, 0.0f, 1.0f)};
+        RGB rgb{std::clamp(entry.rgb.x, 0.0f, 1.0f),
+                std::clamp(entry.rgb.y, 0.0f, 1.0f),
+                std::clamp(entry.rgb.z, 0.0f, 1.0f)};
 
         if (!initialised_) {
             smoother_.reset(rgb.r, rgb.g, rgb.b);

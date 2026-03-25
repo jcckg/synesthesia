@@ -62,14 +62,11 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--copy-audio") == 0) {
             args.copyAudio = true;
         }
+        else if (strcmp(argv[i], "--write-lab-sidecar") == 0) {
+            args.writeLabSidecar = true;
+        }
         else if (strcmp(argv[i], "--true-size") == 0) {
             args.trueSize = true;
-        }
-        else if (strcmp(argv[i], "--no-smoothing") == 0) {
-            args.noSmoothing = true;
-        }
-        else if (strcmp(argv[i], "--no-mel-weighting") == 0) {
-            args.noMelWeighting = true;
         }
         else if (strcmp(argv[i], "--num-workers") == 0) {
             if (i + 1 < argc) {
@@ -87,6 +84,25 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--height") == 0) {
             if (i + 1 < argc) {
                 args.gradientHeight = std::atoi(argv[++i]);
+            }
+        }
+        else if (strcmp(argv[i], "--hop") == 0) {
+            if (i + 1 < argc) {
+                args.analysisHop = std::atoi(argv[++i]);
+                if (args.analysisHop < 1) {
+                    args.analysisHop = 1;
+                }
+            }
+        }
+        else if (strcmp(argv[i], "--gradient-format") == 0) {
+            if (i + 1 < argc) {
+                args.gradientFormat = argv[++i];
+                std::transform(args.gradientFormat.begin(),
+                               args.gradientFormat.end(),
+                               args.gradientFormat.begin(),
+                               [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
             }
         }
         else {
@@ -116,14 +132,17 @@ void Arguments::printHelp() {
     std::cout << "  --output, -o <dir>      Output directory for gradient PNG images\n";
     std::cout << "  --copy-audio            Also copy audio files alongside gradients\n";
     std::cout << "                          (creates 'gradients/' and 'audio/' subdirectories)\n";
+    std::cout << "  --gradient-format <m>   Export mode: png, slices, or both (default: png)\n";
+    std::cout << "  --write-lab-sidecar     Also write a .lab.npy sidecar when exporting PNGs\n";
     std::cout << "  --true-size             Use exact analyser frame count as image width\n";
     std::cout << "                          (no temporal interpolation in export)\n";
-    std::cout << "  --no-smoothing          Disable analyser critical-band smoothing during export\n";
-    std::cout << "  --no-mel-weighting      Disable analyser mel weighting during export\n";
     std::cout << "  --num-workers <n>       Number of worker threads for batch export (default: 1)\n";
+    std::cout << "  --hop <samples>         Analysis hop size in samples (default: 1024)\n";
     std::cout << "  --width <px>            Force gradient width in pixels\n";
     std::cout << "                          (default: 20px per second of audio)\n";
     std::cout << "  --height <px>           Force gradient height in pixels (default: 800)\n\n";
+    std::cout << "Slice export writes float32 Lab arrays as .lab.npy.\n";
+    std::cout << "PNG export writes a Lab sidecar only when --write-lab-sidecar is set.\n\n";
     std::cout << "Supported audio formats: .wav, .flac, .mp3, .ogg\n\n";
     std::cout << "Examples:\n";
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/GradientExport\n";

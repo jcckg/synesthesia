@@ -4,6 +4,7 @@
 #include "resyne/recorder/loudness_utils.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <fstream>
 #include <functional>
@@ -11,6 +12,50 @@
 namespace {
 constexpr uint32_t RESYNE_MAGIC = 0x5253594E;
 constexpr uint32_t RESYNE_VERSION = 4;
+constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
+
+bool resolveImageLayout(const size_t height,
+						const uint32_t preferredChannels,
+						size_t& binCount,
+						uint32_t& channels) {
+	auto acceptLayout = [&](const uint32_t candidateChannels) {
+		if (candidateChannels == 0 || candidateChannels > 8 || candidateChannels > height) {
+			return false;
+		}
+		if ((height % candidateChannels) != 0) {
+			return false;
+		}
+		const size_t candidateBinCount = height / candidateChannels;
+		if (candidateBinCount == 0 || candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
+			return false;
+		}
+		binCount = candidateBinCount;
+		channels = candidateChannels;
+		return true;
+	};
+
+	if (preferredChannels > 0 && acceptLayout(preferredChannels)) {
+		return true;
+	}
+
+	for (const size_t candidateBinCount : COMMON_BIN_COUNTS) {
+		if (candidateBinCount > height || candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
+			continue;
+		}
+		if ((height % candidateBinCount) != 0) {
+			continue;
+		}
+
+		const uint32_t candidateChannels = static_cast<uint32_t>(height / candidateBinCount);
+		if (candidateChannels >= 1 && candidateChannels <= 8) {
+			binCount = candidateBinCount;
+			channels = candidateChannels;
+			return true;
+		}
+	}
+
+	return acceptLayout(1);
+}
 }
 
 namespace SequenceExporterInternal {
@@ -165,8 +210,27 @@ bool loadFromResyne(const std::string& filepath,
 		}
 	}
 
+	size_t binCount = 0;
+	uint32_t resolvedChannels = 1;
+	if (version >= 4) {
+		if (!resolveImageLayout(image.height, storedChannels, binCount, resolvedChannels) ||
+			resolvedChannels != storedChannels) {
+			return false;
+		}
+	} else if (!resolveImageLayout(image.height, 0, binCount, resolvedChannels)) {
+		return false;
+	}
+
+	if (version >= 3 && storedFftSize > 0) {
+		const size_t storedBinCount = static_cast<size_t>(storedFftSize / 2) + 1;
+		if (storedBinCount != binCount) {
+			return false;
+		}
+	}
+
+	image.metadata.channels = resolvedChannels;
+
 	float detectedSampleRate = ColourNativeCodec::detectSampleRate(image);
-	const size_t binCount = std::min(image.height, ColourNativeCodec::MAX_BIN_COUNT);
 	int resolvedFftSize = binCount > 1 ? static_cast<int>((binCount - 1) * 2) : 2;
 	int resolvedHopSize = std::max(1, resolvedFftSize / 2);
 
@@ -205,6 +269,9 @@ bool loadFromResyne(const std::string& filepath,
 	};
 
 	samples = ColourNativeCodec::decode(image, detectedSampleRate, resolvedHopSize, frameCallback, decodeProgress);
+	if (samples.empty()) {
+		return false;
+	}
 
 	image.metadata.sampleRate = detectedSampleRate;
 	image.metadata.hopSize = resolvedHopSize;
@@ -224,7 +291,7 @@ bool loadFromResyne(const std::string& filepath,
 	metadata.windowType = "hann";
 	metadata.numFrames = samples.size();
 	metadata.numBins = binCount;
-	metadata.channels = storedChannels;
+	metadata.channels = resolvedChannels;
 	metadata.version = "3.0.0";
 
 	if (progress) {

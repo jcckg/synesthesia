@@ -118,11 +118,11 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
             state.metadata.channels = static_cast<uint32_t>(numChannels);
         }
 
-        AudioColourSample sample;
-        sample.magnitudes.resize(numChannels);
-        sample.phases.resize(numChannels);
-        sample.channels = static_cast<uint32_t>(numChannels);
-        sample.sampleRate = frame.sampleRate;
+	        AudioColourSample sample;
+	        sample.magnitudes.resize(numChannels);
+	        sample.phases.resize(numChannels);
+	        sample.channels = static_cast<uint32_t>(numChannels);
+	        sample.sampleRate = frame.sampleRate;
         sample.loudnessLUFS = frame.loudnessLUFS;
         sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
 
@@ -132,11 +132,11 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
             if (channelFrame.frameCounter != frame.frameCounter) {
                 channelsAligned = false;
                 break;
-            }
+	            }
 
-            sample.magnitudes[ch] = channelFrame.magnitudes;
-            sample.phases[ch] = channelFrame.phases;
-        }
+	            sample.magnitudes[ch] = channelFrame.magnitudes;
+	            sample.phases[ch] = channelFrame.phases;
+	        }
 
         if (!channelsAligned) {
             continue;

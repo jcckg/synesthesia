@@ -14,6 +14,7 @@
 #include <tiny_dng_writer.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
@@ -23,6 +24,7 @@
 namespace SequenceExporterInternal {
 
 namespace {
+constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
 
 float srgbToLinear(const float value) {
 	if (value <= 0.04045f) {
@@ -36,6 +38,32 @@ float sanitiseFloat(const float value) {
 		return 0.0f;
 	}
 	return std::clamp(value, 0.0f, 1.0f);
+}
+
+bool resolveImageLayout(const size_t height, size_t& binCount, uint32_t& channels) {
+	for (const size_t candidateBinCount : COMMON_BIN_COUNTS) {
+		if (candidateBinCount > height || candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
+			continue;
+		}
+		if ((height % candidateBinCount) != 0) {
+			continue;
+		}
+
+		const uint32_t candidateChannels = static_cast<uint32_t>(height / candidateBinCount);
+		if (candidateChannels >= 1 && candidateChannels <= 8) {
+			binCount = candidateBinCount;
+			channels = candidateChannels;
+			return true;
+		}
+	}
+
+	if (height == 0 || height > ColourNativeCodec::MAX_BIN_COUNT) {
+		return false;
+	}
+
+	binCount = height;
+	channels = 1;
+	return true;
 }
 
 }
@@ -254,35 +282,15 @@ bool loadFromTIFF(const std::string& filepath,
 		return false;
 	}
 
-	float detectedSampleRate = ColourNativeCodec::detectSampleRate(colourImage);
-
-	const std::vector<size_t> commonBinCounts = {257, 513, 1025, 2049, 4097, 8193};
-
 	size_t binCount = 0;
 	uint32_t inferredChannels = 1;
-
-	for (size_t candidateBinCount : commonBinCounts) {
-		if (candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
-			continue;
-		}
-		if (candidateBinCount > colourImage.height) {
-			continue;
-		}
-
-		if (colourImage.height % candidateBinCount == 0) {
-			const uint32_t candidateChannels = static_cast<uint32_t>(colourImage.height / candidateBinCount);
-			if (candidateChannels >= 1 && candidateChannels <= 8) {
-				binCount = candidateBinCount;
-				inferredChannels = candidateChannels;
-				break;
-			}
-		}
+	if (!resolveImageLayout(colourImage.height, binCount, inferredChannels)) {
+		return false;
 	}
 
-	if (binCount == 0) {
-		binCount = std::min(colourImage.height, ColourNativeCodec::MAX_BIN_COUNT);
-		inferredChannels = 1;
-	}
+	colourImage.metadata.channels = inferredChannels;
+
+	float detectedSampleRate = ColourNativeCodec::detectSampleRate(colourImage);
 
 	const int fftSize = binCount > 1 ? static_cast<int>((binCount - 1) * 2) : 2;
 	int hopSize = std::max(1, fftSize / 2);
@@ -310,6 +318,9 @@ bool loadFromTIFF(const std::string& filepath,
 	};
 
 	samples = ColourNativeCodec::decode(colourImage, detectedSampleRate, hopSize, frameCallback, decodeProgress);
+	if (samples.empty()) {
+		return false;
+	}
 	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata);
 
 	colourImage.metadata.sampleRate = detectedSampleRate;

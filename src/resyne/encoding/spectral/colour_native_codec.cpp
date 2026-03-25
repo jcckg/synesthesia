@@ -33,6 +33,12 @@ constexpr float MIN_SAMPLE_RATE = 8000.0f;
 constexpr float MAX_SAMPLE_RATE = 192000.0f;
 constexpr float MIN_BIN_INTENSITY = 1e-6f;
 constexpr float TWO_PI = 2.0f * std::numbers::pi_v<float>;
+constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
+
+bool isCommonBinCount(const size_t binCount) {
+	return std::find(COMMON_BIN_COUNTS.begin(), COMMON_BIN_COUNTS.end(), binCount) !=
+		COMMON_BIN_COUNTS.end();
+}
 
 float snapToCommonSampleRate(float sampleRate) {
 	if (!std::isfinite(sampleRate) || sampleRate <= 0.0f) {
@@ -140,15 +146,25 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 }
 
 float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
-	const std::vector<size_t> commonBinCounts = {257, 513, 1025, 2049, 4097, 8193};
-
 	size_t binCountPerChannel = 0;
 
-	for (size_t candidateBinCount : commonBinCounts) {
+	const uint32_t metadataChannels = image.metadata.channels;
+	if (metadataChannels > 0 && metadataChannels <= image.height &&
+		image.height % metadataChannels == 0) {
+		const size_t candidateBinCount = image.height / metadataChannels;
+		if (candidateBinCount > 0 && candidateBinCount <= MAX_BIN_COUNT &&
+			(metadataChannels > 1 || isCommonBinCount(candidateBinCount))) {
+			binCountPerChannel = candidateBinCount;
+		}
+	}
+
+	for (size_t candidateBinCount : COMMON_BIN_COUNTS) {
+		if (binCountPerChannel != 0) {
+			break;
+		}
 		if (candidateBinCount > MAX_BIN_COUNT || candidateBinCount > image.height) {
 			continue;
 		}
-
 		if (image.height % candidateBinCount == 0) {
 			const uint32_t candidateChannels = static_cast<uint32_t>(image.height / candidateBinCount);
 			if (candidateChannels >= 1 && candidateChannels <= 8) {
@@ -159,7 +175,10 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 	}
 
 	if (binCountPerChannel == 0) {
-		binCountPerChannel = std::min(image.height, MAX_BIN_COUNT);
+		if (image.height == 0 || image.height > MAX_BIN_COUNT) {
+			return DEFAULT_SAMPLE_RATE;
+		}
+		binCountPerChannel = image.height;
 	}
 
 	const size_t usableHeight = binCountPerChannel;
@@ -289,13 +308,13 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 														const SequenceFrameCallback& onFrameDecoded,
 														const std::function<void(float)>& onProgress) {
 	const uint32_t numChannels = image.metadata.channels > 0 ? image.metadata.channels : 1;
-	const size_t totalHeight = std::min(image.height, ColourNativeCodec::MAX_BIN_COUNT);
-	const size_t binCountPerChannel = totalHeight / numChannels;
-	const size_t binCount = binCountPerChannel > 0 ? binCountPerChannel : totalHeight;
+	const bool invalidLayout = numChannels == 0 || numChannels > 8 || image.height == 0 ||
+		numChannels > image.height || (image.height % numChannels) != 0;
+	const size_t binCount = invalidLayout ? 0 : (image.height / numChannels);
 
 	std::vector<AudioColourSample> samples(image.width);
 	const size_t totalFrames = image.width;
-	if (binCount == 0 || totalFrames == 0) {
+	if (binCount == 0 || binCount > ColourNativeCodec::MAX_BIN_COUNT || totalFrames == 0) {
 		if (onProgress) {
 			onProgress(1.0f);
 		}
@@ -326,7 +345,9 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 		onProgress(0.0f);
 	}
 
-	const size_t numThreads = std::min(std::thread::hardware_concurrency(), static_cast<unsigned>(8));
+	const size_t numThreads = std::max<size_t>(
+		1,
+		std::min<size_t>(static_cast<size_t>(std::thread::hardware_concurrency()), 8));
 	const size_t framesPerThread = (totalFrames + numThreads - 1) / numThreads;
 	std::vector<std::thread> pixelThreads;
 	std::atomic<size_t> framesProcessed{0};

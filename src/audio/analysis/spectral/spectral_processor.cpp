@@ -12,6 +12,13 @@ constexpr float MAX_LOUDNESS_DB = 0.0f;
 constexpr float RMS_EPSILON = 1e-12f;
 constexpr float PERCEPTUAL_REFERENCE_LUFS = -23.0f; // EBU R128 nominal programme level (0 LU).
 
+struct SpectralBandBalance {
+	float low = 0.0f;
+	float mid = 0.0f;
+	float high = 0.0f;
+	float tilt = 0.0f;
+};
+
 float soneFromLoudness(const float loudnessDb) {
 	// Stevens' power law: loudness in sones doubles for each +10 phon;LU ≈ 1 phon change around reference band.
 	const float relative = (loudnessDb - PERCEPTUAL_REFERENCE_LUFS) / 10.0f;
@@ -59,6 +66,84 @@ float loudnessToBrightness(const float clampedDb) {
 	return std::pow(normalised, BRIGHTNESS_RESPONSE_GAMMA);
 }
 
+float resolveBrightnessLoudnessDb(
+	const float frameLoudnessDb,
+	const float slowLoudnessDb,
+	const float crestFactor,
+	float& outTransientMix
+) {
+	const float clampedFrame = clampLoudnessDb(frameLoudnessDb);
+	if (!std::isfinite(slowLoudnessDb)) {
+		outTransientMix = 1.0f;
+		return clampedFrame;
+	}
+
+	const float clampedSlow = clampLoudnessDb(slowLoudnessDb);
+	const float attackDb = std::max(0.0f, clampedFrame - clampedSlow);
+	const float crestMix = std::clamp((crestFactor - 1.5f) / 4.5f, 0.0f, 1.0f);
+	const float attackMix = std::clamp(attackDb / 12.0f, 0.0f, 1.0f);
+	outTransientMix = attackMix * (0.35f + 0.65f * crestMix);
+	return clampedSlow + outTransientMix * attackDb;
+}
+
+float normaliseLogFrequency(const float frequency) {
+	if (!std::isfinite(frequency) || frequency <= synesthesia::constants::MIN_AUDIO_FREQ) {
+		return 0.0f;
+	}
+	const float minLog = std::log(synesthesia::constants::MIN_AUDIO_FREQ);
+	const float maxLog = std::log(synesthesia::constants::MAX_AUDIO_FREQ);
+	const float freqLog = std::log(std::clamp(
+		frequency,
+		synesthesia::constants::MIN_AUDIO_FREQ,
+		synesthesia::constants::MAX_AUDIO_FREQ));
+	return std::clamp((freqLog - minLog) / std::max(maxLog - minLog, 1e-6f), 0.0f, 1.0f);
+}
+
+float blendLogFrequencies(const float lhs, const float rhs, const float blend) {
+	const float clampedLhs = std::clamp(std::isfinite(lhs) ? lhs : synesthesia::constants::MIN_AUDIO_FREQ,
+		synesthesia::constants::MIN_AUDIO_FREQ, synesthesia::constants::MAX_AUDIO_FREQ);
+	const float clampedRhs = std::clamp(std::isfinite(rhs) ? rhs : clampedLhs,
+		synesthesia::constants::MIN_AUDIO_FREQ, synesthesia::constants::MAX_AUDIO_FREQ);
+	return std::exp(std::lerp(std::log(clampedLhs), std::log(clampedRhs), std::clamp(blend, 0.0f, 1.0f)));
+}
+
+SpectralBandBalance calculateBandBalance(
+	std::span<const float> magnitudes,
+	std::span<const float> frequencies
+) {
+	SpectralBandBalance balance{};
+	if (magnitudes.empty() || magnitudes.size() != frequencies.size()) {
+		return balance;
+	}
+
+	for (size_t i = 0; i < magnitudes.size(); ++i) {
+		const float magnitude = magnitudes[i];
+		const float frequency = frequencies[i];
+		if (!std::isfinite(magnitude) || !std::isfinite(frequency) || magnitude <= 0.0f) {
+			continue;
+		}
+
+		const float energy = magnitude * magnitude;
+		if (frequency < 220.0f) {
+			balance.low += energy;
+		} else if (frequency < 2200.0f) {
+			balance.mid += energy;
+		} else {
+			balance.high += energy;
+		}
+	}
+
+	const float total = balance.low + balance.mid + balance.high;
+	if (total <= RMS_EPSILON) {
+		return balance;
+	}
+
+	const float weightedLow = balance.low + 0.5f * balance.mid;
+	const float weightedHigh = balance.high + 0.5f * balance.mid;
+	balance.tilt = std::clamp((weightedHigh - weightedLow) / total, -1.0f, 1.0f);
+	return balance;
+}
+
 }
 
 SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
@@ -78,8 +163,11 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 		result.X = result.Y = result.Z = 0.0f;
 		result.L = result.a = result.b_comp = 0.0f;
 		result.loudnessDb = MIN_LOUDNESS_DB;
+		result.frameLoudnessDb = MIN_LOUDNESS_DB;
+		result.brightnessLoudnessDb = MIN_LOUDNESS_DB;
 		result.loudnessNormalised = 0.0f;
 		result.brightnessNormalised = 0.0f;
+		result.transientMix = 0.0f;
 		result.estimatedSPL = synesthesia::constants::REFERENCE_SPL_AT_0_LUFS + MIN_LOUDNESS_DB;
 		result.luminanceCdM2 = 0.0f;
 		return result;
@@ -118,12 +206,32 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	const float loudnessDb = std::isfinite(overrideLoudnessDb) ? overrideLoudnessDb : computedLoudnessDb;
 	const float clampedLoudnessDb = clampLoudnessDb(loudnessDb);
 	const float loudnessNormalised = std::clamp(normaliseLoudness(clampedLoudnessDb), 0.0f, 1.0f);
-	const float brightnessGain = loudnessToBrightness(clampedLoudnessDb);
+	float transientMix = 0.0f;
+	const float brightnessLoudnessDb = resolveBrightnessLoudnessDb(
+		computedLoudnessDb,
+		loudnessDb,
+		result.spectralCrestFactor,
+		transientMix);
+	const float centroidNorm = normaliseLogFrequency(result.spectralCentroid);
+	const float rolloffNorm = normaliseLogFrequency(result.spectralRolloff);
+	const float spreadNorm = std::clamp(
+		result.spectralCentroid > 1e-3f ? (result.spectralSpread / result.spectralCentroid) / 1.75f : 0.0f,
+		0.0f, 1.0f);
+	const float crestNorm = std::clamp(
+		std::log2(std::max(result.spectralCrestFactor, 1.0f)) / 3.5f,
+		0.0f, 1.0f);
+	const float tonalStrength = std::clamp(
+		0.55f * (1.0f - result.spectralFlatness) + 0.45f * crestNorm,
+		0.0f, 1.0f);
+	const SpectralBandBalance bandBalance = calculateBandBalance(magnitudes, effectiveFrequencies);
+	const float transientAccent = transientMix * (0.35f + 0.65f * tonalStrength);
+	const float brightnessGain = std::clamp(
+		loudnessToBrightness(brightnessLoudnessDb) * (1.0f + 0.18f * transientAccent),
+		0.0f, 1.2f);
 	const float estimatedSPL = synesthesia::constants::REFERENCE_SPL_AT_0_LUFS + clampedLoudnessDb;
-	const float luminanceCdM2 = brightnessGain * synesthesia::constants::REFERENCE_WHITE_LUMINANCE_CDM2;
 
-	// Note: A-weighting and EQ are already applied in FFTProcessor::processMagnitudes
-	// Do NOT apply perceptual weighting again as it would be applied twice
+	// Consume the spectrum exactly as supplied. The batch-export path passes the raw FFT
+	// magnitudes here, while any psychoacoustic weighting lives in separate display code.
 
 	float X_total = 0.0f;
 	float Y_total = 0.0f;
@@ -181,19 +289,76 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	const float hkX = scaledX / hkFactor;
 	const float hkY = scaledY / hkFactor;
 	const float hkZ = scaledZ / hkFactor;
-
-	result.X = hkX;
-	result.Y = hkY;
-	result.Z = hkZ;
 	result.loudnessDb = clampedLoudnessDb;
+	result.frameLoudnessDb = clampLoudnessDb(computedLoudnessDb);
+	result.brightnessLoudnessDb = brightnessLoudnessDb;
 	result.loudnessNormalised = loudnessNormalised;
 	result.brightnessNormalised = brightnessGain;
+	result.transientMix = transientMix;
 	result.estimatedSPL = estimatedSPL;
-	result.luminanceCdM2 = luminanceCdM2;
 
-	ColourMapper::XYZtoRGB(hkX, hkY, hkZ, result.r, result.g, result.b, colourSpace, true, applyGamutMapping);
+	float labL = 0.0f;
+	float labA = 0.0f;
+	float labB = 0.0f;
+	ColourMapper::XYZtoLab(hkX, hkY, hkZ, labL, labA, labB);
 
-	ColourMapper::XYZtoLab(hkX, hkY, hkZ, result.L, result.a, result.b_comp);
+	const float baseRadius = std::hypot(labA, labB);
+	const float guidedFrequency = blendLogFrequencies(
+		result.spectralCentroid > 1e-3f ? result.spectralCentroid : result.spectralRolloff,
+		result.spectralRolloff > 1e-3f ? result.spectralRolloff : result.spectralCentroid,
+		0.35f);
+	const float guidedWavelength = ColourMapper::logFrequencyToWavelength(guidedFrequency);
+	float guidedX = 0.0f;
+	float guidedY = 0.0f;
+	float guidedZ = 0.0f;
+	ColourMapper::interpolateCIE(guidedWavelength, guidedX, guidedY, guidedZ);
+	const float guidedScale = guidedY > 1e-6f ? 0.35f / guidedY : 1.0f;
+	float guidedL = 0.0f;
+	float guidedA = 0.0f;
+	float guidedB = 0.0f;
+	ColourMapper::XYZtoLab(guidedX * guidedScale, guidedY * guidedScale, guidedZ * guidedScale, guidedL, guidedA, guidedB);
+
+	const float baseNorm = baseRadius > 1e-6f ? 1.0f / baseRadius : 0.0f;
+	const float guidedRadius = std::hypot(guidedA, guidedB);
+	const float guidedNorm = guidedRadius > 1e-6f ? 1.0f / guidedRadius : 0.0f;
+
+	float hueA = baseRadius > 1e-6f ? labA * baseNorm : guidedA * guidedNorm;
+	float hueB = baseRadius > 1e-6f ? labB * baseNorm : guidedB * guidedNorm;
+	const float hueGuidance = std::clamp(0.25f + 0.25f * tonalStrength + 0.15f * transientAccent, 0.0f, 0.65f);
+	if (guidedRadius > 1e-6f) {
+		hueA = std::lerp(hueA, guidedA * guidedNorm, hueGuidance);
+		hueB = std::lerp(hueB, guidedB * guidedNorm, hueGuidance);
+	}
+
+	hueA += -bandBalance.tilt * 0.18f;
+	hueB += -bandBalance.tilt * 0.26f;
+
+	const float hueLength = std::hypot(hueA, hueB);
+	if (hueLength > 1e-6f) {
+		hueA /= hueLength;
+		hueB /= hueLength;
+	}
+
+	const float semanticRadiusFloor = brightnessGain * (6.0f + 18.0f * tonalStrength);
+	const float radiusSeed = std::max(baseRadius, semanticRadiusFloor);
+	const float radiusScale = std::clamp(
+		0.72f + 0.58f * tonalStrength + 0.18f * transientAccent - 0.18f * spreadNorm,
+		0.45f, 1.45f);
+	const float finalRadius = std::clamp(radiusSeed * radiusScale, 0.0f, 96.0f);
+	const float finalL = std::clamp(
+		labL + transientAccent * (4.0f + 6.0f * brightnessGain) + (centroidNorm - 0.5f) * 2.0f + (rolloffNorm - 0.5f) * 2.5f,
+		0.0f, 100.0f);
+	const float finalA = hueA * finalRadius;
+	const float finalB = hueB * finalRadius;
+
+	ColourMapper::LabtoXYZ(finalL, finalA, finalB, result.X, result.Y, result.Z);
+	ColourMapper::XYZtoRGB(result.X, result.Y, result.Z, result.r, result.g, result.b, colourSpace, true, applyGamutMapping);
+
+	result.L = finalL;
+	result.a = finalA;
+	result.b_comp = finalB;
+	result.luminanceCdM2 =
+		std::max(0.0f, result.Y) * synesthesia::constants::REFERENCE_WHITE_LUMINANCE_CDM2;
 
 	result.dominantFrequency = result.spectralCentroid;
 	result.dominantWavelength = ColourMapper::logFrequencyToWavelength(result.dominantFrequency);

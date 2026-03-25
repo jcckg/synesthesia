@@ -21,6 +21,7 @@ struct AudioMetadata {
     float sampleRate = 0.0f;
     int fftSize = 0;
     int hopSize = 0;
+    double durationSeconds = 0.0;
     std::string windowType = "hann";
     size_t numFrames = 0;
     size_t numBins = 0;

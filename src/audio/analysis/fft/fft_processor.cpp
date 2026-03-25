@@ -11,10 +11,12 @@ FFTProcessor::FFTProcessor()
 	: fft_in(FFT_SIZE),
 	  fft_out(FFT_SIZE / 2 + 1),
 	  hannWindow(FFT_SIZE),
-	  overlapBuffer(FFT_SIZE, 0.0f),
+	  overlapBuffer(FFT_SIZE - HOP_SIZE, 0.0f),
 	  windowBuffer(FFT_SIZE, 0.0f),
 	  inputAccumulator(HOP_SIZE, 0.0f),
 	  accumulatedSamples(0),
+	  analysisHopSize(HOP_SIZE),
+	  overlapSize(FFT_SIZE - HOP_SIZE),
 	  magnitudesBuffer(FFT_SIZE / 2 + 1, 0.0f),
 	  rawMagnitudesBuffer(FFT_SIZE / 2 + 1, 0.0f),
 	  processedMagnitudesBuffer(FFT_SIZE / 2 + 1, 0.0f),
@@ -63,6 +65,24 @@ FFTProcessor::~FFTProcessor() {
 
 void FFTProcessor::setEQGains(const float low, const float mid, const float high) {
 	equaliser.setGains(low, mid, high);
+}
+
+void FFTProcessor::setHopSize(const int hopSize) {
+	const size_t clampedHop = static_cast<size_t>(std::clamp(hopSize, 1, FFT_SIZE));
+	std::lock_guard<std::mutex> processingLock(processingMutex);
+	if (clampedHop == analysisHopSize) {
+		return;
+	}
+	analysisHopSize = clampedHop;
+	overlapSize = FFT_SIZE - analysisHopSize;
+	overlapBuffer.assign(overlapSize, 0.0f);
+	inputAccumulator.assign(analysisHopSize, 0.0f);
+	windowBuffer.assign(FFT_SIZE, 0.0f);
+	accumulatedSamples = 0;
+	frameCounter = 0;
+	loudnessMeter.reset();
+	momentaryLoudnessLUFS = -200.0f;
+	currentLoudness = 0.0f;
 }
 
 float FFTProcessor::calculateMelWeight(const float frequency) {
@@ -115,7 +135,7 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
 
 	size_t bufferPos = 0;
 	while (bufferPos < buffer.size()) {
-		const size_t samplesNeeded = HOP_SIZE - accumulatedSamples;
+		const size_t samplesNeeded = analysisHopSize - accumulatedSamples;
 		const size_t samplesAvailable = buffer.size() - bufferPos;
 		const size_t samplesToCopy = std::min(samplesNeeded, samplesAvailable);
 
@@ -127,7 +147,7 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
 		accumulatedSamples += samplesToCopy;
 		bufferPos += samplesToCopy;
 
-		if (accumulatedSamples == HOP_SIZE) {
+		if (accumulatedSamples == analysisHopSize) {
 			processOverlappingWindow(sampleRate);
 			accumulatedSamples = 0;
 		}
@@ -178,10 +198,17 @@ void FFTProcessor::updateSpectralData(const std::vector<float>& rawMagnitudes,
 }
 
 void FFTProcessor::processOverlappingWindow(const float sampleRate) {
-	std::copy(overlapBuffer.begin(), overlapBuffer.begin() + HOP_SIZE, windowBuffer.begin());
-	std::copy(inputAccumulator.begin(), inputAccumulator.begin() + HOP_SIZE,
-			  windowBuffer.begin() + HOP_SIZE);
-	std::copy(windowBuffer.begin() + HOP_SIZE, windowBuffer.end(), overlapBuffer.begin());
+	if (overlapSize > 0) {
+		std::copy(overlapBuffer.begin(), overlapBuffer.end(), windowBuffer.begin());
+	}
+	std::copy(inputAccumulator.begin(),
+			  inputAccumulator.end(),
+			  windowBuffer.begin() + static_cast<std::ptrdiff_t>(overlapSize));
+	if (overlapSize > 0) {
+		std::copy(windowBuffer.begin() + static_cast<std::ptrdiff_t>(analysisHopSize),
+				  windowBuffer.end(),
+				  overlapBuffer.begin());
+	}
 
 	applyWindow(windowBuffer);
 	kiss_fftr(fft_cfg, fft_in.data(), fft_out.data());

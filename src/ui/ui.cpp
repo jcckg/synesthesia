@@ -220,20 +220,20 @@ void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::Record
 		std::vector<float> averagedMagnitudes;
 		std::vector<float> averagedPhases;
 
-		if (!currentSample.magnitudes.empty() && !currentSample.magnitudes[0].empty()) {
-			const size_t numBins = currentSample.magnitudes[0].size();
-			const uint32_t numChannels = currentSample.channels;
+			if (!currentSample.magnitudes.empty() && !currentSample.magnitudes[0].empty()) {
+				const size_t numBins = currentSample.magnitudes[0].size();
+				const uint32_t numChannels = currentSample.channels;
 
-			averagedMagnitudes.resize(numBins, 0.0f);
-			averagedPhases.resize(numBins, 0.0f);
+				averagedMagnitudes.resize(numBins, 0.0f);
+				averagedPhases.resize(numBins, 0.0f);
 
-			for (uint32_t ch = 0; ch < numChannels && ch < currentSample.magnitudes.size(); ++ch) {
-				if (currentSample.magnitudes[ch].size() == numBins) {
-					for (size_t bin = 0; bin < numBins; ++bin) {
-						const float mag = currentSample.magnitudes[ch][bin];
-						averagedMagnitudes[bin] += mag * mag;
+				for (uint32_t ch = 0; ch < numChannels && ch < currentSample.magnitudes.size(); ++ch) {
+					if (currentSample.magnitudes[ch].size() == numBins) {
+						for (size_t bin = 0; bin < numBins; ++bin) {
+							const float mag = currentSample.magnitudes[ch][bin];
+							averagedMagnitudes[bin] += mag * mag;
+						}
 					}
-				}
 				if (ch < currentSample.phases.size() && currentSample.phases[ch].size() == numBins) {
 					for (size_t bin = 0; bin < numBins; ++bin) {
 						averagedPhases[bin] += currentSample.phases[ch][bin];

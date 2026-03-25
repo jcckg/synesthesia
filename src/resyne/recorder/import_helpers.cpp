@@ -2,6 +2,7 @@
 #include "resyne/recorder/recorder.h"
 #include "resyne/decoding/audio_decoder.h"
 #include "resyne/encoding/formats/exporter.h"
+#include "resyne/recorder/loudness_utils.h"
 #include "audio/analysis/fft/fft_processor.h"
 #include "colour/colour_mapper.h"
 #include "constants.h"
@@ -23,6 +24,7 @@ bool importAudioFile(
     float gamma,
     ColourMapper::ColourSpace colourSpace,
     bool applyGamutMapping,
+    int analysisHopSize,
     float importLowGain,
     float importMidGain,
     float importHighGain,
@@ -58,7 +60,7 @@ bool importAudioFile(
         return false;
     }
 
-    const int resolvedHopSize = FFTProcessor::HOP_SIZE;
+    const int resolvedHopSize = std::clamp(analysisHopSize, 1, FFTProcessor::FFT_SIZE);
 
     std::vector<std::unique_ptr<FFTProcessor>> processors;
     processors.reserve(numChannels);
@@ -66,6 +68,7 @@ bool importAudioFile(
         processors.push_back(std::make_unique<FFTProcessor>());
     }
     for (auto& processor : processors) {
+        processor->setHopSize(resolvedHopSize);
         processor->setEQGains(importLowGain, importMidGain, importHighGain);
         processor->setCriticalBandSmoothingEnabled(enableSmoothing);
         processor->setMelWeightingEnabled(enableMelWeighting);
@@ -93,17 +96,17 @@ bool importAudioFile(
             return;
         }
 
-        for (size_t f = 0; f < frameCount; ++f) {
-            AudioColourSample sample;
-            sample.magnitudes.resize(numChannels);
-            sample.phases.resize(numChannels);
-            sample.channels = numChannels;
+	        for (size_t f = 0; f < frameCount; ++f) {
+	            AudioColourSample sample;
+	            sample.magnitudes.resize(numChannels);
+	            sample.phases.resize(numChannels);
+	            sample.channels = numChannels;
 
-            for (uint32_t ch = 0; ch < numChannels; ++ch) {
-                sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
-                sample.phases[ch] = std::move(channelFrames[ch][f].phases);
-                if (ch == 0) {
-                    sample.sampleRate = channelFrames[ch][f].sampleRate;
+	            for (uint32_t ch = 0; ch < numChannels; ++ch) {
+	                sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
+	                sample.phases[ch] = std::move(channelFrames[ch][f].phases);
+	                if (ch == 0) {
+	                    sample.sampleRate = channelFrames[ch][f].sampleRate;
                     sample.loudnessLUFS = channelFrames[ch][f].loudnessLUFS;
                     sample.splDb = channelFrames[ch][f].loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
                 }
@@ -156,38 +159,26 @@ bool importAudioFile(
         return false;
     }
 
-    size_t firstValidFrame = 0;
-    for (size_t i = 0; i < samples.size(); ++i) {
-        if (samples[i].loudnessLUFS > -200.0f) {
-            firstValidFrame = i;
-            break;
-        }
-    }
-
-    const double overlapBufferOffsetSeconds = static_cast<double>(resolvedHopSize) /
-                                               static_cast<double>(decoded.sampleRate);
-
-    if (firstValidFrame > 0) {
-        samples.erase(samples.begin(), samples.begin() + static_cast<std::ptrdiff_t>(firstValidFrame));
-    }
-
-    for (size_t i = 0; i < samples.size(); ++i) {
-        samples[i].timestamp -= (static_cast<double>(firstValidFrame) * static_cast<double>(resolvedHopSize)) /
-                                 static_cast<double>(decoded.sampleRate);
-        samples[i].timestamp -= overlapBufferOffsetSeconds;
-        if (samples[i].timestamp < 0.0) {
-            samples[i].timestamp = 0.0;
-        }
-    }
+    // EBU momentary loudness needs a 0.4 s window, but exported analysis frames must
+    // stay aligned with the source audio rather than being trimmed by the warm-up.
 
     metadata.sampleRate = sampleRate;
     metadata.fftSize = FFTProcessor::FFT_SIZE;
     metadata.hopSize = resolvedHopSize;
+    metadata.durationSeconds = decoded.channelSamples[0].empty()
+        ? 0.0
+        : static_cast<double>(decoded.channelSamples[0].size()) / static_cast<double>(decoded.sampleRate);
     metadata.windowType = "hann";
     metadata.numFrames = samples.size();
     metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
     metadata.channels = numChannels;
     metadata.version = "3.0.0";
+
+    for (auto& sample : samples) {
+        sample.loudnessLUFS = std::numeric_limits<float>::quiet_NaN();
+        sample.splDb = std::numeric_limits<float>::quiet_NaN();
+    }
+    ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, metadata);
 
     return true;
 }

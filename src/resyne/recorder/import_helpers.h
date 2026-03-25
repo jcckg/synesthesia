@@ -22,6 +22,7 @@ bool importAudioFile(
     float gamma,
     ColourMapper::ColourSpace colourSpace,
     bool applyGamutMapping,
+    int analysisHopSize,
     float importLowGain,
     float importMidGain,
     float importHighGain,

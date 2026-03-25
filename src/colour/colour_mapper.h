@@ -35,8 +35,11 @@ public:
 		float spectralRolloff;
 		float spectralCrestFactor;
 		float loudnessDb;
+		float frameLoudnessDb;
+		float brightnessLoudnessDb;
 		float loudnessNormalised;
 		float brightnessNormalised;
+		float transientMix;
 		float estimatedSPL;
 		float luminanceCdM2;
 	};

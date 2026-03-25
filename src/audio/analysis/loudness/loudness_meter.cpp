@@ -11,7 +11,6 @@ LoudnessMeter::LoudnessMeter()
 	  hopSize(static_cast<size_t>(BLOCK_DURATION * 48000.0f * (1.0f - OVERLAP))),
 	  bufferPosition(0) {
 	audioBuffer.resize(blockSize, 0.0f);
-	filteredSamples.reserve(blockSize);
 	initialiseFilters(48000.0f);
 }
 
@@ -31,7 +30,6 @@ void LoudnessMeter::initialiseFilters(const float sampleRate) {
 	bufferPosition = 0;
 	bufferInitialised = false;
 	samplesSinceLastBlock = 0;
-	blockLoudness.clear();
 
 	// ITU-R BS.1770-4 Stage 1: High-frequency shelving filter
 	// Centre frequency f0 ≈ 1681.97 Hz, Gain G ≈ 4.0 dB, Q ≈ 0.7071
@@ -104,15 +102,9 @@ void LoudnessMeter::processSamples(const std::span<const float> samples, const f
 		if (bufferInitialised && samplesSinceLastBlock >= hopSize) {
 			const float meanSquare = calculateMeanSquare(audioBuffer);
 			const float loudness = loudnessFromMeanSquare(meanSquare);
-			blockLoudness.push_back(loudness);
 			blockHistory.emplace_back(processedBlockCount, loudness);
 			++processedBlockCount;
 			samplesSinceLastBlock = 0;
-
-			constexpr size_t maxBlocks = 100;
-			if (blockLoudness.size() > maxBlocks) {
-				blockLoudness.erase(blockLoudness.begin());
-			}
 		}
 	}
 }
@@ -138,13 +130,13 @@ float LoudnessMeter::loudnessFromMeanSquare(const float meanSquare) const {
 }
 
 float LoudnessMeter::getIntegratedLoudness() const {
-	if (blockLoudness.empty())
+	if (blockHistory.empty())
 		return -200.0f;
 
 	std::vector<float> gatedBlocks;
-	gatedBlocks.reserve(blockLoudness.size());
+	gatedBlocks.reserve(blockHistory.size());
 
-	for (const float loudness : blockLoudness) {
+	for (const auto& [_, loudness] : blockHistory) {
 		if (loudness >= ABSOLUTE_THRESHOLD) {
 			gatedBlocks.push_back(loudness);
 		}
@@ -180,10 +172,10 @@ float LoudnessMeter::getIntegratedLoudness() const {
 }
 
 float LoudnessMeter::getMomentaryLoudness() const {
-	if (blockLoudness.empty())
+	if (blockHistory.empty())
 		return -200.0f;
 
-	const float lastLoudness = blockLoudness.back();
+	const float lastLoudness = blockHistory.back().second;
 	return lastLoudness;
 }
 
@@ -200,7 +192,6 @@ bool LoudnessMeter::getBlockLoudness(const uint64_t index, float& out) const {
 void LoudnessMeter::reset() {
 	preFilter.reset();
 	rlbFilter.reset();
-	blockLoudness.clear();
 	blockHistory.clear();
 	std::fill(audioBuffer.begin(), audioBuffer.end(), 0.0f);
 	bufferPosition = 0;

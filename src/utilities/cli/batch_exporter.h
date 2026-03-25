@@ -11,10 +11,11 @@ public:
                    bool copyAudio,
                    int width = 0,
                    int height = 0,
+                   const std::string& gradientFormat = "png",
+                   bool writeLabSidecar = false,
                    bool trueSize = false,
-                   bool noSmoothing = false,
-                   bool noMelWeighting = false,
-                   int numWorkers = 1);
+                   int numWorkers = 1,
+                   int analysisHop = 1024);
 };
 
 }

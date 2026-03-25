@@ -37,8 +37,6 @@ private:
 	BiquadFilter preFilter;
 	BiquadFilter rlbFilter;
 
-	std::vector<float> filteredSamples;
-	std::vector<float> blockLoudness;
 	std::deque<std::pair<uint64_t, float>> blockHistory;
 
 	// ITU-R BS.1770-4 gating thresholds for integrated loudness measurement

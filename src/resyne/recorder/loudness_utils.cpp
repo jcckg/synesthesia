@@ -12,6 +12,48 @@
 
 namespace ReSyne::LoudnessUtils {
 
+namespace {
+
+constexpr float INVALID_LOUDNESS_LUFS = -200.0f;
+constexpr float BS1770_LUFS_OFFSET = -0.691f;
+
+float loudnessToMeanSquare(const float loudness) {
+	if (!std::isfinite(loudness) || loudness <= INVALID_LOUDNESS_LUFS) {
+		return 0.0f;
+	}
+	return std::pow(10.0f, (loudness - BS1770_LUFS_OFFSET) / 10.0f);
+}
+
+float meanSquareToLoudness(const float meanSquare) {
+	if (!(meanSquare > 0.0f) || !std::isfinite(meanSquare)) {
+		return INVALID_LOUDNESS_LUFS;
+	}
+	return BS1770_LUFS_OFFSET + 10.0f * std::log10(meanSquare);
+}
+
+std::vector<std::vector<float>> deinterleaveChannels(const std::vector<float>& interleavedSamples,
+													  const size_t numChannels) {
+	std::vector<std::vector<float>> channels(numChannels);
+	if (numChannels == 0) {
+		return channels;
+	}
+
+	const size_t frames = interleavedSamples.size() / numChannels;
+	for (auto& channel : channels) {
+		channel.resize(frames, 0.0f);
+	}
+
+	for (size_t frame = 0; frame < frames; ++frame) {
+		for (size_t ch = 0; ch < numChannels; ++ch) {
+			channels[ch][frame] = interleavedSamples[frame * numChannels + ch];
+		}
+	}
+
+	return channels;
+}
+
+}
+
 void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples,
 										  const AudioMetadata& metadata) {
 	if (samples.empty() || metadata.sampleRate <= 0.0f) {
@@ -29,54 +71,20 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 	for (const auto& sample : samples) {
 		SpectralSample spectral;
 		spectral.timestamp = sample.timestamp;
-		spectral.sampleRate = sample.sampleRate;
+		spectral.sampleRate = sample.sampleRate > 0.0f ? sample.sampleRate : metadata.sampleRate;
+		spectral.magnitudes.resize(numChannels);
+		spectral.phases.resize(numChannels);
+		spectral.frequencies.resize(numChannels);
 
-		if (numChannels == 1 || sample.magnitudes.size() <= 1) {
-			spectral.magnitudes.clear();
-			spectral.phases.clear();
-			if (!sample.magnitudes.empty()) {
-				spectral.magnitudes.push_back(sample.magnitudes[0]);
-			} else {
-				spectral.magnitudes.push_back(std::vector<float>());
+		for (uint32_t ch = 0; ch < numChannels; ++ch) {
+			if (ch < sample.magnitudes.size()) {
+				spectral.magnitudes[ch] = sample.magnitudes[ch];
 			}
-			if (!sample.phases.empty()) {
-				spectral.phases.push_back(sample.phases[0]);
-			} else {
-				spectral.phases.push_back(std::vector<float>());
+			if (ch < sample.phases.size()) {
+				spectral.phases[ch] = sample.phases[ch];
 			}
-		} else {
-			const size_t numBins = !sample.magnitudes.empty() && !sample.magnitudes[0].empty()
-				? sample.magnitudes[0].size() : 0;
-
-			if (numBins > 0) {
-				std::vector<float> avgMagnitudes(numBins, 0.0f);
-				std::vector<float> avgPhases(numBins, 0.0f);
-
-				for (uint32_t ch = 0; ch < numChannels && ch < sample.magnitudes.size(); ++ch) {
-					if (sample.magnitudes[ch].size() == numBins) {
-						for (size_t bin = 0; bin < numBins; ++bin) {
-							const float mag = sample.magnitudes[ch][bin];
-							avgMagnitudes[bin] += mag * mag;
-						}
-					}
-				}
-
-				for (uint32_t ch = 0; ch < numChannels && ch < sample.phases.size(); ++ch) {
-					if (sample.phases[ch].size() == numBins) {
-						for (size_t bin = 0; bin < numBins; ++bin) {
-							avgPhases[bin] += sample.phases[ch][bin];
-						}
-					}
-				}
-
-				const float invChannels = 1.0f / static_cast<float>(numChannels);
-				for (size_t bin = 0; bin < numBins; ++bin) {
-					avgMagnitudes[bin] = std::sqrt(avgMagnitudes[bin] * invChannels);
-					avgPhases[bin] *= invChannels;
-				}
-
-				spectral.magnitudes.push_back(std::move(avgMagnitudes));
-				spectral.phases.push_back(std::move(avgPhases));
+			if (ch < sample.frequencies.size()) {
+				spectral.frequencies[ch] = sample.frequencies[ch];
 			}
 		}
 
@@ -96,12 +104,63 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 		return;
 	}
 
-	LoudnessMeter loudnessMeter;
-	loudnessMeter.processSamples(reconstructionResult.audioSamples, metadata.sampleRate);
+	std::vector<float> blockLoudness;
+	size_t blockHopSamples = 0;
+	size_t blockSizeSamples = 0;
 
-	const uint64_t processedBlockCount = loudnessMeter.getProcessedBlockCount();
-	const size_t blockHopSamples = loudnessMeter.getBlockHopSamples();
-	const size_t blockSizeSamples = loudnessMeter.getBlockSizeSamples();
+	if (reconstructionResult.numChannels <= 1) {
+		LoudnessMeter loudnessMeter;
+		loudnessMeter.processSamples(reconstructionResult.audioSamples, metadata.sampleRate);
+
+		const uint64_t processedBlockCount = loudnessMeter.getProcessedBlockCount();
+		blockHopSamples = loudnessMeter.getBlockHopSamples();
+		blockSizeSamples = loudnessMeter.getBlockSizeSamples();
+		blockLoudness.resize(static_cast<size_t>(processedBlockCount), INVALID_LOUDNESS_LUFS);
+
+		for (uint64_t blockIndex = 0; blockIndex < processedBlockCount; ++blockIndex) {
+			float loudness = INVALID_LOUDNESS_LUFS;
+			if (loudnessMeter.getBlockLoudness(blockIndex, loudness)) {
+				blockLoudness[static_cast<size_t>(blockIndex)] = loudness;
+			}
+		}
+	} else {
+		const auto channelSamples = deinterleaveChannels(
+			reconstructionResult.audioSamples,
+			reconstructionResult.numChannels);
+
+		std::vector<LoudnessMeter> channelMeters(reconstructionResult.numChannels);
+		uint64_t processedBlockCount = std::numeric_limits<uint64_t>::max();
+
+		for (size_t ch = 0; ch < channelSamples.size(); ++ch) {
+			channelMeters[ch].processSamples(channelSamples[ch], metadata.sampleRate);
+			processedBlockCount = std::min(processedBlockCount, channelMeters[ch].getProcessedBlockCount());
+		}
+
+		if (processedBlockCount == std::numeric_limits<uint64_t>::max()) {
+			processedBlockCount = 0;
+		}
+
+		if (!channelMeters.empty()) {
+			blockHopSamples = channelMeters.front().getBlockHopSamples();
+			blockSizeSamples = channelMeters.front().getBlockSizeSamples();
+		}
+
+		blockLoudness.resize(static_cast<size_t>(processedBlockCount), INVALID_LOUDNESS_LUFS);
+
+		for (uint64_t blockIndex = 0; blockIndex < processedBlockCount; ++blockIndex) {
+			float combinedMeanSquare = 0.0f;
+			for (auto& meter : channelMeters) {
+				float channelLoudness = INVALID_LOUDNESS_LUFS;
+				if (meter.getBlockLoudness(blockIndex, channelLoudness)) {
+					// Channel layout is not stored in spectral assets, so use equal weights.
+					combinedMeanSquare += loudnessToMeanSquare(channelLoudness);
+				}
+			}
+			blockLoudness[static_cast<size_t>(blockIndex)] = meanSquareToLoudness(combinedMeanSquare);
+		}
+	}
+
+	const uint64_t processedBlockCount = static_cast<uint64_t>(blockLoudness.size());
 
 	for (size_t frameIndex = 0; frameIndex < samples.size(); ++frameIndex) {
 		auto& sample = samples[frameIndex];
@@ -133,8 +192,11 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 			}
 		}
 
-		float loudness = -200.0f;
-		if (processedBlockCount > 0 && loudnessMeter.getBlockLoudness(closestBlockIndex, loudness)) {
+		float loudness = INVALID_LOUDNESS_LUFS;
+		if (processedBlockCount > 0) {
+			loudness = blockLoudness[static_cast<size_t>(closestBlockIndex)];
+		}
+		if (processedBlockCount > 0 && std::isfinite(loudness) && loudness > INVALID_LOUDNESS_LUFS) {
 			sample.loudnessLUFS = loudness;
 			sample.splDb = loudness + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
 		} else {

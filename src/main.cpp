@@ -35,8 +35,8 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         return CLI::BatchExporter::run(args.inputDir, args.outputDir, args.copyAudio,
-                                       args.gradientWidth, args.gradientHeight, args.trueSize,
-                                       args.noSmoothing, args.noMelWeighting, args.numWorkers);
+                                       args.gradientWidth, args.gradientHeight, args.gradientFormat, args.writeLabSidecar, args.trueSize,
+                                       args.numWorkers, args.analysisHop);
     }
 
     if (args.headless) {

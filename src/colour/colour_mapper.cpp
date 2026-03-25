@@ -809,8 +809,11 @@ const float overrideLoudnessDb
 	result.spectralRolloff = spectralResult.spectralRolloff;
 	result.spectralCrestFactor = spectralResult.spectralCrestFactor;
 	result.loudnessDb = spectralResult.loudnessDb;
+	result.frameLoudnessDb = spectralResult.frameLoudnessDb;
+	result.brightnessLoudnessDb = spectralResult.brightnessLoudnessDb;
 	result.loudnessNormalised = spectralResult.loudnessNormalised;
 	result.brightnessNormalised = spectralResult.brightnessNormalised;
+	result.transientMix = spectralResult.transientMix;
 	result.estimatedSPL = spectralResult.estimatedSPL;
 	result.luminanceCdM2 = spectralResult.luminanceCdM2;
 

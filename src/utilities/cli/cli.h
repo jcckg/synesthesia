@@ -18,12 +18,13 @@ struct Arguments {
     std::string inputDir;
     std::string outputDir;
     bool copyAudio = false;
+    bool writeLabSidecar = false;
     bool trueSize = false;
-    bool noSmoothing = false;
-    bool noMelWeighting = false;
     int numWorkers = 1;
     int gradientWidth  = 0;
     int gradientHeight = 0;
+    int analysisHop = 1024;
+    std::string gradientFormat = "png";
 
     static Arguments parseCommandLine(int argc, char* argv[]);
     static void printHelp();
