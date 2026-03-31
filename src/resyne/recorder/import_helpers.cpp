@@ -17,6 +17,26 @@ namespace ReSyne::ImportHelpers {
 
 namespace {
 
+bool sanitiseDecodedAudio(AudioDecoding::DecodedAudio& decoded) {
+    bool changed = false;
+    for (auto& channel : decoded.channelSamples) {
+        for (float& sample : channel) {
+            if (!std::isfinite(sample)) {
+                sample = 0.0f;
+                changed = true;
+            }
+        }
+    }
+    return changed;
+}
+
+bool hasUsableFrameLoudness(const AudioColourSample& sample) {
+    return std::isfinite(sample.loudnessLUFS) &&
+           std::isnormal(sample.loudnessLUFS) &&
+           sample.loudnessLUFS > -200.0f &&
+           sample.loudnessLUFS < 20.0f;
+}
+
 }
 
 bool importAudioFile(
@@ -51,6 +71,10 @@ bool importAudioFile(
     if (decoded.channelSamples.empty() || decoded.sampleRate == 0) {
         errorMessage = "empty audio";
         return false;
+    }
+
+    if (sanitiseDecodedAudio(decoded)) {
+        std::cerr << "[Synesthesia] Replaced non-finite decoded audio samples with silence for " << filepath << '\n';
     }
 
     const uint32_t numChannels = static_cast<uint32_t>(decoded.channelSamples.size());
@@ -102,7 +126,12 @@ bool importAudioFile(
 	            sample.phases.resize(numChannels);
 	            sample.channels = numChannels;
 
+            bool channelsAligned = true;
 	            for (uint32_t ch = 0; ch < numChannels; ++ch) {
+                    if (channelFrames[ch][f].frameCounter != channelFrames[0][f].frameCounter) {
+                        channelsAligned = false;
+                        break;
+                    }
 	                sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
 	                sample.phases[ch] = std::move(channelFrames[ch][f].phases);
 	                if (ch == 0) {
@@ -110,6 +139,10 @@ bool importAudioFile(
                     sample.loudnessLUFS = channelFrames[ch][f].loudnessLUFS;
                     sample.splDb = channelFrames[ch][f].loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
                 }
+            }
+
+            if (!channelsAligned) {
+                continue;
             }
 
             sample.timestamp = (static_cast<double>(frameIndex) * static_cast<double>(resolvedHopSize)) /
@@ -159,9 +192,6 @@ bool importAudioFile(
         return false;
     }
 
-    // EBU momentary loudness needs a 0.4 s window, but exported analysis frames must
-    // stay aligned with the source audio rather than being trimmed by the warm-up.
-
     metadata.sampleRate = sampleRate;
     metadata.fftSize = FFTProcessor::FFT_SIZE;
     metadata.hopSize = resolvedHopSize;
@@ -174,11 +204,16 @@ bool importAudioFile(
     metadata.channels = numChannels;
     metadata.version = "3.0.0";
 
-    for (auto& sample : samples) {
-        sample.loudnessLUFS = std::numeric_limits<float>::quiet_NaN();
-        sample.splDb = std::numeric_limits<float>::quiet_NaN();
+    const bool needsLoudnessBackfill = std::any_of(
+        samples.begin(),
+        samples.end(),
+        [](const AudioColourSample& sample) {
+            return !hasUsableFrameLoudness(sample);
+        });
+
+    if (needsLoudnessBackfill) {
+        ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, metadata);
     }
-    ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, metadata);
 
     return true;
 }

@@ -497,10 +497,10 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 					const bool isEditedBin = binDamageWeight >= 0.01f;
 					
 					if (!isEditedBin) {
-						const float phaseError = PhaseReconstruction::wrapToPi(
-							decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
-						const float correctedAdvance = expectedAdvance + phaseError;
-						vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + correctedAdvance);
+						// Native ReSyne/TIFF exports already encode a phase vector per bin.
+						// Preserve that exact phase for untouched bins and only reconstruct
+						// where damage detection says the image has been edited.
+						vocoderPhase = decodedPhase;
 					} else if (isTransient) {
 						vocoderPhase = decodedPhase;
 					} else {

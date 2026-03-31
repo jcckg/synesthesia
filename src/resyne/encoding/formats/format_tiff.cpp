@@ -17,7 +17,9 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <functional>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -25,6 +27,17 @@ namespace SequenceExporterInternal {
 
 namespace {
 constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
+constexpr unsigned short TIFFTAG_RESYNE_SAMPLE_RATE = 65000;
+constexpr unsigned short TIFFTAG_RESYNE_FFT_SIZE = 65001;
+constexpr unsigned short TIFFTAG_RESYNE_HOP_SIZE = 65002;
+constexpr unsigned short TIFFTAG_RESYNE_CHANNELS = 65003;
+
+struct EmbeddedTiffMetadata {
+	uint32_t sampleRate = 0;
+	uint32_t fftSize = 0;
+	uint32_t hopSize = 0;
+	uint32_t channels = 0;
+};
 
 float srgbToLinear(const float value) {
 	if (value <= 0.04045f) {
@@ -40,7 +53,133 @@ float sanitiseFloat(const float value) {
 	return std::clamp(value, 0.0f, 1.0f);
 }
 
-bool resolveImageLayout(const size_t height, size_t& binCount, uint32_t& channels) {
+size_t resolveBinCount(const std::vector<AudioColourSample>& samples,
+						 const AudioMetadata& metadata) {
+	if (metadata.numBins > 0) {
+		return metadata.numBins;
+	}
+	if (samples.empty() || samples.front().magnitudes.empty()) {
+		return 0;
+	}
+	return samples.front().magnitudes.front().size();
+}
+
+uint32_t resolveStoredSampleRate(const std::vector<AudioColourSample>& samples,
+								   const AudioMetadata& metadata) {
+	const float sampleRate = metadata.sampleRate > 0.0f
+		? metadata.sampleRate
+		: (!samples.empty() ? samples.front().sampleRate : 0.0f);
+	if (!std::isfinite(sampleRate) || sampleRate <= 0.0f) {
+		return 0;
+	}
+	const double roundedSampleRate = std::round(static_cast<double>(sampleRate));
+	const double clampedSampleRate = std::clamp(
+		roundedSampleRate,
+		1.0,
+		static_cast<double>(std::numeric_limits<uint32_t>::max()));
+	return static_cast<uint32_t>(clampedSampleRate);
+}
+
+uint32_t resolveStoredFftSize(const std::vector<AudioColourSample>& samples,
+								const AudioMetadata& metadata) {
+	if (metadata.fftSize > 0) {
+		return static_cast<uint32_t>(metadata.fftSize);
+	}
+	const size_t numBins = resolveBinCount(samples, metadata);
+	if (numBins <= 1) {
+		return 2;
+	}
+	return static_cast<uint32_t>((numBins - 1) * 2);
+}
+
+uint32_t resolveStoredHopSize(const AudioMetadata& metadata,
+							  const uint32_t storedFftSize) {
+	if (metadata.hopSize > 0) {
+		return static_cast<uint32_t>(metadata.hopSize);
+	}
+	return storedFftSize > 0 ? std::max(1u, storedFftSize / 2) : 0u;
+}
+
+uint32_t resolveStoredChannels(const std::vector<AudioColourSample>& samples,
+								 const AudioMetadata& metadata) {
+	if (metadata.channels > 0) {
+		return metadata.channels;
+	}
+	return !samples.empty() ? std::max(1u, samples.front().channels) : 1u;
+}
+
+std::vector<tinydng::FieldInfo> buildEmbeddedMetadataFields() {
+	auto buildField = [](const int tag, const std::string& name) {
+		tinydng::FieldInfo field;
+		field.tag = tag;
+		field.read_count = 1;
+		field.write_count = 1;
+		field.type = tinydng::TYPE_LONG;
+		field.name = name;
+		return field;
+	};
+
+	return {
+		buildField(TIFFTAG_RESYNE_SAMPLE_RATE, "resyne_sample_rate"),
+		buildField(TIFFTAG_RESYNE_FFT_SIZE, "resyne_fft_size"),
+		buildField(TIFFTAG_RESYNE_HOP_SIZE, "resyne_hop_size"),
+		buildField(TIFFTAG_RESYNE_CHANNELS, "resyne_channels")
+	};
+}
+
+bool readEmbeddedULong(const tinydng::FieldData& field, uint32_t& value) {
+	if (field.data.size() != sizeof(uint32_t)) {
+		return false;
+	}
+	std::memcpy(&value, field.data.data(), sizeof(uint32_t));
+	return true;
+}
+
+EmbeddedTiffMetadata readEmbeddedMetadata(const tinydng::DNGImage& image) {
+	EmbeddedTiffMetadata metadata;
+	for (const auto& field : image.custom_fields) {
+		uint32_t value = 0;
+		if (!readEmbeddedULong(field, value)) {
+			continue;
+		}
+
+		if (field.name == "resyne_sample_rate") {
+			metadata.sampleRate = value;
+		} else if (field.name == "resyne_fft_size") {
+			metadata.fftSize = value;
+		} else if (field.name == "resyne_hop_size") {
+			metadata.hopSize = value;
+		} else if (field.name == "resyne_channels") {
+			metadata.channels = value;
+		}
+	}
+	return metadata;
+}
+
+bool resolveImageLayout(const size_t height,
+						  const uint32_t preferredChannels,
+						  size_t& binCount,
+						  uint32_t& channels) {
+	auto acceptLayout = [&](const uint32_t candidateChannels) {
+		if (candidateChannels == 0 || candidateChannels > 8 || candidateChannels > height) {
+			return false;
+		}
+		if ((height % candidateChannels) != 0) {
+			return false;
+		}
+		const size_t candidateBinCount = height / candidateChannels;
+		if (candidateBinCount == 0 || candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
+			return false;
+		}
+		binCount = candidateBinCount;
+		channels = candidateChannels;
+		return true;
+	};
+
+	if (preferredChannels > 0 && acceptLayout(preferredChannels)) {
+		return true;
+	}
+
 	for (const size_t candidateBinCount : COMMON_BIN_COUNTS) {
 		if (candidateBinCount > height || candidateBinCount > ColourNativeCodec::MAX_BIN_COUNT) {
 			continue;
@@ -61,9 +200,7 @@ bool resolveImageLayout(const size_t height, size_t& binCount, uint32_t& channel
 		return false;
 	}
 
-	binCount = height;
-	channels = 1;
-	return true;
+	return acceptLayout(1);
 }
 
 }
@@ -147,6 +284,20 @@ bool exportToTIFF(const std::string& filepath,
 	dngImage.SetXResolution(1.0);
 	dngImage.SetYResolution(1.0);
 	dngImage.SetResolutionUnit(tinydngwriter::RESUNIT_NONE);
+	dngImage.SetSoftware("Synesthesia");
+
+	const uint32_t storedSampleRate = resolveStoredSampleRate(samples, metadata);
+	const uint32_t storedFftSize = resolveStoredFftSize(samples, metadata);
+	const uint32_t storedHopSize = resolveStoredHopSize(metadata, storedFftSize);
+	const uint32_t storedChannels = resolveStoredChannels(samples, metadata);
+
+	if (!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_SAMPLE_RATE, storedSampleRate) ||
+		!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_FFT_SIZE, storedFftSize) ||
+		!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_HOP_SIZE, storedHopSize) ||
+		!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_CHANNELS, storedChannels)) {
+		emitProgress(1.0f);
+		return false;
+	}
 
 	dngImage.SetImageData(reinterpret_cast<const unsigned char*>(imageData.data()),
 						  imageData.size() * sizeof(float));
@@ -164,9 +315,9 @@ bool loadFromTIFF(const std::string& filepath,
                  std::vector<AudioColourSample>& samples,
                  AudioMetadata& metadata,
                  const std::function<void(float)>& progress,
-                 const SequenceFrameCallback& onFrameDecoded) {
+				 const SequenceFrameCallback& onFrameDecoded) {
 	std::vector<tinydng::DNGImage> images;
-	std::vector<tinydng::FieldInfo> customFields;
+	std::vector<tinydng::FieldInfo> customFields = buildEmbeddedMetadataFields();
 	std::string warn;
 	std::string err;
 
@@ -186,6 +337,7 @@ bool loadFromTIFF(const std::string& filepath,
 	if (image.width <= 0 || image.height <= 0 || image.samples_per_pixel < 3) {
 		return false;
 	}
+	const EmbeddedTiffMetadata embeddedMetadata = readEmbeddedMetadata(image);
 
 	if (progress) {
 		progress(0.06f);
@@ -284,16 +436,31 @@ bool loadFromTIFF(const std::string& filepath,
 
 	size_t binCount = 0;
 	uint32_t inferredChannels = 1;
-	if (!resolveImageLayout(colourImage.height, binCount, inferredChannels)) {
+	if (!resolveImageLayout(colourImage.height, embeddedMetadata.channels, binCount, inferredChannels)) {
 		return false;
+	}
+	if (embeddedMetadata.channels > 0 && inferredChannels != embeddedMetadata.channels) {
+		return false;
+	}
+	if (embeddedMetadata.fftSize > 0) {
+		const size_t storedBinCount = static_cast<size_t>(embeddedMetadata.fftSize / 2) + 1;
+		if (storedBinCount != binCount) {
+			return false;
+		}
 	}
 
 	colourImage.metadata.channels = inferredChannels;
 
-	float detectedSampleRate = ColourNativeCodec::detectSampleRate(colourImage);
+	float detectedSampleRate = embeddedMetadata.sampleRate > 0
+		? static_cast<float>(embeddedMetadata.sampleRate)
+		: ColourNativeCodec::detectSampleRate(colourImage);
 
-	const int fftSize = binCount > 1 ? static_cast<int>((binCount - 1) * 2) : 2;
-	int hopSize = std::max(1, fftSize / 2);
+	const int fftSize = embeddedMetadata.fftSize > 0
+		? static_cast<int>(embeddedMetadata.fftSize)
+		: (binCount > 1 ? static_cast<int>((binCount - 1) * 2) : 2);
+	int hopSize = embeddedMetadata.hopSize > 0
+		? static_cast<int>(embeddedMetadata.hopSize)
+		: std::max(1, fftSize / 2);
 
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.fftSize = fftSize;
