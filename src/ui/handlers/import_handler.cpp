@@ -63,7 +63,7 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 					recorderState.sampleColourCache.clear();
 					recorderState.colourCacheDirty = true;
 
-					// Check if NEW import has reconstructed audio (WAV/FLAC/etc do, TIFF doesn't)
+					// Audio imports may already have a playback buffer; spectral imports rebuild lazily on play.
 					hasReconstructedAudio = !recorderState.reconstructedAudio.empty();
 
 					if (recorderState.audioOutput) {
@@ -98,16 +98,18 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 				}
 			}
 
-			if (success && hasReconstructedAudio) {
-				if (!recorderState.audioOutput) {
-					recorderState.audioOutput = std::make_unique<AudioOutput>();
-				}
+			if (success) {
+				if (hasReconstructedAudio) {
+					if (!recorderState.audioOutput) {
+						recorderState.audioOutput = std::make_unique<AudioOutput>();
+					}
 
-				const int deviceIndex = recorderState.outputDeviceIndex;
-				const int channelCount = recorderState.metadata.channels > 0 ? static_cast<int>(recorderState.metadata.channels) : 1;
-				recorderState.audioOutput->initOutputStream(recorderState.metadata.sampleRate, channelCount, deviceIndex);
-				recorderState.audioOutput->setAudioData(recorderState.reconstructedAudio, static_cast<size_t>(channelCount));
-				recorderState.isPlaybackInitialised = true;
+					const int deviceIndex = recorderState.outputDeviceIndex;
+					const int channelCount = recorderState.metadata.channels > 0 ? static_cast<int>(recorderState.metadata.channels) : 1;
+					recorderState.audioOutput->initOutputStream(recorderState.metadata.sampleRate, channelCount, deviceIndex);
+					recorderState.audioOutput->setAudioData(recorderState.reconstructedAudio, static_cast<size_t>(channelCount));
+					recorderState.isPlaybackInitialised = true;
+				}
 
 				recorderState.statusMessage.clear();
 				recorderState.statusMessageTimer = 0.0f;

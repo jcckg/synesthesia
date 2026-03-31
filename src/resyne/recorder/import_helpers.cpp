@@ -17,6 +17,19 @@ namespace ReSyne::ImportHelpers {
 
 namespace {
 
+bool sanitiseDecodedAudio(AudioDecoding::DecodedAudio& decoded) {
+    bool changed = false;
+    for (auto& channel : decoded.channelSamples) {
+        for (float& sample : channel) {
+            if (!std::isfinite(sample)) {
+                sample = 0.0f;
+                changed = true;
+            }
+        }
+    }
+    return changed;
+}
+
 }
 
 bool importAudioFile(
@@ -51,6 +64,10 @@ bool importAudioFile(
     if (decoded.channelSamples.empty() || decoded.sampleRate == 0) {
         errorMessage = "empty audio";
         return false;
+    }
+
+    if (sanitiseDecodedAudio(decoded)) {
+        std::cerr << "[Synesthesia] Replaced non-finite decoded audio samples with silence for " << filepath << '\n';
     }
 
     const uint32_t numChannels = static_cast<uint32_t>(decoded.channelSamples.size());
@@ -102,7 +119,12 @@ bool importAudioFile(
 	            sample.phases.resize(numChannels);
 	            sample.channels = numChannels;
 
+            bool channelsAligned = true;
 	            for (uint32_t ch = 0; ch < numChannels; ++ch) {
+                    if (channelFrames[ch][f].frameCounter != channelFrames[0][f].frameCounter) {
+                        channelsAligned = false;
+                        break;
+                    }
 	                sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
 	                sample.phases[ch] = std::move(channelFrames[ch][f].phases);
 	                if (ch == 0) {
@@ -110,6 +132,10 @@ bool importAudioFile(
                     sample.loudnessLUFS = channelFrames[ch][f].loudnessLUFS;
                     sample.splDb = channelFrames[ch][f].loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
                 }
+            }
+
+            if (!channelsAligned) {
+                continue;
             }
 
             sample.timestamp = (static_cast<double>(frameIndex) * static_cast<double>(resolvedHopSize)) /

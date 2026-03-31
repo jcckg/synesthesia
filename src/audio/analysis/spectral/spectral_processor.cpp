@@ -1,6 +1,7 @@
 #include "spectral_processor.h"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <limits>
 #include <numbers>
 #include <numeric>
@@ -64,6 +65,18 @@ float loudnessToBrightness(const float clampedDb) {
 	normalised = std::clamp(normalised, 0.0f, 1.0f);
 	constexpr float BRIGHTNESS_RESPONSE_GAMMA = 1.1f;
 	return std::pow(normalised, BRIGHTNESS_RESPONSE_GAMMA);
+}
+
+bool isFiniteColourResult(const SpectralProcessor::SpectralColourResult& result) {
+	return std::isfinite(result.r) &&
+		std::isfinite(result.g) &&
+		std::isfinite(result.b) &&
+		std::isfinite(result.X) &&
+		std::isfinite(result.Y) &&
+		std::isfinite(result.Z) &&
+		std::isfinite(result.L) &&
+		std::isfinite(result.a) &&
+		std::isfinite(result.b_comp);
 }
 
 float resolveBrightnessLoudnessDb(
@@ -174,6 +187,11 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	}
 
 	const size_t binCount = magnitudes.size();
+	std::vector<float> cleanMagnitudes(binCount, 0.0f);
+	for (size_t i = 0; i < binCount; ++i) {
+		const float magnitude = magnitudes[i];
+		cleanMagnitudes[i] = (std::isfinite(magnitude) && magnitude > 0.0f) ? magnitude : 0.0f;
+	}
 	std::vector<float> localFrequencies;
     std::span<const float> effectiveFrequencies;
 
@@ -189,18 +207,18 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
     }
 
 	// Calculate spectral features on unweighted magnitudes for accurate frequency analysis
-	result.spectralCentroid = calculateSpectralCentroid(magnitudes, effectiveFrequencies);
-	result.spectralSpread = calculateSpectralSpread(magnitudes, effectiveFrequencies, result.spectralCentroid);
-	result.spectralFlatness = calculateSpectralFlatness(magnitudes);
-	result.spectralRolloff = calculateSpectralRolloff(magnitudes, effectiveFrequencies);
+	result.spectralCentroid = calculateSpectralCentroid(cleanMagnitudes, effectiveFrequencies);
+	result.spectralSpread = calculateSpectralSpread(cleanMagnitudes, effectiveFrequencies, result.spectralCentroid);
+	result.spectralFlatness = calculateSpectralFlatness(cleanMagnitudes);
+	result.spectralRolloff = calculateSpectralRolloff(cleanMagnitudes, effectiveFrequencies);
 
 	float maxMag = 0.0f;
 	float totalEnergyLocal = 0.0f;
-	for (const float mag : magnitudes) {
+	for (const float mag : cleanMagnitudes) {
 		maxMag = std::max(maxMag, mag);
 		totalEnergyLocal += mag * mag;
 	}
-	result.spectralCrestFactor = calculateSpectralCrestFactor(magnitudes, maxMag, totalEnergyLocal);
+	result.spectralCrestFactor = calculateSpectralCrestFactor(cleanMagnitudes, maxMag, totalEnergyLocal);
 
 	const float computedLoudnessDb = calculateLoudnessDbFromEnergy(totalEnergyLocal, binCount);
 	const float loudnessDb = std::isfinite(overrideLoudnessDb) ? overrideLoudnessDb : computedLoudnessDb;
@@ -223,7 +241,7 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	const float tonalStrength = std::clamp(
 		0.55f * (1.0f - result.spectralFlatness) + 0.45f * crestNorm,
 		0.0f, 1.0f);
-	const SpectralBandBalance bandBalance = calculateBandBalance(magnitudes, effectiveFrequencies);
+	const SpectralBandBalance bandBalance = calculateBandBalance(cleanMagnitudes, effectiveFrequencies);
 	const float transientAccent = transientMix * (0.35f + 0.65f * tonalStrength);
 	const float brightnessGain = std::clamp(
 		loudnessToBrightness(brightnessLoudnessDb) * (1.0f + 0.18f * transientAccent),
@@ -237,7 +255,7 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	float Y_total = 0.0f;
 	float Z_total = 0.0f;
 
-	integrateSpectrumCIE(magnitudes, effectiveFrequencies, X_total, Y_total, Z_total);
+	integrateSpectrumCIE(cleanMagnitudes, effectiveFrequencies, X_total, Y_total, Z_total);
 
 	float chromaX = 0.0f;
 	float chromaY = 0.0f;
@@ -378,6 +396,30 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 		result.r = applyCurve(result.r);
 		result.g = applyCurve(result.g);
 		result.b = applyCurve(result.b);
+	}
+
+	if (!isFiniteColourResult(result)) {
+		std::cerr
+			<< "[Synesthesia] Non-finite colour frame:"
+			<< " centroid=" << result.spectralCentroid
+			<< " rolloff=" << result.spectralRolloff
+			<< " flatness=" << result.spectralFlatness
+			<< " crest=" << result.spectralCrestFactor
+			<< " loudness=" << result.loudnessDb
+			<< " brightness=" << result.brightnessNormalised
+			<< " transient=" << result.transientMix
+			<< " rgb=(" << result.r << "," << result.g << "," << result.b << ")"
+			<< " lab=(" << result.L << "," << result.a << "," << result.b_comp << ")"
+			<< std::endl;
+		result.r = 0.0f;
+		result.g = 0.0f;
+		result.b = 0.0f;
+		result.X = 0.0f;
+		result.Y = 0.0f;
+		result.Z = 0.0f;
+		result.L = 0.0f;
+		result.a = 0.0f;
+		result.b_comp = 0.0f;
 	}
 
 	return result;
@@ -652,13 +694,13 @@ float SpectralProcessor::calculateSpectralCrestFactor(
 	const float maxMagnitude,
 	const float totalEnergy
 ) {
-	if (magnitudes.empty() || maxMagnitude < 1e-6f || totalEnergy < 1e-6f) {
+	if (magnitudes.empty() || !std::isfinite(maxMagnitude) || !std::isfinite(totalEnergy) || maxMagnitude < 1e-6f || totalEnergy < 1e-6f) {
 		return 1.0f;
 	}
 
 	const float rms = std::sqrt(totalEnergy / static_cast<float>(magnitudes.size()));
 
-	if (rms < 1e-6f) {
+	if (!std::isfinite(rms) || rms < 1e-6f) {
 		return 1.0f;
 	}
 

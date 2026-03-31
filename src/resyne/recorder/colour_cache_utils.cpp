@@ -2,6 +2,7 @@
 
 #include "colour/colour_mapper.h"
 
+#include <algorithm>
 #include <cmath>
 
 namespace ReSyne::RecorderColourCache {
@@ -76,15 +77,29 @@ SampleColourEntry computeEntryInternal(const AudioColourSample& sample,
 		loudnessOverride);
 
 	SampleColourEntry entry{};
-	entry.rgb = ImVec4(colour.r, colour.g, colour.b, 1.0f);
-	ColourMapper::RGBtoLab(
-		entry.rgb.x,
-		entry.rgb.y,
-		entry.rgb.z,
-		entry.labL,
-		entry.labA,
-		entry.labB,
-		colourSpace);
+	entry.rgb.x = std::isfinite(colour.r) ? std::clamp(colour.r, 0.0f, 1.0f) : 0.0f;
+	entry.rgb.y = std::isfinite(colour.g) ? std::clamp(colour.g, 0.0f, 1.0f) : 0.0f;
+	entry.rgb.z = std::isfinite(colour.b) ? std::clamp(colour.b, 0.0f, 1.0f) : 0.0f;
+	entry.rgb.w = 1.0f;
+	if (std::isfinite(colour.L) && std::isfinite(colour.a) && std::isfinite(colour.b_comp)) {
+		entry.labL = colour.L;
+		entry.labA = colour.a;
+		entry.labB = colour.b_comp;
+	} else {
+		ColourMapper::RGBtoLab(
+			entry.rgb.x,
+			entry.rgb.y,
+			entry.rgb.z,
+			entry.labL,
+			entry.labA,
+			entry.labB,
+			colourSpace);
+		if (!std::isfinite(entry.labL) || !std::isfinite(entry.labA) || !std::isfinite(entry.labB)) {
+			entry.labL = 0.0f;
+			entry.labA = 0.0f;
+			entry.labB = 0.0f;
+		}
+	}
 	return entry;
 }
 
