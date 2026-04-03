@@ -140,6 +140,15 @@ void applyColourSmoothing(const ColourMapper::ColourResult& targetColour,
     }
 }
 
+float resolveSpectrumHistoryFactor(const UIState& state,
+                                   const SmoothingSignalFeatures* features) {
+    const float baseSmoothing = std::clamp(state.audioSettings.spectrumSmoothingFactor, 0.0f, 1.0f);
+    if (state.visualSettings.manualSmoothing || features == nullptr) {
+        return baseSmoothing;
+    }
+    return resolveAdaptiveSmoothingAmount(baseSmoothing, *features);
+}
+
 }
 
 void syncRecorderPresentationSettings(UIState& state) {
@@ -308,7 +317,9 @@ void processPlaybackState(AudioInput& audioInput,
                 state.audioSettings.smoothedMagnitudes[channelIndex].assign(visualiserMagnitudes.size(), 0.0f);
             }
 
-            const float smoothing = std::clamp(state.audioSettings.spectrumSmoothingFactor, 0.0f, 1.0f);
+            const float smoothing = resolveSpectrumHistoryFactor(
+                state,
+                playbackSignalFeaturesValid ? &playbackSignalFeatures : nullptr);
             const float newContribution = 1.0f - smoothing;
             const float historyContribution = smoothing;
 
@@ -377,6 +388,8 @@ void processLiveAudioState(AudioInput& audioInput,
     const std::vector<float>& visualiserMagnitudes = preparedFrame.visualiserMagnitudes;
     const bool silentMagnitudeFrame = spectrumIsSilent(visualiserMagnitudes);
     const auto& colourResult = preparedFrame.colourResult;
+    SmoothingSignalFeatures liveFeatures{};
+    bool liveFeaturesValid = false;
 
     const float displayR = std::clamp(colourResult.r, 0.0f, 1.0f);
     const float displayG = std::clamp(colourResult.g, 0.0f, 1.0f);
@@ -389,13 +402,13 @@ void processLiveAudioState(AudioInput& audioInput,
     }
 
     if (std::isfinite(displayR) && std::isfinite(displayG) && std::isfinite(displayB)) {
-        SmoothingSignalFeatures liveFeatures{};
         liveFeatures.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
         liveFeatures.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
         liveFeatures.spectralFlatness = colourResult.spectralFlatness;
         liveFeatures.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
         liveFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
         populateSpectralNorms(colourResult, liveFeatures);
+        liveFeaturesValid = true;
 
         applyColourSmoothing(
             colourResult,
@@ -438,7 +451,9 @@ void processLiveAudioState(AudioInput& audioInput,
             state.audioSettings.smoothedMagnitudes[channelIndex].assign(visualiserMagnitudes.size(), 0.0f);
         }
 
-        const float smoothing = std::clamp(state.audioSettings.spectrumSmoothingFactor, 0.0f, 1.0f);
+        const float smoothing = resolveSpectrumHistoryFactor(
+            state,
+            liveFeaturesValid ? &liveFeatures : nullptr);
         const float newContribution = 1.0f - smoothing;
         const float historyContribution = smoothing;
 

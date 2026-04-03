@@ -11,6 +11,9 @@ struct SmoothingSignalFeatures {
     float spectralCrestNorm = 0.0f;    // [0,1] — log2(crestFactor), normalised
 };
 
+float resolveAdaptiveSmoothingAmount(float baseSmoothingAmount,
+                                     const SmoothingSignalFeatures& features);
+
 class SpringSmoother {
 public:
     explicit SpringSmoother(float stiffness = 8.0f, float damping = 1.0f, float mass = 0.3f);

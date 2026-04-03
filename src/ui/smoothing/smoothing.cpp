@@ -4,8 +4,65 @@
 #include <algorithm>
 #include <cmath>
 
+namespace {
+
+constexpr float kMinStiffness = 8.0f;
+constexpr float kMaxStiffness = 120.0f;
+
+float smoothingAmountToBaseStiffness(float smoothingAmount) {
+    smoothingAmount = std::clamp(smoothingAmount, 0.0f, 1.0f);
+    const float responseAmount = 1.0f - smoothingAmount;
+    return kMinStiffness * std::pow(kMaxStiffness / kMinStiffness, responseAmount);
+}
+
+float baseStiffnessToSmoothingAmount(float stiffness) {
+    const float clampedStiffness = std::clamp(stiffness, kMinStiffness, kMaxStiffness);
+    const float logRatio = std::log(clampedStiffness / kMinStiffness) /
+        std::log(kMaxStiffness / kMinStiffness);
+    return std::clamp(1.0f - logRatio, 0.0f, 1.0f);
+}
+
+float applyAdaptiveStiffness(const float baseStiffness,
+                             const SmoothingSignalFeatures& features) {
+    float adaptiveStiffness = baseStiffness;
+
+    constexpr float onsetStiffnessBoost = 0.45f;
+    if (features.onsetDetected) {
+        adaptiveStiffness *= (1.0f + onsetStiffnessBoost);
+    }
+
+    constexpr float fluxStiffnessGain = 8.0f;
+    const float fluxContribution = std::clamp(features.spectralFlux * fluxStiffnessGain, 0.0f, 1.0f);
+    adaptiveStiffness *= (1.0f + fluxContribution);
+
+    constexpr float flatnessSuppression = 0.6f;
+    const float clampedFlatness = std::clamp(features.spectralFlatness, 0.0f, 1.0f);
+    const float noiseSuppression = 1.0f - clampedFlatness * flatnessSuppression;
+    adaptiveStiffness *= std::clamp(noiseSuppression, 0.35f, 1.0f);
+
+    constexpr float crestStiffnessGain = 0.35f;
+    adaptiveStiffness *= (1.0f + features.spectralCrestNorm * crestStiffnessGain);
+
+    constexpr float psychoacousticRange = 0.5f;
+    const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
+    const float brightness = std::clamp(features.brightnessNormalised, 0.0f, 1.0f);
+    const float psychoScalar = 0.5f * loudness + 0.5f * brightness;
+    adaptiveStiffness *= (1.0f + psychoScalar * psychoacousticRange);
+
+    return std::clamp(adaptiveStiffness, kMinStiffness * 0.5f, kMaxStiffness * 2.5f);
+}
+
+}
+
+float resolveAdaptiveSmoothingAmount(const float baseSmoothingAmount,
+                                     const SmoothingSignalFeatures& features) {
+    const float baseStiffness = smoothingAmountToBaseStiffness(baseSmoothingAmount);
+    const float adaptiveStiffness = applyAdaptiveStiffness(baseStiffness, features);
+    return baseStiffnessToSmoothingAmount(adaptiveStiffness);
+}
+
 SpringSmoother::SpringSmoother(const float stiffness, const float damping, const float mass)
-    : m_stiffness(stiffness), m_baseStiffness(stiffness), m_damping(damping), m_mass(mass), m_rgbCacheDirty(true) {
+	: m_stiffness(stiffness), m_baseStiffness(stiffness), m_damping(damping), m_mass(mass), m_rgbCacheDirty(true) {
     initialiseToDefaults();
 }
 
@@ -121,51 +178,20 @@ void SpringSmoother::getCurrentOklab(float& L, float& a, float& b) const {
 void SpringSmoother::setSmoothingAmount(float smoothingAmount) {
     smoothingAmount = std::clamp(smoothingAmount, 0.0f, 1.0f);
 
-    const float responseAmount = 1.0f - smoothingAmount;
-    m_baseStiffness = MIN_STIFFNESS * std::pow(MAX_STIFFNESS / MIN_STIFFNESS, responseAmount);
+    m_baseStiffness = smoothingAmountToBaseStiffness(smoothingAmount);
     m_stiffness = m_baseStiffness;
     m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * 0.5f;
 }
 
 float SpringSmoother::getSmoothingAmount() const {
-    const float logRatio = std::log(m_baseStiffness / MIN_STIFFNESS) /
-                          std::log(MAX_STIFFNESS / MIN_STIFFNESS);
-    return std::clamp(1.0f - logRatio, 0.0f, 1.0f);
+    return baseStiffnessToSmoothingAmount(m_baseStiffness);
 }
 
 // Stowell & Plumbley (2007) - adaptive whitening for improved onset detection
 // Adaptive smoothing with perceptual cues
 bool SpringSmoother::update(const float deltaTime, const SmoothingSignalFeatures& features) {
-    float adaptiveStiffness = m_baseStiffness;
-
-    constexpr float ONSET_STIFFNESS_BOOST = 0.45f;
-    if (features.onsetDetected) {
-        adaptiveStiffness *= (1.0f + ONSET_STIFFNESS_BOOST);
-    }
-
-    // Böck & Widmer (2013) SuperFlux: spectral flux spikes reveal transients, so chase them faster
-    constexpr float FLUX_STIFFNESS_GAIN = 8.0f;
-    const float fluxContribution = std::clamp(features.spectralFlux * FLUX_STIFFNESS_GAIN, 0.0f, 1.0f);
-    adaptiveStiffness *= (1.0f + fluxContribution);
-
-    // Peeters (2004): spectral flatness close to 1 indicates noise, so provide extra damping
-    constexpr float FLATNESS_SUPPRESSION = 0.6f;
-    const float clampedFlatness = std::clamp(features.spectralFlatness, 0.0f, 1.0f);
-    const float noiseSuppression = 1.0f - clampedFlatness * FLATNESS_SUPPRESSION;
-    adaptiveStiffness *= std::clamp(noiseSuppression, 0.35f, 1.0f);
-
-    // Spectral crest factor → stiffness: peaky spectrum (bell, snare) = crisper colour snap
-    // Complements onset detection — crest detects spectral peakiness even without a temporal onset
-    constexpr float CREST_STIFFNESS_GAIN = 0.35f;
-    adaptiveStiffness *= (1.0f + features.spectralCrestNorm * CREST_STIFFNESS_GAIN);
-
-    constexpr float PSYCHOACOUSTIC_RANGE = 0.5f;
+    const float adaptiveStiffness = applyAdaptiveStiffness(m_baseStiffness, features);
     const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
-    const float brightness = std::clamp(features.brightnessNormalised, 0.0f, 1.0f);
-    const float psychoScalar = 0.5f * loudness + 0.5f * brightness;
-    adaptiveStiffness *= (1.0f + psychoScalar * PSYCHOACOUSTIC_RANGE);
-
-    adaptiveStiffness = std::clamp(adaptiveStiffness, MIN_STIFFNESS * 0.5f, MAX_STIFFNESS * 2.5f);
 
     m_stiffness = adaptiveStiffness;
     constexpr float BASE_DAMPING_RATIO = 0.65f;
