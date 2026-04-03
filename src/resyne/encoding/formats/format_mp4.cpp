@@ -138,11 +138,15 @@ public:
     RGB colourAt(double timeSeconds) {
         timeSeconds = std::max(timeSeconds, 0.0);
         const AudioColourSample& sample = sampleForTime(timeSeconds);
+        ReSyne::RecorderColourCache::CacheSettings settings{};
+        settings.gamma = gamma_;
+        settings.colourSpace = colourSpace_;
+        settings.gamutMapping = gamut_;
+        settings.smoothingEnabled = false;
+        settings.smoothingAmount = 0.0f;
         const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
             sample,
-            gamma_,
-            colourSpace_,
-            gamut_);
+            settings);
 
         RGB rgb{std::clamp(entry.rgb.x, 0.0f, 1.0f),
                 std::clamp(entry.rgb.y, 0.0f, 1.0f),

@@ -7,6 +7,40 @@
 
 namespace ReSyne {
 
+bool Recorder::refreshPlaybackOutput(RecorderState& state) {
+    if (state.playbackAudio.empty()) {
+        state.isPlaybackInitialised = false;
+        return false;
+    }
+
+    const uint32_t numChannels = state.metadata.channels > 0
+        ? state.metadata.channels
+        : (!state.samples.empty() ? state.samples.front().channels : 1);
+    const float sampleRate = state.metadata.sampleRate > 0.0f
+        ? state.metadata.sampleRate
+        : state.fallbackSampleRate;
+
+    if (sampleRate <= 0.0f) {
+        state.isPlaybackInitialised = false;
+        return false;
+    }
+
+    if (!state.audioOutput) {
+        state.audioOutput = std::make_unique<AudioOutput>();
+    }
+
+    const int deviceIndex = state.outputDeviceIndex;
+    if (!state.audioOutput->initOutputStream(sampleRate, static_cast<int>(numChannels), deviceIndex)) {
+        state.isPlaybackInitialised = false;
+        return false;
+    }
+
+    state.audioOutput->setAudioData(state.playbackAudio, numChannels);
+    state.audioOutput->setLoopEnabled(state.loopEnabled);
+    state.isPlaybackInitialised = true;
+    return true;
+}
+
 void Recorder::reconstructAudio(RecorderState& state) {
     std::lock_guard<std::mutex> lock(state.samplesMutex);
     if (state.samples.empty()) {
@@ -62,34 +96,26 @@ void Recorder::reconstructAudio(RecorderState& state) {
         maxLength = std::max(maxLength, channelAudioData[ch].size());
     }
 
-    state.reconstructedAudio.clear();
-    state.reconstructedAudio.reserve(maxLength * numChannels);
+    state.playbackAudio.clear();
+    state.playbackAudio.reserve(maxLength * numChannels);
 
     for (size_t i = 0; i < maxLength; ++i) {
         for (uint32_t ch = 0; ch < numChannels; ++ch) {
             if (i < channelAudioData[ch].size()) {
-                state.reconstructedAudio.push_back(channelAudioData[ch][i]);
+                state.playbackAudio.push_back(channelAudioData[ch][i]);
             } else {
-                state.reconstructedAudio.push_back(0.0f);
+                state.playbackAudio.push_back(0.0f);
             }
         }
     }
 
-    if (!state.audioOutput) {
-        state.audioOutput = std::make_unique<AudioOutput>();
-    }
-
-    int deviceIndex = state.outputDeviceIndex;
-    state.audioOutput->initOutputStream(state.metadata.sampleRate, static_cast<int>(numChannels), deviceIndex);
-    state.audioOutput->setAudioData(state.reconstructedAudio, numChannels);
-
-    state.isPlaybackInitialised = true;
+    refreshPlaybackOutput(state);
 }
 
 void Recorder::startPlayback(RecorderState& state) {
-    if (!state.isPlaybackInitialised || state.reconstructedAudio.empty()) {
+    if (!state.isPlaybackInitialised || state.playbackAudio.empty()) {
         reconstructAudio(state);
-        if (!state.isPlaybackInitialised || state.reconstructedAudio.empty()) {
+        if (!state.isPlaybackInitialised || state.playbackAudio.empty()) {
             return;
         }
     }
@@ -98,7 +124,7 @@ void Recorder::startPlayback(RecorderState& state) {
         return;
     }
 
-    if (!state.reconstructedAudio.empty()) {
+    if (!state.playbackAudio.empty()) {
         size_t totalFrames = state.audioOutput->getTotalFrames();
         size_t currentPosition = state.audioOutput->getPlaybackPosition();
         if (totalFrames > 0 && currentPosition >= totalFrames - 1) {
@@ -107,7 +133,7 @@ void Recorder::startPlayback(RecorderState& state) {
         } else {
             if (totalFrames == 0) {
                 const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
-                totalFrames = numChannels > 0 ? state.reconstructedAudio.size() / numChannels : state.reconstructedAudio.size();
+                totalFrames = numChannels > 0 ? state.playbackAudio.size() / numChannels : state.playbackAudio.size();
             }
             if (totalFrames > 0) {
                 size_t startFrame = static_cast<size_t>(
@@ -142,11 +168,11 @@ void Recorder::seekPlayback(RecorderState& state, float normalisedPosition) {
     float clamped = std::clamp(normalisedPosition, 0.0f, 1.0f);
     state.timeline.scrubberNormalisedPosition = clamped;
 
-    if (state.audioOutput && !state.reconstructedAudio.empty()) {
+    if (state.audioOutput && !state.playbackAudio.empty()) {
         size_t totalFrames = state.audioOutput->getTotalFrames();
         if (totalFrames == 0) {
             const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
-            totalFrames = numChannels > 0 ? state.reconstructedAudio.size() / numChannels : state.reconstructedAudio.size();
+            totalFrames = numChannels > 0 ? state.playbackAudio.size() / numChannels : state.playbackAudio.size();
         }
         if (totalFrames > 0) {
             size_t framePosition = static_cast<size_t>(clamped * static_cast<float>(totalFrames));

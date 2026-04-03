@@ -120,30 +120,28 @@ void renderViewTabs(RenderArgs& args) {
     ImGui::Spacing();
 }
 
-void renderVisualisationSections(const RenderArgs& args, bool showEQControls) {
+void renderVisualisationSections(const RenderArgs& args) {
     Controls::renderVisualiserSettingsPanel(
         args.colourSmoother,
         args.uiState.visualSettings.colourSmoothingSpeed,
+        args.uiState.visualSettings.manualSmoothing,
+        args.uiState.visibility.showSpectrumAnalyser,
         args.layout.width,
         args.layout.padding,
         args.layout.labelWidth,
         args.layout.controlWidth,
         args.layout.buttonHeight);
 
-    if (showEQControls) {
-        Controls::renderEQControlsPanel(
-            args.uiState.audioSettings.lowGain,
-            args.uiState.audioSettings.midGain,
-            args.uiState.audioSettings.highGain,
-            args.uiState.visibility.showSpectrumAnalyser,
-            args.uiState.audioSettings.spectrumSmoothingFactor,
-            args.layout.width,
-            args.layout.padding,
-            args.layout.labelWidth,
-            args.layout.controlWidth,
-            args.layout.buttonHeight,
-            args.layout.contentWidth);
-    }
+    Controls::renderEQControlsPanel(
+        args.uiState.audioSettings.lowGain,
+        args.uiState.audioSettings.midGain,
+        args.uiState.audioSettings.highGain,
+        args.layout.width,
+        args.layout.padding,
+        args.layout.labelWidth,
+        args.layout.controlWidth,
+        args.layout.buttonHeight,
+        args.layout.contentWidth);
 }
 
 void renderReSyneSections(const RenderArgs& args) {
@@ -211,6 +209,7 @@ void render(RenderArgs& args) {
             Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.uiState, args.recorderState);
         }
         renderReSyneSections(args);
+        renderVisualisationSections(args);
     }
 
     if (hasLiveInput) {
@@ -219,7 +218,7 @@ void render(RenderArgs& args) {
 
     if (args.uiState.visualSettings.activeView == UIState::View::Visualisation && showFrequencyInfo) {
         Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.uiState, args.recorderState);
-        renderVisualisationSections(args, hasLiveInput);
+        renderVisualisationSections(args);
     }
 
     Controls::renderAdvancedSettingsPanel(args.uiState

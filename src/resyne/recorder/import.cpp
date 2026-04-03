@@ -64,8 +64,10 @@ void applyImportedSequence(RecorderState& state,
     state.fallbackHopSize = state.metadata.hopSize;
     state.dropFlashAlpha = 1.0f;
     state.statusMessageTimer = STATUS_MESSAGE_DURATION;
-
-    RecorderColourCache::rebuildCache(state);
+    state.sampleColourCache.clear();
+    state.colourCacheDirty = true;
+    state.timelinePreviewCache.clear();
+    state.timelinePreviewCacheDirty = true;
 }
 
 }
@@ -95,6 +97,7 @@ bool Recorder::importFromFile(RecorderState& state,
     std::vector<AudioColourSample> importedSamples;
     AudioMetadata metadata{};
     std::string errorMessage;
+    std::vector<float> playbackAudio;
     const auto extension = extractExtension(filepath);
 
     bool success = false;
@@ -107,7 +110,10 @@ bool Recorder::importFromFile(RecorderState& state,
             state.importLowGain, state.importMidGain, state.importHighGain,
             importedSamples, metadata, errorMessage,
             [&state](float progress) { state.loadingProgress = progress; },
-            nullptr
+            nullptr,
+            true,
+            true,
+            &playbackAudio
         );
 	} else if (extension == ".tiff" || extension == ".tif") {
 		state.loadingProgress = 0.05f;
@@ -150,7 +156,12 @@ bool Recorder::importFromFile(RecorderState& state,
     applyImportedSequence(state, std::move(importedSamples), metadata);
 
     state.loadingProgress = 0.95f;
-    reconstructAudio(state);
+    if (!playbackAudio.empty()) {
+        state.playbackAudio = std::move(playbackAudio);
+        refreshPlaybackOutput(state);
+    } else {
+        reconstructAudio(state);
+    }
 
     state.showLoadingDialog = false;
     state.statusMessage.clear();
@@ -170,6 +181,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
     std::vector<AudioColourSample> samples;
     AudioMetadata metadata{};
     std::string errorMessage;
+    std::vector<float> playbackAudio;
     const auto extension = extractExtension(filepath);
     const auto filename = extractFilename(filepath);
 
@@ -208,7 +220,10 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             state.importLowGain, state.importMidGain, state.importHighGain,
             samples, metadata, errorMessage,
             updateProgress,
-            updatePreview
+            updatePreview,
+            true,
+            true,
+            &playbackAudio
         );
 	} else if (extension == ".tiff" || extension == ".tif") {
 		setStatus("Loading TIFF file...");
@@ -238,14 +253,11 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         errorMessage = "unsupported format";
     }
 
-    std::vector<float> reconstructedAudio;
+    std::vector<float> resolvedPlaybackAudio;
     bool reconstructionSuccess = false;
     uint32_t numChannels = 1;
 
-    const bool shouldReconstructDuringImport = (extension == ".wav" || extension == ".flac" ||
-                                                 extension == ".mp3" || extension == ".mpeg3" ||
-                                                 extension == ".mpga" || extension == ".ogg" ||
-                                                 extension == ".oga");
+    const bool shouldReconstructDuringImport = playbackAudio.empty();
 
     if (success && !samples.empty() && shouldReconstructDuringImport) {
         setStatus("Reconstructing audio...");
@@ -301,21 +313,23 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         updateProgress(0.95f);
 
         if (allChannelsSuccess) {
-            reconstructedAudio.clear();
-            reconstructedAudio.reserve(maxLength * numChannels);
+            resolvedPlaybackAudio.clear();
+            resolvedPlaybackAudio.reserve(maxLength * numChannels);
 
             for (size_t i = 0; i < maxLength; ++i) {
                 for (uint32_t ch = 0; ch < numChannels; ++ch) {
                     if (i < channelAudioData[ch].size()) {
-                        reconstructedAudio.push_back(channelAudioData[ch][i]);
+                        resolvedPlaybackAudio.push_back(channelAudioData[ch][i]);
                     } else {
-                        reconstructedAudio.push_back(0.0f);
+                        resolvedPlaybackAudio.push_back(0.0f);
                     }
                 }
             }
             reconstructionSuccess = true;
         }
     } else if (success && !samples.empty() && !shouldReconstructDuringImport) {
+        resolvedPlaybackAudio = std::move(playbackAudio);
+        reconstructionSuccess = !resolvedPlaybackAudio.empty();
         updateProgress(0.95f);
     }
 
@@ -333,9 +347,9 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             state.importErrorMessage.clear();
 
             if (reconstructionSuccess) {
-                state.reconstructedAudio = std::move(reconstructedAudio);
+                state.playbackAudio = std::move(resolvedPlaybackAudio);
             } else {
-                state.reconstructedAudio.clear();
+                state.playbackAudio.clear();
             }
 
             updateProgress(1.0f);

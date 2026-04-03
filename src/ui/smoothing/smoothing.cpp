@@ -21,10 +21,18 @@ void SpringSmoother::reset(const float r, const float g, const float b) {
     float L, a, b_comp;
     ColourMapper::RGBtoOklab(r, g, b, L, a, b_comp);
 
+    resetOklab(L, a, b_comp);
+}
+
+void SpringSmoother::resetOklab(const float L, const float a, const float b_comp) {
     m_channels[0] = {L, 0.0f, L};
     m_channels[1] = {a, 0.0f, a};
     m_channels[2] = {b_comp, 0.0f, b_comp};
 
+    float r = 0.0f;
+    float g = 0.0f;
+    float b = 0.0f;
+    ColourMapper::OklabtoRGB(L, a, b_comp, r, g, b);
     m_currentRGB[0] = r;
     m_currentRGB[1] = g;
     m_currentRGB[2] = b;
@@ -35,6 +43,10 @@ void SpringSmoother::setTargetColour(const float r, const float g, const float b
     float L, a, b_comp;
     ColourMapper::RGBtoOklab(r, g, b, L, a, b_comp);
 
+    setTargetOklab(L, a, b_comp);
+}
+
+void SpringSmoother::setTargetOklab(const float L, const float a, const float b_comp) {
     m_channels[0].targetPosition = L;
     m_channels[1].targetPosition = a;
     m_channels[2].targetPosition = b_comp;
@@ -100,10 +112,17 @@ void SpringSmoother::getCurrentColour(float& r, float& g, float& b) const {
     b = m_currentRGB[2];
 }
 
+void SpringSmoother::getCurrentOklab(float& L, float& a, float& b) const {
+    L = m_channels[0].position;
+    a = m_channels[1].position;
+    b = m_channels[2].position;
+}
+
 void SpringSmoother::setSmoothingAmount(float smoothingAmount) {
     smoothingAmount = std::clamp(smoothingAmount, 0.0f, 1.0f);
 
-    m_baseStiffness = MIN_STIFFNESS * std::pow(MAX_STIFFNESS / MIN_STIFFNESS, smoothingAmount);
+    const float responseAmount = 1.0f - smoothingAmount;
+    m_baseStiffness = MIN_STIFFNESS * std::pow(MAX_STIFFNESS / MIN_STIFFNESS, responseAmount);
     m_stiffness = m_baseStiffness;
     m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * 0.5f;
 }
@@ -111,7 +130,7 @@ void SpringSmoother::setSmoothingAmount(float smoothingAmount) {
 float SpringSmoother::getSmoothingAmount() const {
     const float logRatio = std::log(m_baseStiffness / MIN_STIFFNESS) /
                           std::log(MAX_STIFFNESS / MIN_STIFFNESS);
-    return std::clamp(logRatio, 0.0f, 1.0f);
+    return std::clamp(1.0f - logRatio, 0.0f, 1.0f);
 }
 
 // Stowell & Plumbley (2007) - adaptive whitening for improved onset detection

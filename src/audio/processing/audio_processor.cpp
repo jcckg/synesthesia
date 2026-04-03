@@ -107,7 +107,7 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
 
 		fftProcessors[ch]->processBuffer(std::span(channelBuffer.data(), frames), buffer.sampleRate);
 
-		auto magnitudes = fftProcessors[ch]->getMagnitudesBuffer();
+		auto magnitudes = fftProcessors[ch]->getRawMagnitudesBuffer();
 		auto phases = fftProcessors[ch]->getPhaseBuffer();
 
 		if (!magnitudes.empty()) {

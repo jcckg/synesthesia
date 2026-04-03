@@ -37,6 +37,26 @@ bool hasUsableFrameLoudness(const AudioColourSample& sample) {
            sample.loudnessLUFS < 20.0f;
 }
 
+std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& decoded) {
+    if (decoded.channelSamples.empty()) {
+        return {};
+    }
+
+    const size_t channelCount = decoded.channelSamples.size();
+    const size_t frameCount = decoded.channelSamples.front().size();
+    std::vector<float> interleaved(frameCount * channelCount, 0.0f);
+
+    for (size_t channelIndex = 0; channelIndex < channelCount; ++channelIndex) {
+        const auto& channelSamples = decoded.channelSamples[channelIndex];
+        const size_t safeFrameCount = std::min(frameCount, channelSamples.size());
+        for (size_t frameIndex = 0; frameIndex < safeFrameCount; ++frameIndex) {
+            interleaved[frameIndex * channelCount + channelIndex] = channelSamples[frameIndex];
+        }
+    }
+
+    return interleaved;
+}
+
 }
 
 bool importAudioFile(
@@ -54,7 +74,8 @@ bool importAudioFile(
     const ProgressCallback& onProgress,
     const PreviewCallback& onPreview,
     const bool enableSmoothing,
-    const bool enableMelWeighting
+    const bool enableMelWeighting,
+    std::vector<float>* playbackAudio
 ) {
     (void)gamma;
     (void)colourSpace;
@@ -75,6 +96,10 @@ bool importAudioFile(
 
     if (sanitiseDecodedAudio(decoded)) {
         std::cerr << "[Synesthesia] Replaced non-finite decoded audio samples with silence for " << filepath << '\n';
+    }
+
+    if (playbackAudio != nullptr) {
+        *playbackAudio = buildInterleavedAudio(decoded);
     }
 
     const uint32_t numChannels = static_cast<uint32_t>(decoded.channelSamples.size());

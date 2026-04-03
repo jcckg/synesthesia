@@ -1,0 +1,54 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <vector>
+
+#include "colour/colour_mapper.h"
+
+namespace SpectralPresentation {
+
+struct Settings {
+    float lowGain = 1.0f;
+    float midGain = 1.0f;
+    float highGain = 1.0f;
+    float gamma = 0.8f;
+    ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    bool applyGamutMapping = true;
+};
+
+struct Frame {
+    std::vector<float> magnitudes;
+    std::vector<float> phases;
+    std::vector<float> frequencies;
+    float sampleRate = 0.0f;
+};
+
+struct PreparedFrame {
+    std::vector<float> visualiserMagnitudes;
+    ColourMapper::ColourResult colourResult;
+};
+
+Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
+                  const std::vector<std::vector<float>>& phases,
+                  const std::vector<std::vector<float>>& frequencies,
+                  std::uint32_t channels,
+                  float sampleRate);
+
+std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
+                                             const Settings& settings);
+
+PreparedFrame prepareFrame(const Frame& frame,
+                           const Settings& settings,
+                           float loudnessDb);
+
+std::array<float, 3> displayRGBFromXYZ(float X,
+                                       float Y,
+                                       float Z,
+                                       const Settings& settings);
+
+ColourMapper::ColourResult buildColourResult(const Frame& frame,
+                                             const Settings& settings,
+                                             float loudnessDb);
+
+}

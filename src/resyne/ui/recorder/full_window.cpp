@@ -62,9 +62,9 @@ void Recorder::drawFullWindow(RecorderState& state,
         sampleCount = sourceSamples.size();
         hasData = !sourceSamples.empty();
         if (hasData) {
-            if (!state.reconstructedAudio.empty() && sampleRate > 0.0f) {
+            if (!state.playbackAudio.empty() && sampleRate > 0.0f) {
                 const uint32_t numChannels = state.metadata.channels > 0 ? state.metadata.channels : 1;
-                const size_t totalFrames = state.reconstructedAudio.size() / numChannels;
+                const size_t totalFrames = state.playbackAudio.size() / numChannels;
                 duration = static_cast<double>(totalFrames) / static_cast<double>(sampleRate);
             } else {
                 duration = sourceSamples.back().timestamp;

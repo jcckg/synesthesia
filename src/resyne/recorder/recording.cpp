@@ -37,7 +37,7 @@ bool Recorder::hasLoadedAudio(RecorderState& state) {
     std::lock_guard<std::mutex> lock(state.samplesMutex);
     return !state.samples.empty() ||
            !state.previewSamples.empty() ||
-           !state.reconstructedAudio.empty() ||
+           !state.playbackAudio.empty() ||
            (state.audioOutput && state.audioOutput->getTotalSamples() > 0);
 }
 
@@ -56,7 +56,9 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     state.importErrorMessage.clear();
     state.sampleColourCache.clear();
     state.colourCacheDirty = true;
-    state.reconstructedAudio.clear();
+    state.timelinePreviewCache.clear();
+    state.timelinePreviewCacheDirty = true;
+    state.playbackAudio.clear();
     state.metadata = {};
     state.firstFrameCounter = 0;
     state.fallbackSampleRate = 0.0f;
@@ -147,7 +149,8 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
                            static_cast<double>(state.metadata.sampleRate);
 
         state.samples.push_back(sample);
-        RecorderColourCache::appendSampleLocked(state, state.samples.back());
+        state.colourCacheDirty = true;
+        state.timelinePreviewCacheDirty = true;
     }
 }
 

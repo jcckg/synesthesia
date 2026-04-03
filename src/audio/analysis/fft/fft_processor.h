@@ -74,6 +74,7 @@ public:
 
 	void processBuffer(std::span<const float> buffer, float sampleRate);
 	std::vector<float> getMagnitudesBuffer() const;
+	std::vector<float> getRawMagnitudesBuffer() const;
 	std::vector<float> getSpectralEnvelope() const;
 	std::vector<float> getPhaseBuffer() const;
 	void reset();

@@ -245,6 +245,11 @@ std::vector<float> FFTProcessor::getMagnitudesBuffer() const {
 	return magnitudesBuffer;
 }
 
+std::vector<float> FFTProcessor::getRawMagnitudesBuffer() const {
+	std::lock_guard lock(dataMutex);
+	return rawMagnitudesBuffer;
+}
+
 std::vector<float> FFTProcessor::getPhaseBuffer() const {
 	std::lock_guard lock(dataMutex);
 	return phaseBuffer;

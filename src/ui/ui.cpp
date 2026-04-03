@@ -23,6 +23,7 @@
 #include "resyne/ui/timeline/timeline.h"
 #include "resyne/ui/timeline/timeline_gradient.h"
 #include "sidebar.h"
+#include "ui/audio_visualisation/presentation_state.h"
 #include "ui/dragdrop/file_drop_manager.h"
 #include "ui/input/trackpad_gestures.h"
 #include "system_theme_detector.h"
@@ -50,50 +51,6 @@ void initialiseApp(UIState& state) {
 
 namespace {
 
-void populateSpectralNorms(const ColourMapper::ColourResult& result, SmoothingSignalFeatures& features) {
-	constexpr float kMinCentroid = 100.0f;
-	constexpr float kMinRolloff = 20.0f;
-	constexpr float kRolloffLogMin = 4.32f;   // log2(20)
-	constexpr float kRolloffLogMax = 14.29f;  // log2(20000)
-	constexpr float kCrestLogScale = 4.0f;
-
-	const float centroid = std::max(result.spectralCentroid, kMinCentroid);
-	features.spectralSpreadNorm = std::clamp(result.spectralSpread / centroid * 0.5f, 0.0f, 1.0f);
-	const float rolloffLog = std::log2(std::max(result.spectralRolloff, kMinRolloff));
-	features.spectralRolloffNorm = std::clamp((rolloffLog - kRolloffLogMin) / (kRolloffLogMax - kRolloffLogMin), 0.0f, 1.0f);
-	features.spectralCrestNorm = std::clamp(std::log2(std::max(result.spectralCrestFactor, 1.0f)) / kCrestLogScale, 0.0f, 1.0f);
-}
-
-struct ColourUpdateContext {
-	float deltaTime;
-	bool smoothingEnabled;
-	SpringSmoother& colourSmoother;
-	float* clearColour;
-	UIState::View activeView;
-};
-
-struct PlaybackSmoothingState {
-	std::vector<float> previousMagnitudes;
-	std::array<float, 12> fluxHistory{};
-	size_t fluxHistoryIndex = 0;
-};
-
-PlaybackSmoothingState playbackSmoothingState;
-
-constexpr float SILENCE_MAGNITUDE_THRESHOLD = 1e-5f;
-
-bool spectrumIsSilent(const std::vector<float>& magnitudes) {
-	for (float magnitude : magnitudes) {
-		if (!std::isfinite(magnitude)) {
-			continue;
-		}
-		if (std::fabs(magnitude) > SILENCE_MAGNITUDE_THRESHOLD) {
-			return false;
-		}
-	}
-	return true;
-}
-
 bool dropEventsContainSupportedImport(const std::vector<FileDropManager::FileDropEvent>& events) {
 	for (const auto& event : events) {
 		bool anySupported = std::any_of(
@@ -105,438 +62,6 @@ bool dropEventsContainSupportedImport(const std::vector<FileDropManager::FileDro
 		}
 	}
 	return false;
-}
-
-void sanitiseMagnitudes(std::vector<float>& magnitudes) {
-	for (float& value : magnitudes) {
-		if (!std::isfinite(value) || value < 0.0f) {
-			value = 0.0f;
-		}
-	}
-}
-
-void resetAnalyserState(UIState& state, size_t binCount, size_t numChannels = 1) {
-	if (state.audioSettings.smoothedMagnitudes.size() != numChannels) {
-		state.audioSettings.smoothedMagnitudes.resize(numChannels);
-	}
-	for (auto& channelMags : state.audioSettings.smoothedMagnitudes) {
-		if (channelMags.size() != binCount) {
-			channelMags.assign(binCount, 0.0f);
-		} else {
-			std::fill(channelMags.begin(), channelMags.end(), 0.0f);
-		}
-	}
-	state.spectrumAnalyser.resetTemporalBuffers();
-}
-
-void applyColourSmoothing(float displayR, float displayG, float displayB,
-						  float& outR, float& outG, float& outB,
-						  const ColourUpdateContext& ctx,
-						  const SmoothingSignalFeatures* signalFeatures) {
-	if (ctx.smoothingEnabled) {
-		ctx.colourSmoother.setTargetColour(displayR, displayG, displayB);
-		if (signalFeatures) {
-			ctx.colourSmoother.update(ctx.deltaTime * UIConstants::COLOUR_SMOOTH_UPDATE_FACTOR, *signalFeatures);
-		} else {
-			ctx.colourSmoother.update(ctx.deltaTime * UIConstants::COLOUR_SMOOTH_UPDATE_FACTOR);
-		}
-
-		if (ctx.activeView == UIState::View::ReSyne) {
-			ctx.colourSmoother.getCurrentColour(outR, outG, outB);
-		} else {
-			ctx.colourSmoother.getCurrentColour(ctx.clearColour[0], ctx.clearColour[1], ctx.clearColour[2]);
-			outR = ctx.clearColour[0];
-			outG = ctx.clearColour[1];
-			outB = ctx.clearColour[2];
-		}
-	} else {
-		outR = displayR;
-		outG = displayG;
-		outB = displayB;
-		if (ctx.activeView != UIState::View::ReSyne) {
-			ctx.clearColour[0] = displayR;
-			ctx.clearColour[1] = displayG;
-			ctx.clearColour[2] = displayB;
-		}
-	}
-}
-
-void processPlaybackState(AudioInput& audioInput, UIState& state, ReSyne::RecorderState& recorderState,
-						  float& currentDisplayR, float& currentDisplayG, float& currentDisplayB,
-						  const ColourUpdateContext& ctx) {
-	size_t playbackPosition = recorderState.audioOutput->getPlaybackPosition();
-	size_t totalSamples = recorderState.audioOutput->getTotalSamples();
-
-	if (totalSamples > 0 && !recorderState.samples.empty()) {
-		const size_t totalFrames = recorderState.audioOutput->getTotalFrames();
-		if (totalFrames > 0) {
-			const float audioNormalised = static_cast<float>(playbackPosition) / static_cast<float>(totalFrames);
-			const size_t spectralFrame = static_cast<size_t>(
-				std::clamp(audioNormalised, 0.0f, 1.0f) * static_cast<float>(recorderState.samples.size())
-			);
-			const size_t clampedSpectralFrame = std::min(spectralFrame, recorderState.samples.size() - 1);
-
-			recorderState.timeline.scrubberNormalisedPosition =
-				static_cast<float>(clampedSpectralFrame) / static_cast<float>(recorderState.samples.size() - 1);
-		}
-	}
-
-	ImVec4 playbackColour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-	SmoothingSignalFeatures playbackSignalFeatures{};
-	bool playbackSignalFeaturesValid = false;
-
-	if (!recorderState.samples.empty()) {
-		const float scrubberPos = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f);
-
-		std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
-		ReSyne::RecorderColourCache::ensureCacheLocked(recorderState);
-		const float position = scrubberPos * (static_cast<float>(recorderState.samples.size()) - 1.0f);
-		const size_t sampleIndex = static_cast<size_t>(position);
-		const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
-		const auto makeSample = [&](size_t idx) {
-			ReSyne::Timeline::TimelineSample sample{};
-			sample.timestamp = recorderState.samples[idx].timestamp;
-			const auto& entry = recorderState.sampleColourCache[idx];
-			sample.colour = entry.rgb;
-			sample.labL = entry.labL;
-			sample.labA = entry.labA;
-			sample.labB = entry.labB;
-			return sample;
-		};
-		if (recorderState.samples.size() == 1) {
-			playbackColour = recorderState.sampleColourCache.front().rgb;
-		} else {
-			const float t = position - static_cast<float>(sampleIndex);
-			playbackColour = ReSyne::Timeline::Gradient::interpolateColour(
-				makeSample(sampleIndex),
-				makeSample(std::min(sampleIndex + 1, recorderState.samples.size() - 1)),
-				t,
-				recorderState.importColourSpace,
-				recorderState.importGamutMapping);
-		}
-
-		const auto& currentSample = recorderState.samples[clampedIndex];
-
-		std::vector<float> averagedMagnitudes;
-		std::vector<float> averagedPhases;
-
-			if (!currentSample.magnitudes.empty() && !currentSample.magnitudes[0].empty()) {
-				const size_t numBins = currentSample.magnitudes[0].size();
-				const uint32_t numChannels = currentSample.channels;
-
-				averagedMagnitudes.resize(numBins, 0.0f);
-				averagedPhases.resize(numBins, 0.0f);
-
-				for (uint32_t ch = 0; ch < numChannels && ch < currentSample.magnitudes.size(); ++ch) {
-					if (currentSample.magnitudes[ch].size() == numBins) {
-						for (size_t bin = 0; bin < numBins; ++bin) {
-							const float mag = currentSample.magnitudes[ch][bin];
-							averagedMagnitudes[bin] += mag * mag;
-						}
-					}
-				if (ch < currentSample.phases.size() && currentSample.phases[ch].size() == numBins) {
-					for (size_t bin = 0; bin < numBins; ++bin) {
-						averagedPhases[bin] += currentSample.phases[ch][bin];
-					}
-				}
-			}
-
-			if (numChannels > 0) {
-				const float invChannels = 1.0f / static_cast<float>(numChannels);
-				for (size_t bin = 0; bin < numBins; ++bin) {
-					averagedMagnitudes[bin] = std::sqrt(averagedMagnitudes[bin] * invChannels);
-					averagedPhases[bin] *= invChannels;
-				}
-			}
-		}
-
-		const auto& currentMagnitudes = averagedMagnitudes;
-		const auto& currentPhases = averagedPhases;
-
-		if (!currentMagnitudes.empty()) {
-			const float sampleLoudness = std::isfinite(currentSample.loudnessLUFS)
-				? currentSample.loudnessLUFS
-				: ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-			const std::vector<float>& currentFrequencies = !currentSample.frequencies.empty() ? currentSample.frequencies[0] : std::vector<float>();
-			auto playbackColourResult = ColourMapper::spectrumToColour(
-				currentMagnitudes,
-				currentPhases,
-				currentFrequencies,
-				currentSample.sampleRate,
-				UIConstants::DEFAULT_GAMMA,
-				state.visualSettings.colourSpace,
-				state.visualSettings.gamutMappingEnabled,
-				sampleLoudness);
-
-			playbackSignalFeaturesValid = true;
-			playbackSignalFeatures.spectralFlatness = playbackColourResult.spectralFlatness;
-			playbackSignalFeatures.loudnessNormalised =
-				std::clamp(playbackColourResult.loudnessNormalised, 0.0f, 1.0f);
-			playbackSignalFeatures.brightnessNormalised =
-				std::clamp(playbackColourResult.brightnessNormalised, 0.0f, 1.0f);
-
-			populateSpectralNorms(playbackColourResult, playbackSignalFeatures);
-
-#ifdef ENABLE_OSC
-			auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-			osc.updateColourData(currentMagnitudes, currentPhases, playbackColourResult.dominantFrequency,
-                                 currentSample.sampleRate, currentDisplayR, currentDisplayG, currentDisplayB);
-#endif
-		}
-		if (currentMagnitudes.empty()) {
-			resetAnalyserState(state, 0);
-		} else {
-			float playbackFlux = 0.0f;
-			bool fluxComputed = false;
-			if (playbackSmoothingState.previousMagnitudes.size() == currentMagnitudes.size()) {
-				for (size_t i = 0; i < currentMagnitudes.size(); ++i) {
-					const float diff = currentMagnitudes[i] - playbackSmoothingState.previousMagnitudes[i];
-					playbackFlux += std::max(diff, 0.0f);
-				}
-				playbackFlux /= static_cast<float>(currentMagnitudes.size());
-				fluxComputed = true;
-			}
-			playbackSmoothingState.previousMagnitudes = currentMagnitudes;
-
-			if (fluxComputed) {
-				playbackSmoothingState.fluxHistory[playbackSmoothingState.fluxHistoryIndex] = playbackFlux;
-				playbackSmoothingState.fluxHistoryIndex =
-					(playbackSmoothingState.fluxHistoryIndex + 1) % playbackSmoothingState.fluxHistory.size();
-			}
-
-			float maxFlux = 0.0f;
-			for (float flux : playbackSmoothingState.fluxHistory) {
-				maxFlux = std::max(maxFlux, flux);
-			}
-
-			constexpr float PLAYBACK_ONSET_THRESHOLD_MULTIPLIER = 1.3f;
-			const bool playbackOnset = fluxComputed &&
-				maxFlux > 0.0f &&
-				playbackFlux > maxFlux * PLAYBACK_ONSET_THRESHOLD_MULTIPLIER &&
-				playbackFlux > 0.001f;
-
-			if (playbackSignalFeaturesValid) {
-				playbackSignalFeatures.spectralFlux = fluxComputed ? playbackFlux : 0.0f;
-				playbackSignalFeatures.onsetDetected = playbackOnset;
-			}
-
-			const size_t binCount = currentMagnitudes.size();
-			const size_t channelIndex = 0;  // Processing first channel for playback display
-
-			if (spectrumIsSilent(currentMagnitudes)) {
-				resetAnalyserState(state, binCount, 1);
-			} else {
-				// Ensure we have at least one channel in smoothedMagnitudes
-				if (state.audioSettings.smoothedMagnitudes.empty()) {
-					state.audioSettings.smoothedMagnitudes.resize(1);
-				}
-				if (state.audioSettings.smoothedMagnitudes[channelIndex].size() != binCount) {
-					state.audioSettings.smoothedMagnitudes[channelIndex].assign(binCount, 0.0f);
-				}
-
-				std::vector<float> processedMagnitudes = currentMagnitudes;
-
-				float maxMagnitude = 0.0f;
-				for (float mag : processedMagnitudes) {
-					if (!std::isfinite(mag)) {
-						continue;
-					}
-					maxMagnitude = std::max(maxMagnitude, mag);
-				}
-
-				if (maxMagnitude <= SILENCE_MAGNITUDE_THRESHOLD) {
-					resetAnalyserState(state, binCount, 1);
-				} else {
-					float sampleRate = currentSample.sampleRate;
-					if (sampleRate <= 0.0f) {
-						sampleRate = recorderState.metadata.sampleRate;
-					}
-					if (sampleRate <= 0.0f) {
-						sampleRate = recorderState.fallbackSampleRate;
-					}
-					if (sampleRate <= 0.0f) {
-						sampleRate = UIConstants::DEFAULT_SAMPLE_RATE;
-					}
-
-					FFTProcessor::prepareMagnitudesForDisplay(
-						processedMagnitudes,
-						sampleRate,
-						state.audioSettings.lowGain,
-						state.audioSettings.midGain,
-						state.audioSettings.highGain);
-
-					sanitiseMagnitudes(processedMagnitudes);
-
-					const float smoothing = std::clamp(state.audioSettings.spectrumSmoothingFactor, 0.0f, 1.0f);
-					const float newContribution = 1.0f - smoothing;
-					const float historyContribution = smoothing;
-
-					for (size_t i = 0; i < processedMagnitudes.size(); ++i) {
-						state.audioSettings.smoothedMagnitudes[channelIndex][i] =
-							newContribution * processedMagnitudes[i] +
-							historyContribution * state.audioSettings.smoothedMagnitudes[channelIndex][i];
-					}
-				}
-			}
-		}
-	}
-
-	applyColourSmoothing(playbackColour.x, playbackColour.y, playbackColour.z,
-						 currentDisplayR, currentDisplayG, currentDisplayB, ctx,
-						 playbackSignalFeaturesValid ? &playbackSignalFeatures : nullptr);
-
-	ctx.clearColour[0] = currentDisplayR;
-	ctx.clearColour[1] = currentDisplayG;
-	ctx.clearColour[2] = currentDisplayB;
-
-	state.resyneState.displayColour[0] = currentDisplayR;
-	state.resyneState.displayColour[1] = currentDisplayG;
-	state.resyneState.displayColour[2] = currentDisplayB;
-
-	ReSyne::updateFromFFT(
-		state.resyneState,
-		audioInput.getAudioProcessor(),
-		audioInput.getSampleRate(),
-		currentDisplayR,
-		currentDisplayG,
-		currentDisplayB);
-}
-
-void processLiveAudioState(AudioInput& audioInput, UIState& state, ReSyne::RecorderState& recorderState,
-						   float& currentDisplayR, float& currentDisplayG, float& currentDisplayB,
-						   const ColourUpdateContext& ctx) {
-	constexpr float whiteMix = 0.0f;
-	constexpr float gamma = 0.8f;
-
-	if (recorderState.isRecording || recorderState.samples.empty()) {
-		recorderState.importGamma = gamma;
-		recorderState.importColourSpace = state.visualSettings.colourSpace;
-		recorderState.importGamutMapping = state.visualSettings.gamutMappingEnabled;
-	}
-	recorderState.importLowGain = state.audioSettings.lowGain;
-	recorderState.importMidGain = state.audioSettings.midGain;
-	recorderState.importHighGain = state.audioSettings.highGain;
-	audioInput.setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
-
-	const auto spectralData = audioInput.getSpectralData();
-	const size_t numChannels = spectralData.magnitudes.size();
-	const size_t numBins = numChannels > 0
-		? spectralData.magnitudes[0].size()
-		: static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
-	std::vector<float> magnitudes(numBins, 0.0f);
-	std::vector<float> phases(numBins, 0.0f);
-
-	if (numChannels > 0) {
-		for (size_t ch = 0; ch < numChannels; ++ch) {
-			const auto& chMags = spectralData.magnitudes[ch];
-			const auto& chPhases = spectralData.phases[ch];
-			
-			if (chMags.size() == numBins) {
-				for (size_t i = 0; i < numBins; ++i) {
-					magnitudes[i] += chMags[i] * chMags[i];
-				}
-			}
-			if (chPhases.size() == numBins) {
-				for (size_t i = 0; i < numBins; ++i) {
-					phases[i] += chPhases[i];
-				}
-			}
-		}
-
-		const float invChannels = 1.0f / static_cast<float>(numChannels);
-		for (size_t i = 0; i < numBins; ++i) {
-			magnitudes[i] = std::sqrt(magnitudes[i] * invChannels);
-			phases[i] *= invChannels;
-		}
-	} else {
-		// Fallback for no channels (shouldn't happen if stream is active)
-		magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
-		phases = audioInput.getFFTProcessor().getPhaseBuffer();
-	}
-
-	const float liveLoudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
-
-	const bool silentMagnitudeFrame = spectrumIsSilent(magnitudes);
-	sanitiseMagnitudes(magnitudes);
-
-	auto colourResult = ColourMapper::spectrumToColour(
-		magnitudes,
-		phases,
-		{},
-		audioInput.getSampleRate(),
-		gamma,
-		state.visualSettings.colourSpace,
-		state.visualSettings.gamutMappingEnabled,
-		liveLoudnessDb);
-
-	const float adjustedR = colourResult.r * (1.0f - whiteMix) + whiteMix;
-	const float adjustedG = colourResult.g * (1.0f - whiteMix) + whiteMix;
-	const float adjustedB = colourResult.b * (1.0f - whiteMix) + whiteMix;
-
-	const float displayR = std::clamp(adjustedR, 0.0f, 1.0f);
-	const float displayG = std::clamp(adjustedG, 0.0f, 1.0f);
-	const float displayB = std::clamp(adjustedB, 0.0f, 1.0f);
-
-	bool currentValid = std::isfinite(ctx.clearColour[0]) && std::isfinite(ctx.clearColour[1]) &&
-						std::isfinite(ctx.clearColour[2]);
-
-	bool newValid = std::isfinite(displayR) && std::isfinite(displayG) && std::isfinite(displayB);
-
-	if (!currentValid) {
-		ctx.clearColour[0] = ctx.clearColour[1] = ctx.clearColour[2] = 0.1f;
-	}
-
-	if (newValid) {
-		SmoothingSignalFeatures liveFeatures{};
-		liveFeatures.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
-		liveFeatures.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
-		liveFeatures.spectralFlatness = colourResult.spectralFlatness;
-		liveFeatures.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
-		liveFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
-
-		populateSpectralNorms(colourResult, liveFeatures);
-
-		applyColourSmoothing(displayR, displayG, displayB,
-							currentDisplayR, currentDisplayG, currentDisplayB, ctx, &liveFeatures);
-	}
-
-#ifdef ENABLE_OSC
-	auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-	osc.updateColourData(magnitudes, phases, colourResult.dominantFrequency, audioInput.getSampleRate(),
-                         currentDisplayR, currentDisplayG, currentDisplayB);
-#endif
-
-	ReSyne::updateFromFFT(
-		state.resyneState,
-		audioInput.getAudioProcessor(),
-		audioInput.getSampleRate(),
-		currentDisplayR,
-		currentDisplayG,
-		currentDisplayB);
-
-	const size_t channelIndex = 0;  // Processing first channel for live audio display
-
-	if (silentMagnitudeFrame || magnitudes.empty()) {
-		resetAnalyserState(state, magnitudes.size(), 1);
-	} else {
-		// Ensure we have at least one channel in smoothedMagnitudes
-		if (state.audioSettings.smoothedMagnitudes.empty()) {
-			state.audioSettings.smoothedMagnitudes.resize(1);
-		}
-		if (state.audioSettings.smoothedMagnitudes[channelIndex].size() != magnitudes.size()) {
-			state.audioSettings.smoothedMagnitudes[channelIndex].assign(magnitudes.size(), 0.0f);
-		}
-
-		const float smoothing = std::clamp(state.audioSettings.spectrumSmoothingFactor, 0.0f, 1.0f);
-		const float newContribution = 1.0f - smoothing;
-		const float historyContribution = smoothing;
-
-		for (size_t i = 0; i < magnitudes.size(); ++i) {
-			state.audioSettings.smoothedMagnitudes[channelIndex][i] =
-				newContribution * magnitudes[i] +
-				historyContribution * state.audioSettings.smoothedMagnitudes[channelIndex][i];
-		}
-	}
 }
 
 void processIdleState(float* clearColour, float deltaTime) {
@@ -759,6 +284,8 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	float deltaTime = io.DeltaTime;
 	static SpringSmoother colourSmoother(8.0f, 1.0f, 0.3f);
 	colourSmoother.setSmoothingAmount(state.visualSettings.colourSmoothingSpeed);
+	state.audioSettings.spectrumSmoothingFactor = state.visualSettings.colourSmoothingSpeed;
+	UI::AudioVisualisation::syncRecorderPresentationSettings(state);
 
 	constexpr float SIDEBAR_WIDTH = 280.0f;
 	constexpr float SIDEBAR_PADDING = 12.0f;
@@ -772,29 +299,42 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	static float currentDisplayG = 0.0f;
 	static float currentDisplayB = 0.0f;
 
-	bool hasPlaybackData = !recorderState.samples.empty() &&
-	                       recorderState.audioOutput &&
-	                       recorderState.audioOutput->isPlaying();
+	bool hasPlaybackSession = UI::AudioVisualisation::hasPlaybackSession(recorderState);
 
-	ColourUpdateContext colourCtx{
+	UI::AudioVisualisation::ColourUpdateContext colourCtx{
 		deltaTime,
 		state.visualSettings.smoothingEnabled,
+		state.visualSettings.manualSmoothing,
 		colourSmoother,
 		clear_colour,
 		state.visualSettings.activeView
 	};
 
-	if (hasPlaybackData) {
-		processPlaybackState(audioInput, state, recorderState, currentDisplayR, currentDisplayG, currentDisplayB, colourCtx);
+	if (hasPlaybackSession) {
+		UI::AudioVisualisation::processPlaybackState(
+			audioInput,
+			state,
+			recorderState,
+			currentDisplayR,
+			currentDisplayG,
+			currentDisplayB,
+			colourCtx);
 	}
 
 	bool hasMicInput = state.deviceState.selectedDeviceIndex >= 0;
 
-	if (!hasPlaybackData && hasMicInput) {
-		processLiveAudioState(audioInput, state, recorderState, currentDisplayR, currentDisplayG, currentDisplayB, colourCtx);
+	if (!hasPlaybackSession && hasMicInput) {
+		UI::AudioVisualisation::processLiveAudioState(
+			audioInput,
+			state,
+			recorderState,
+			currentDisplayR,
+			currentDisplayG,
+			currentDisplayB,
+			colourCtx);
 	}
 
-	if (!hasPlaybackData && !hasMicInput) {
+	if (!hasPlaybackSession && !hasMicInput) {
 		processIdleState(clear_colour, deltaTime);
 		currentDisplayR = clear_colour[0];
 		currentDisplayG = clear_colour[1];
@@ -840,7 +380,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			colourSmoother,
 			sidebarLayout,
 			displaySize,
-			hasPlaybackData
+			hasPlaybackSession
 #ifdef ENABLE_MIDI
 			, midiInput
 			, midiDevices
@@ -849,7 +389,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
 		Sidebar::render(sidebarArgs);
 
-		bool showSpectrum = (state.deviceState.selectedDeviceIndex >= 0 && !state.deviceState.streamError) || hasPlaybackData;
+		bool showSpectrum = (state.deviceState.selectedDeviceIndex >= 0 && !state.deviceState.streamError) || hasPlaybackSession;
 
 		bool showSpectrumInCurrentView = state.visualSettings.activeView == UIState::View::Visualisation;
 

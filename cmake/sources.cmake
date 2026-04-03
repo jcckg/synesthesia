@@ -2,6 +2,7 @@ set(SOURCES
     ${SRC_DIR}/main.cpp
     ${SRC_DIR}/audio/analysis/fft/fft_processor.cpp
     ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
+    ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
     ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
     ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp
     ${SRC_DIR}/audio/input/audio_input.cpp
@@ -39,6 +40,7 @@ set(SOURCES
     ${SRC_DIR}/ui/styling/styling.cpp
     ${SRC_DIR}/ui/spectrum_analyser/spectrum_analyser.cpp
     ${SRC_DIR}/ui/sidebar/sidebar.cpp
+    ${SRC_DIR}/ui/audio_visualisation/presentation_state.cpp
     ${SRC_DIR}/ui/dragdrop/file_drop_manager.cpp
     ${SRC_DIR}/ui/input/trackpad_gestures.cpp
     ${SRC_DIR}/utilities/midi/input/midi_input.cpp

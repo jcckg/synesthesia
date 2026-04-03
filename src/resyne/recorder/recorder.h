@@ -93,7 +93,7 @@ struct RecorderState {
     std::string pendingExportPath;
 
     std::unique_ptr<AudioOutput> audioOutput;
-    std::vector<float> reconstructedAudio;
+    std::vector<float> playbackAudio;
     bool isPlaybackInitialised = false;
 
     bool loopEnabled = true;
@@ -115,6 +115,30 @@ struct RecorderState {
     float colourCacheGamma = 0.8f;
     ColourMapper::ColourSpace colourCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool colourCacheGamutMapping = true;
+    float colourCacheLowGain = 1.0f;
+    float colourCacheMidGain = 1.0f;
+    float colourCacheHighGain = 1.0f;
+    bool colourCacheSmoothingEnabled = true;
+    bool colourCacheManualSmoothing = false;
+    float colourCacheSmoothingAmount = 0.6f;
+    bool presentationSmoothingEnabled = true;
+    bool presentationManualSmoothing = false;
+    float presentationSmoothingAmount = 0.6f;
+
+    std::vector<Timeline::TimelineSample> timelinePreviewCache;
+    bool timelinePreviewCacheDirty = true;
+    size_t timelinePreviewCacheMaxSamples = 0;
+    size_t timelinePreviewCacheSourceCount = 0;
+    bool timelinePreviewCacheUsesPreviewSamples = false;
+    float timelinePreviewCacheGamma = 0.8f;
+    ColourMapper::ColourSpace timelinePreviewCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
+    bool timelinePreviewCacheGamutMapping = true;
+    float timelinePreviewCacheLowGain = 1.0f;
+    float timelinePreviewCacheMidGain = 1.0f;
+    float timelinePreviewCacheHighGain = 1.0f;
+    bool timelinePreviewCacheSmoothingEnabled = true;
+    bool timelinePreviewCacheManualSmoothing = false;
+    float timelinePreviewCacheSmoothingAmount = 0.6f;
 };
 
 class Recorder {
@@ -176,6 +200,7 @@ public:
     static void stopPlayback(RecorderState& state);
     static void seekPlayback(RecorderState& state, float normalisedPosition);
     static void reconstructAudio(RecorderState& state);
+    static bool refreshPlaybackOutput(RecorderState& state);
     static void importFromFileThreaded(RecorderState& state,
                                        std::string filepath,
                                        float gamma,

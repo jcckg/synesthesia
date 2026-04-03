@@ -20,6 +20,8 @@ namespace Controls {
     
     void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother, 
                                      float& smoothingAmount,
+                                     bool& manualSmoothing,
+                                     bool& showSpectrumAnalyser,
                                      float sidebarWidth,
                                      float sidebarPadding,
                                      float labelWidth,
@@ -29,8 +31,6 @@ namespace Controls {
     void renderEQControlsPanel(float& lowGain,
                               float& midGain,
                               float& highGain,
-                              bool& showSpectrumAnalyser,
-                              float& spectrumSmoothingFactor,
                               float sidebarWidth,
                               float sidebarPadding,
                               float labelWidth,

@@ -32,7 +32,8 @@ bool importAudioFile(
     const ProgressCallback& onProgress = nullptr,
     const PreviewCallback& onPreview = nullptr,
     bool enableSmoothing = true,
-    bool enableMelWeighting = true
+    bool enableMelWeighting = true,
+    std::vector<float>* playbackAudio = nullptr
 );
 
 bool importResyneFile(

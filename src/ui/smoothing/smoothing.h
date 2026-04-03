@@ -16,11 +16,14 @@ public:
     explicit SpringSmoother(float stiffness = 8.0f, float damping = 1.0f, float mass = 0.3f);
 
     void reset(float r, float g, float b);
+    void resetOklab(float L, float a, float b);
     void setTargetColour(float r, float g, float b);
+    void setTargetOklab(float L, float a, float b);
     bool update(float deltaTime);
     bool update(float deltaTime, const SmoothingSignalFeatures& features);
     bool update(float deltaTime, bool onsetDetected, float spectralFlux, float spectralFlatness);
     void getCurrentColour(float& r, float& g, float& b) const;
+    void getCurrentOklab(float& L, float& a, float& b) const;
     void setSmoothingAmount(float smoothingAmount);
     [[nodiscard]] float getSmoothingAmount() const;
 

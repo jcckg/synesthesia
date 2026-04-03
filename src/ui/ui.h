@@ -21,6 +21,7 @@
 namespace UIConstants {
     static constexpr float DEFAULT_SAMPLE_RATE = 44100.0f;
     static constexpr float DEFAULT_SMOOTHING_SPEED = 0.6f;
+    static constexpr float DEFAULT_SPECTRUM_SMOOTHING = 0.2f;
     static constexpr float DEFAULT_GAMMA = 0.8f;
     static constexpr float COLOUR_SMOOTH_UPDATE_FACTOR = 1.2f;
     static constexpr float COLOUR_DECAY_RATE = 0.5f;
@@ -31,12 +32,13 @@ struct AudioSettings {
     float midGain = 1.0f;
     float highGain = 1.0f;
     std::vector<std::vector<float>> smoothedMagnitudes;
-    float spectrumSmoothingFactor = 0.2f;
+    float spectrumSmoothingFactor = UIConstants::DEFAULT_SPECTRUM_SMOOTHING;
 };
 
 struct VisualSettings {
     float colourSmoothingSpeed = UIConstants::DEFAULT_SMOOTHING_SPEED;
     bool smoothingEnabled = true;
+    bool manualSmoothing = false;
     ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
     bool gamutMappingEnabled = true;
 

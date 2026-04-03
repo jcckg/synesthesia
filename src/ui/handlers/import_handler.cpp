@@ -62,8 +62,10 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 					recorderState.isPlaybackInitialised = false;
 					recorderState.sampleColourCache.clear();
 					recorderState.colourCacheDirty = true;
+					recorderState.timelinePreviewCache.clear();
+					recorderState.timelinePreviewCacheDirty = true;
 
-					hasReconstructedAudio = !recorderState.reconstructedAudio.empty();
+					hasReconstructedAudio = !recorderState.playbackAudio.empty();
 
 					if (recorderState.audioOutput) {
 						recorderState.audioOutput->stop();
@@ -99,15 +101,7 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 
 			if (success) {
 				if (hasReconstructedAudio) {
-					if (!recorderState.audioOutput) {
-						recorderState.audioOutput = std::make_unique<AudioOutput>();
-					}
-
-					const int deviceIndex = recorderState.outputDeviceIndex;
-					const int channelCount = recorderState.metadata.channels > 0 ? static_cast<int>(recorderState.metadata.channels) : 1;
-					recorderState.audioOutput->initOutputStream(recorderState.metadata.sampleRate, channelCount, deviceIndex);
-					recorderState.audioOutput->setAudioData(recorderState.reconstructedAudio, static_cast<size_t>(channelCount));
-					recorderState.isPlaybackInitialised = true;
+					ReSyne::Recorder::refreshPlaybackOutput(recorderState);
 				}
 
 				recorderState.statusMessage.clear();

@@ -4,15 +4,25 @@
 
 namespace ReSyne::RecorderColourCache {
 
+struct CacheSettings {
+    float gamma = 0.8f;
+    ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    bool gamutMapping = true;
+    float lowGain = 1.0f;
+    float midGain = 1.0f;
+    float highGain = 1.0f;
+    bool smoothingEnabled = true;
+    bool manualSmoothing = false;
+    float smoothingAmount = 0.6f;
+};
+
+CacheSettings currentSettings(const RecorderState& state);
+
 SampleColourEntry computeSampleColour(const AudioColourSample& sample,
-	float gamma,
-	ColourMapper::ColourSpace colourSpace,
-	bool gamutMapping);
+    const CacheSettings& settings);
 
 void markSettingsIfChanged(RecorderState& state,
-	float gamma,
-	ColourMapper::ColourSpace colourSpace,
-	bool gamutMapping);
+    const CacheSettings& settings);
 
 void ensureCacheLocked(RecorderState& state);
 

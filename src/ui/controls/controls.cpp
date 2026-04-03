@@ -8,6 +8,7 @@
 #include <mutex>
 #include <vector>
 
+#include "audio/analysis/presentation/spectral_presentation.h"
 #include "colour_mapper.h"
 #include "ui.h"
 #include "resyne/recorder/recorder.h"
@@ -19,14 +20,6 @@
 #endif
 
 namespace {
-
-void sanitiseMagnitudes(std::vector<float>& magnitudes) {
-	for (float& value : magnitudes) {
-		if (!std::isfinite(value) || value < 0.0f) {
-			value = 0.0f;
-		}
-	}
-}
 
 void renderWrappedStatusText(const char* text, const ImVec4* colour = nullptr) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
@@ -48,13 +41,22 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
     if (ImGui::CollapsingHeader("Output Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(10);
 
-        bool isPlaybackActive = recorderState.audioOutput && recorderState.audioOutput->isPlaying();
-        std::vector<float> magnitudes;
-        std::vector<float> phases;
-        float sampleRate;
+        const auto settings = SpectralPresentation::Settings{
+            state.audioSettings.lowGain,
+            state.audioSettings.midGain,
+            state.audioSettings.highGain,
+            UIConstants::DEFAULT_GAMMA,
+            state.visualSettings.colourSpace,
+            state.visualSettings.gamutMappingEnabled
+        };
+        const bool hasPlaybackSession =
+            recorderState.audioOutput != nullptr &&
+            recorderState.audioOutput->getTotalFrames() > 0 &&
+            !recorderState.samples.empty();
 
-		float storedLoudness = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-	        if (isPlaybackActive && !recorderState.samples.empty()) {
+        SpectralPresentation::Frame frame{};
+		float loudnessOverride = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+        if (hasPlaybackSession) {
             std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
             const float position = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f) *
                                    (static_cast<float>(recorderState.samples.size()) - 1.0f);
@@ -62,34 +64,30 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
             const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
 
             const auto& currentSample = recorderState.samples[clampedIndex];
-            magnitudes = !currentSample.magnitudes.empty() ? currentSample.magnitudes[0] : std::vector<float>();
-            phases = !currentSample.phases.empty() ? currentSample.phases[0] : std::vector<float>();
-            sampleRate = currentSample.sampleRate;
+            frame = SpectralPresentation::mixChannels(
+                currentSample.magnitudes,
+                currentSample.phases,
+                currentSample.frequencies,
+                currentSample.channels,
+                currentSample.sampleRate);
 			if (std::isfinite(currentSample.loudnessLUFS)) {
-				storedLoudness = currentSample.loudnessLUFS;
+				loudnessOverride = currentSample.loudnessLUFS;
 			}
         } else {
-            magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
-            phases = audioInput.getFFTProcessor().getPhaseBuffer();
-            sampleRate = audioInput.getSampleRate();
+            const auto spectralData = audioInput.getSpectralData();
+            frame = SpectralPresentation::mixChannels(
+                spectralData.magnitudes,
+                spectralData.phases,
+                {},
+                static_cast<std::uint32_t>(spectralData.magnitudes.size()),
+                spectralData.sampleRate > 0.0f ? spectralData.sampleRate : audioInput.getSampleRate());
+			loudnessOverride = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
         }
 
-		sanitiseMagnitudes(magnitudes);
-
-		float loudnessOverride = storedLoudness;
-		if (!isPlaybackActive) {
-			loudnessOverride = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
-		}
-
-		auto currentColourResult = ColourMapper::spectrumToColour(
-			magnitudes,
-			phases,
-			{},
-			sampleRate,
-			UIConstants::DEFAULT_GAMMA,
-			state.visualSettings.colourSpace,
-			state.visualSettings.gamutMappingEnabled,
-			loudnessOverride);
+		auto currentColourResult = SpectralPresentation::buildColourResult(
+            frame,
+            settings,
+            loudnessOverride);
 
 		const bool hasFiniteLoudness = std::isfinite(currentColourResult.loudnessDb);
 		if (currentColourResult.dominantFrequency > 0.0f) {
@@ -112,27 +110,58 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
 
 void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother, 
                                  float& smoothingAmount,
+                                 bool& manualSmoothing,
+                                 bool& showSpectrumAnalyser,
                                  float sidebarWidth,
                                  float sidebarPadding,
                                  float labelWidth,
                                  float controlWidth,
                                  float buttonHeight) {
-    if (ImGui::CollapsingHeader("Visualiser Settings")) {
+    if (ImGui::CollapsingHeader("Smoothing")) {
         ImGui::Indent(10);
+        const float contentWidth = sidebarWidth - sidebarPadding * 2.0f;
+        const float buttonWidth = (contentWidth - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
 
         ImGui::AlignTextToFramePadding();
-        ImGui::Text("Smoothing");
-        ImGui::SameLine(sidebarPadding + labelWidth);
-        ImGui::SetCursorPosX(sidebarWidth - sidebarPadding - controlWidth);
-        ImGui::SetNextItemWidth(controlWidth);
-        if (ImGui::SliderFloat("##Smoothing", &smoothingAmount, 0.0f, 1.0f, "%.2f")) {
-            colourSmoother.setSmoothingAmount(smoothingAmount);
+        ImGui::Text("Manual Smoothing");
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(sidebarPadding + contentWidth - ImGui::GetFrameHeight());
+        const bool previousManualSmoothing = manualSmoothing;
+        ImGui::Checkbox("##ManualSmoothing", &manualSmoothing);
+        if (manualSmoothing != previousManualSmoothing) {
+            if (!manualSmoothing) {
+                smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
+                colourSmoother.setSmoothingAmount(smoothingAmount);
+            }
+            float r, g, b;
+            colourSmoother.getCurrentColour(r, g, b);
+            colourSmoother.reset(r, g, b);
         }
 
-        ImGui::SetCursorPosX(sidebarPadding);
-        if (ImGui::Button("Reset Smoothing", ImVec2(130, buttonHeight))) {
-            smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
-            colourSmoother.setSmoothingAmount(smoothingAmount);
+        if (manualSmoothing) {
+            ImGui::AlignTextToFramePadding();
+            ImGui::Text("Smoothing");
+            ImGui::SameLine(sidebarPadding + labelWidth);
+            ImGui::SetCursorPosX(sidebarWidth - sidebarPadding - controlWidth);
+            ImGui::SetNextItemWidth(controlWidth);
+            if (ImGui::SliderFloat("##Smoothing", &smoothingAmount, 0.0f, 1.0f, "%.2f")) {
+                colourSmoother.setSmoothingAmount(smoothingAmount);
+            }
+
+            ImGui::SetCursorPosX(sidebarPadding);
+            if (ImGui::Button("Reset Smoothing", ImVec2(buttonWidth, buttonHeight))) {
+                smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
+                colourSmoother.setSmoothingAmount(smoothingAmount);
+            }
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(sidebarPadding + buttonWidth + ImGui::GetStyle().ItemSpacing.x);
+        } else {
+            ImGui::SetCursorPosX(sidebarPadding);
+        }
+
+        if (ImGui::Button(showSpectrumAnalyser ? "Hide Spectrum" : "Show Spectrum",
+                          ImVec2(manualSmoothing ? buttonWidth : contentWidth, buttonHeight))) {
+            showSpectrumAnalyser = !showSpectrumAnalyser;
         }
 
         ImGui::Unindent(10);
@@ -143,15 +172,13 @@ void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother,
 void renderEQControlsPanel(float& lowGain,
                           float& midGain,
                           float& highGain,
-                          bool& showSpectrumAnalyser,
-                          float& spectrumSmoothingFactor,
                           float sidebarWidth,
                           float sidebarPadding,
                           float labelWidth,
                           float controlWidth,
                           float buttonHeight,
                           float contentWidth) {
-    if (ImGui::CollapsingHeader("Gain Adjustment")) {
+    if (ImGui::CollapsingHeader("EQ/Gain")) {
         ImGui::Indent(10);
 
         ImGui::AlignTextToFramePadding();
@@ -175,27 +202,9 @@ void renderEQControlsPanel(float& lowGain,
         ImGui::SetNextItemWidth(controlWidth);
         ImGui::SliderFloat("##HighGain", &highGain, 0.0f, 2.0f);
 
-        float buttonWidth = (contentWidth - ImGui::GetStyle().ItemSpacing.x) / 2;
         ImGui::SetCursorPosX(sidebarPadding);
-        if (ImGui::Button("Reset EQ", ImVec2(buttonWidth, buttonHeight))) {
+        if (ImGui::Button("Reset EQ", ImVec2(contentWidth, buttonHeight))) {
             lowGain = midGain = highGain = 1.0f;
-        }
-
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(sidebarPadding + buttonWidth + ImGui::GetStyle().ItemSpacing.x);
-        if (ImGui::Button(showSpectrumAnalyser ? "Hide Spectrum" : "Show Spectrum",
-                          ImVec2(buttonWidth, buttonHeight))) {
-            showSpectrumAnalyser = !showSpectrumAnalyser;
-        }
-
-        if (showSpectrumAnalyser) {
-            ImGui::Spacing();
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("Spectrum Smoothing");
-            ImGui::SameLine(sidebarPadding + labelWidth);
-            ImGui::SetCursorPosX(sidebarWidth - sidebarPadding - controlWidth);
-            ImGui::SetNextItemWidth(controlWidth);
-            ImGui::SliderFloat("##SpectrumSmoothing", &spectrumSmoothingFactor, 0.0f, 1.0f, "%.2f");
         }
 
         ImGui::Unindent(10);

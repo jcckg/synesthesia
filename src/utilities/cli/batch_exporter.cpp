@@ -263,13 +263,17 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
 
     std::vector<FrameLab> frameColours;
     frameColours.reserve(samples.size());
+    ReSyne::RecorderColourCache::CacheSettings settings{};
+    settings.gamma = kDefaultGamma;
+    settings.colourSpace = ColourMapper::ColourSpace::Rec2020;
+    settings.gamutMapping = true;
+    settings.smoothingEnabled = false;
+    settings.smoothingAmount = 0.0f;
 
     for (const auto& sample : samples) {
         const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
             sample,
-            kDefaultGamma,
-            ColourMapper::ColourSpace::Rec2020,
-            true);
+            settings);
         frameColours.push_back({entry.labL, entry.labA, entry.labB});
     }
 

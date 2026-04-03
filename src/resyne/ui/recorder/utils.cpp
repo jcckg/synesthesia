@@ -5,8 +5,7 @@
 namespace ReSyne::RecorderUI {
 
 std::optional<float> computePlaybackNormalisedPosition(const RecorderState& state) {
-    if (state.audioOutput && !state.reconstructedAudio.empty()) {
-        // Use getTotalFrames() to match getPlaybackPosition() which returns frames
+    if (state.audioOutput && !state.playbackAudio.empty()) {
         size_t total = state.audioOutput->getTotalFrames();
         if (total > 0) {
             size_t position = state.audioOutput->getPlaybackPosition();
