@@ -108,6 +108,7 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 		} else {
 			playbackStep_.store(1.0f);
 		}
+		playbackEqualiser_.configure(actualRate, static_cast<size_t>(clampedChannels));
 	}
 	return true;
 }
@@ -126,8 +127,17 @@ void AudioOutput::setAudioData(const std::vector<float>& audioSamples, size_t ch
 		audioBuffer_ = std::move(newBuffer);
 		playbackCursor_ = 0.0;
 	}
+	playbackEqualiser_.requestReset();
 	totalSamples_.store(audioSamples.size());
 	playbackPosition_.store(0);
+}
+
+void AudioOutput::setPlaybackEQEnabled(const bool enabled) {
+	playbackEqualiser_.setEnabled(enabled);
+}
+
+void AudioOutput::setPlaybackEQGains(const float low, const float mid, const float high) {
+	playbackEqualiser_.setGains(low, mid, high);
 }
 
 void AudioOutput::play() {
@@ -167,6 +177,7 @@ void AudioOutput::stop() {
 		std::lock_guard<std::mutex> lock(bufferMutex_);
 		playbackCursor_ = 0.0;
 	}
+	playbackEqualiser_.requestReset();
 }
 
 void AudioOutput::seek(size_t framePosition) {
@@ -189,6 +200,7 @@ void AudioOutput::seek(size_t framePosition) {
 		std::lock_guard<std::mutex> lock(bufferMutex_);
 		playbackCursor_ = static_cast<double>(clamped);
 	}
+	playbackEqualiser_.requestReset();
 	playbackPosition_.store(clamped);
 }
 
@@ -199,6 +211,7 @@ void AudioOutput::clearAudioData() {
 	totalSamples_.store(0);
 	playbackPosition_.store(0);
 	playbackCursor_ = 0.0;
+	playbackEqualiser_.requestReset();
 }
 
 float AudioOutput::getPlaybackRateRatio() const {
@@ -405,6 +418,8 @@ int AudioOutput::audioCallback(const void* input, void* output,
 			audioOutput->playbackPosition_.store(stored);
 		}
 	}
+
+	audioOutput->playbackEqualiser_.processInterleaved(out, frameCount, outputChannels);
 
 
 	constexpr float THRESHOLD = 0.85f;

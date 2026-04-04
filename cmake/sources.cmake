@@ -4,9 +4,11 @@ set(SOURCES
     ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
     ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
     ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
+    ${SRC_DIR}/audio/analysis/eq/shared_eq_model.cpp
     ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp
     ${SRC_DIR}/audio/input/audio_input.cpp
     ${SRC_DIR}/audio/output/audio_output.cpp
+    ${SRC_DIR}/audio/output/playback_equaliser.cpp
     ${SRC_DIR}/audio/processing/audio_processor.cpp
     ${SRC_DIR}/audio/processing/dc_filter/dc_filter.cpp
     ${SRC_DIR}/audio/processing/noise_gate/noise_gate.cpp

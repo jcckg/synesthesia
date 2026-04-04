@@ -3,63 +3,18 @@
 #include <algorithm>
 #include <cmath>
 
+#include "audio/analysis/eq/shared_eq_model.h"
 #include "audio/analysis/fft/fft_processor.h"
 
 namespace SpectralPresentation {
 
 namespace {
 
-constexpr float kLowCrossover = 200.0f;
-constexpr float kHighCrossover = 1900.0f;
-constexpr float kLowTransition = 50.0f;
-constexpr float kHighTransition = 100.0f;
-
 void sanitiseMagnitudes(std::vector<float>& magnitudes) {
     for (float& magnitude : magnitudes) {
         if (!std::isfinite(magnitude) || magnitude < 0.0f) {
             magnitude = 0.0f;
         }
-    }
-}
-
-void calculateBandResponses(const float frequency,
-                            float& lowResponse,
-                            float& midResponse,
-                            float& highResponse) {
-    lowResponse = std::clamp(
-        1.0f - std::max(0.0f, (frequency - kLowCrossover) / kLowTransition),
-        0.0f,
-        1.0f);
-    highResponse = std::clamp((frequency - kHighCrossover) / kHighTransition, 0.0f, 1.0f);
-    midResponse = std::clamp(1.0f - lowResponse - highResponse, 0.0f, 1.0f);
-}
-
-void applyColourBandGains(std::vector<float>& magnitudes,
-                          const float sampleRate,
-                          const Settings& settings) {
-    if (magnitudes.empty() || sampleRate <= 0.0f) {
-        return;
-    }
-
-    const bool gainsAreNeutral =
-        std::abs(settings.lowGain - 1.0f) < 1e-6f &&
-        std::abs(settings.midGain - 1.0f) < 1e-6f &&
-        std::abs(settings.highGain - 1.0f) < 1e-6f;
-    if (gainsAreNeutral) {
-        return;
-    }
-
-    for (size_t index = 0; index < magnitudes.size(); ++index) {
-        const float frequency = static_cast<float>(index) * sampleRate / static_cast<float>(FFTProcessor::FFT_SIZE);
-        float lowResponse = 0.0f;
-        float midResponse = 0.0f;
-        float highResponse = 0.0f;
-        calculateBandResponses(frequency, lowResponse, midResponse, highResponse);
-        const float gain =
-            lowResponse * settings.lowGain +
-            midResponse * settings.midGain +
-            highResponse * settings.highGain;
-        magnitudes[index] *= std::clamp(gain, 0.0f, 4.0f);
     }
 }
 
@@ -146,16 +101,28 @@ std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
     return magnitudes;
 }
 
+std::vector<float> buildColourMagnitudes(const Frame& frame,
+                                         const Settings& settings) {
+    std::vector<float> magnitudes = frame.magnitudes;
+    sanitiseMagnitudes(magnitudes);
+    AudioEQ::applyMagnitudeResponse(
+        magnitudes,
+        frame.sampleRate,
+        FFTProcessor::FFT_SIZE,
+        settings.lowGain,
+        settings.midGain,
+        settings.highGain);
+    return magnitudes;
+}
+
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,
                            const float loudnessDb) {
     PreparedFrame prepared{};
     prepared.visualiserMagnitudes = buildVisualiserMagnitudes(frame, settings);
-    std::vector<float> rawMagnitudes = frame.magnitudes;
-    sanitiseMagnitudes(rawMagnitudes);
-    applyColourBandGains(rawMagnitudes, frame.sampleRate, settings);
+    const std::vector<float> colourMagnitudes = buildColourMagnitudes(frame, settings);
     prepared.colourResult = ColourMapper::spectrumToColour(
-        rawMagnitudes,
+        colourMagnitudes,
         frame.phases,
         frame.frequencies,
         frame.sampleRate,

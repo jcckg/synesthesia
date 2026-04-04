@@ -136,6 +136,7 @@ void renderVisualisationSections(const RenderArgs& args) {
         args.uiState.audioSettings.lowGain,
         args.uiState.audioSettings.midGain,
         args.uiState.audioSettings.highGain,
+        args.uiState.audioSettings.audibleEQEnabled,
         args.layout.width,
         args.layout.padding,
         args.layout.labelWidth,

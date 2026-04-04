@@ -13,6 +13,7 @@ namespace {
 
 constexpr float kSmoothingUpdateFactor = 1.2f;
 constexpr float kFallbackDeltaTime = 1.0f / 60.0f;
+constexpr auto kInteractiveRebuildDebounce = std::chrono::milliseconds(120);
 
 SpectralPresentation::Settings buildPresentationSettings(const CacheSettings& settings) {
     SpectralPresentation::Settings presentation{};
@@ -132,7 +133,24 @@ bool settingsMatch(const RecorderState& state,
     return state.colourCacheGamma == settings.gamma &&
         state.colourCacheColourSpace == settings.colourSpace &&
         state.colourCacheGamutMapping == settings.gamutMapping &&
+        state.colourCacheLowGain == settings.lowGain &&
+        state.colourCacheMidGain == settings.midGain &&
+        state.colourCacheHighGain == settings.highGain &&
+        state.colourCacheSmoothingEnabled == settings.smoothingEnabled &&
+        state.colourCacheManualSmoothing == settings.manualSmoothing &&
+        state.colourCacheSmoothingAmount == settings.smoothingAmount &&
         !state.colourCacheDirty;
+}
+
+bool shouldDeferInteractiveRebuild(const RecorderState& state) {
+    if (!state.presentationSettingsSettling) {
+        return false;
+    }
+
+    using namespace std::chrono;
+    const auto elapsed = duration_cast<milliseconds>(
+        steady_clock::now() - state.presentationSettingsLastChangedTime);
+    return elapsed < kInteractiveRebuildDebounce;
 }
 
 void assignEntry(RecorderState& state,
@@ -187,11 +205,23 @@ void markSettingsIfChanged(RecorderState& state,
                            const CacheSettings& settings) {
     if (state.colourCacheGamma != settings.gamma ||
         state.colourCacheColourSpace != settings.colourSpace ||
-        state.colourCacheGamutMapping != settings.gamutMapping) {
+        state.colourCacheGamutMapping != settings.gamutMapping ||
+        state.colourCacheLowGain != settings.lowGain ||
+        state.colourCacheMidGain != settings.midGain ||
+        state.colourCacheHighGain != settings.highGain ||
+        state.colourCacheSmoothingEnabled != settings.smoothingEnabled ||
+        state.colourCacheManualSmoothing != settings.manualSmoothing ||
+        state.colourCacheSmoothingAmount != settings.smoothingAmount) {
         state.colourCacheDirty = true;
         state.colourCacheGamma = settings.gamma;
         state.colourCacheColourSpace = settings.colourSpace;
         state.colourCacheGamutMapping = settings.gamutMapping;
+        state.colourCacheLowGain = settings.lowGain;
+        state.colourCacheMidGain = settings.midGain;
+        state.colourCacheHighGain = settings.highGain;
+        state.colourCacheSmoothingEnabled = settings.smoothingEnabled;
+        state.colourCacheManualSmoothing = settings.manualSmoothing;
+        state.colourCacheSmoothingAmount = settings.smoothingAmount;
     }
 }
 
@@ -199,6 +229,9 @@ void ensureCacheLocked(RecorderState& state) {
     const CacheSettings settings = currentSettings(state);
     markSettingsIfChanged(state, settings);
     if (!state.colourCacheDirty && state.sampleColourCache.size() == state.samples.size()) {
+        return;
+    }
+    if (shouldDeferInteractiveRebuild(state)) {
         return;
     }
 
@@ -211,6 +244,7 @@ void ensureCacheLocked(RecorderState& state) {
     smoothEntriesInPlace(entries, state.samples, settings);
     state.sampleColourCache = std::move(entries);
     state.colourCacheDirty = false;
+    state.presentationSettingsSettling = false;
 }
 
 void appendSampleLocked(RecorderState& state,

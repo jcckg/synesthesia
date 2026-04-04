@@ -157,6 +157,7 @@ bool Recorder::importFromFile(RecorderState& state,
 
     state.loadingProgress = 0.95f;
     if (!playbackAudio.empty()) {
+        state.sourcePlaybackAudio = playbackAudio;
         state.playbackAudio = std::move(playbackAudio);
         refreshPlaybackOutput(state);
     } else {
@@ -347,8 +348,10 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             state.importErrorMessage.clear();
 
             if (reconstructionSuccess) {
+                state.sourcePlaybackAudio = resolvedPlaybackAudio;
                 state.playbackAudio = std::move(resolvedPlaybackAudio);
             } else {
+                state.sourcePlaybackAudio.clear();
                 state.playbackAudio.clear();
             }
 

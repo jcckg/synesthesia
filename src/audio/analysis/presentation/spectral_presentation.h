@@ -38,6 +38,9 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
 std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
                                              const Settings& settings);
 
+std::vector<float> buildColourMagnitudes(const Frame& frame,
+                                         const Settings& settings);
+
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,
                            float loudnessDb);

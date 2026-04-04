@@ -581,6 +581,19 @@ void FFTProcessor::prepareMagnitudesForDisplay(std::vector<float>& magnitudes,
 	equaliser.setGains(lowGain, midGain, highGain);
 	equaliser.applyEQ(magnitudes, sampleRate, FFT_SIZE);
 
+	float postEqMax = 0.0f;
+	for (const float magnitude : magnitudes) {
+		if (std::isfinite(magnitude)) {
+			postEqMax = std::max(postEqMax, magnitude);
+		}
+	}
+	if (postEqMax > MAGNITUDE_EPSILON) {
+		const float postEqNormalisation = 1.0f / postEqMax;
+		for (float& magnitude : magnitudes) {
+			magnitude *= postEqNormalisation;
+		}
+	}
+
 	for (float& magnitude : magnitudes) {
 		if (!std::isfinite(magnitude) || magnitude < 0.0f) {
 			magnitude = 0.0f;

@@ -7,6 +7,8 @@
 #include <string>
 #include <memory>
 
+#include "playback_equaliser.h"
+
 class AudioOutput {
 public:
 	struct DeviceInfo {
@@ -42,6 +44,8 @@ public:
 	float getActualSampleRate() const { return actualSampleRate_.load(); }
 	float getPlaybackRateRatio() const;
 	float getPlaybackStep() const { return playbackStep_.load(); }
+	void setPlaybackEQEnabled(bool enabled);
+	void setPlaybackEQGains(float low, float mid, float high);
 
 	void clearAudioData();
 
@@ -64,6 +68,7 @@ private:
 	std::atomic<size_t> pendingSeekPosition_;
 	std::atomic<size_t> seekFadeRemaining_;
 	double oldSeekCursor_;
+	PlaybackEqualiser playbackEqualiser_;
 
 	static int audioCallback(const void* input, void* output,
 						 unsigned long frameCount,

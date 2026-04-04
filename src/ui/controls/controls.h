@@ -31,6 +31,7 @@ namespace Controls {
     void renderEQControlsPanel(float& lowGain,
                               float& midGain,
                               float& highGain,
+                              bool& audibleEQEnabled,
                               float sidebarWidth,
                               float sidebarPadding,
                               float labelWidth,

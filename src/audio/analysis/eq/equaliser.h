@@ -17,13 +17,4 @@ private:
 	float midGain;
 	float highGain;
 	mutable std::mutex gainsMutex;
-
-	static constexpr float LOW_CROSSOVER = 200.0f;
-	static constexpr float HIGH_CROSSOVER = 1900.0f;
-	static constexpr float LOW_TRANSITION = 50.0f;
-	static constexpr float HIGH_TRANSITION = 100.0f;
-
-	static float calculateAWeighting(float frequency);
-	static void calculateBandResponses(float frequency, float& lowResponse, float& midResponse,
-									   float& highResponse);
 };

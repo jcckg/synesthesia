@@ -1,6 +1,7 @@
 #include "resyne/ui/recorder/shared_components.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 
 #include "imgui.h"
@@ -12,6 +13,8 @@
 namespace ReSyne::UI {
 
 namespace {
+
+constexpr auto kInteractivePreviewRebuildDebounce = std::chrono::milliseconds(120);
 
 bool previewSettingsMatch(const RecorderState& state,
                           const RecorderColourCache::CacheSettings& settings,
@@ -33,6 +36,28 @@ bool previewSettingsMatch(const RecorderState& state,
         state.timelinePreviewCacheSmoothingAmount == settings.smoothingAmount;
 }
 
+bool shouldThrottlePreviewRebuild(const RecorderState& state) {
+    if (state.timelinePreviewCache.empty()) {
+        return false;
+    }
+
+    using namespace std::chrono;
+    const auto now = steady_clock::now();
+    const auto elapsed = duration_cast<milliseconds>(now - state.timelinePreviewCacheLastBuildTime);
+    return elapsed.count() < 50;
+}
+
+bool shouldDeferInteractivePreviewRebuild(const RecorderState& state) {
+    if (!state.presentationSettingsSettling || state.timelinePreviewCache.empty()) {
+        return false;
+    }
+
+    using namespace std::chrono;
+    const auto elapsed = duration_cast<milliseconds>(
+        steady_clock::now() - state.presentationSettingsLastChangedTime);
+    return elapsed < kInteractivePreviewRebuildDebounce;
+}
+
 void storePreviewSettings(RecorderState& state,
                           const RecorderColourCache::CacheSettings& settings,
                           const size_t maxSamples,
@@ -51,6 +76,7 @@ void storePreviewSettings(RecorderState& state,
     state.timelinePreviewCacheManualSmoothing = settings.manualSmoothing;
     state.timelinePreviewCacheSmoothingAmount = settings.smoothingAmount;
     state.timelinePreviewCacheDirty = false;
+    state.timelinePreviewCacheLastBuildTime = std::chrono::steady_clock::now();
 }
 
 SpectralPresentation::Settings buildPresentationSettings(const RecorderColourCache::CacheSettings& settings) {
@@ -338,6 +364,12 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
     if (previewSettingsMatch(state, settings, maxSamples, samplesSize, usePreview)) {
         return state.timelinePreviewCache;
     }
+    if (shouldDeferInteractivePreviewRebuild(state)) {
+        return state.timelinePreviewCache;
+    }
+    if (shouldThrottlePreviewRebuild(state)) {
+        return state.timelinePreviewCache;
+    }
 
     auto unsmoothedSettings = settings;
     unsmoothedSettings.smoothingEnabled = false;
@@ -369,6 +401,7 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
     applyPreviewSmoothing(previewData, sourceSamples, sampledIndices, settings);
     state.timelinePreviewCache = previewData;
     storePreviewSettings(state, settings, maxSamples, samplesSize, usePreview);
+    state.presentationSettingsSettling = false;
     return state.timelinePreviewCache;
 }
 

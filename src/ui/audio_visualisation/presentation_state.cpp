@@ -153,6 +153,17 @@ float resolveSpectrumHistoryFactor(const UIState& state,
 
 void syncRecorderPresentationSettings(UIState& state) {
     auto& recorderState = state.resyneState.recorderState;
+    const bool changed =
+        recorderState.importGamma != UIConstants::DEFAULT_GAMMA ||
+        recorderState.importColourSpace != state.visualSettings.colourSpace ||
+        recorderState.importGamutMapping != state.visualSettings.gamutMappingEnabled ||
+        recorderState.importLowGain != state.audioSettings.lowGain ||
+        recorderState.importMidGain != state.audioSettings.midGain ||
+        recorderState.importHighGain != state.audioSettings.highGain ||
+        recorderState.presentationSmoothingEnabled != state.visualSettings.smoothingEnabled ||
+        recorderState.presentationManualSmoothing != state.visualSettings.manualSmoothing ||
+        recorderState.presentationSmoothingAmount != state.visualSettings.colourSmoothingSpeed;
+
     recorderState.importGamma = UIConstants::DEFAULT_GAMMA;
     recorderState.importColourSpace = state.visualSettings.colourSpace;
     recorderState.importGamutMapping = state.visualSettings.gamutMappingEnabled;
@@ -162,6 +173,13 @@ void syncRecorderPresentationSettings(UIState& state) {
     recorderState.presentationSmoothingEnabled = state.visualSettings.smoothingEnabled;
     recorderState.presentationManualSmoothing = state.visualSettings.manualSmoothing;
     recorderState.presentationSmoothingAmount = state.visualSettings.colourSmoothingSpeed;
+
+    if (changed) {
+        recorderState.colourCacheDirty = true;
+        recorderState.timelinePreviewCacheDirty = true;
+        recorderState.presentationSettingsLastChangedTime = std::chrono::steady_clock::now();
+        recorderState.presentationSettingsSettling = true;
+    }
 }
 
 bool hasPlaybackSession(const ReSyne::RecorderState& recorderState) {

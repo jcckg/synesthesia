@@ -172,6 +172,7 @@ void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother,
 void renderEQControlsPanel(float& lowGain,
                           float& midGain,
                           float& highGain,
+                          bool& audibleEQEnabled,
                           float sidebarWidth,
                           float sidebarPadding,
                           float labelWidth,
@@ -201,6 +202,12 @@ void renderEQControlsPanel(float& lowGain,
         ImGui::SetCursorPosX(sidebarWidth - sidebarPadding - controlWidth);
         ImGui::SetNextItemWidth(controlWidth);
         ImGui::SliderFloat("##HighGain", &highGain, 0.0f, 2.0f);
+
+        ImGui::AlignTextToFramePadding();
+        ImGui::Text("Audible");
+        ImGui::SameLine();
+        ImGui::SetCursorPosX(sidebarPadding + contentWidth - ImGui::GetFrameHeight());
+        ImGui::Checkbox("##AudibleEQ", &audibleEQEnabled);
 
         ImGui::SetCursorPosX(sidebarPadding);
         if (ImGui::Button("Reset EQ", ImVec2(contentWidth, buttonHeight))) {
