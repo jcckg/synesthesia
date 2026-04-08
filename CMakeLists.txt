@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.13)
+cmake_minimum_required(VERSION 3.20)
 
 set(SYNESTHESIA_VERSION_MAJOR 2026)
 set(SYNESTHESIA_VERSION_MINOR 03)
@@ -19,12 +19,15 @@ set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(GLFW_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/glfw")
 set(PORTAUDIO_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/portaudio")
 set(RTMIDI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/rtmidi")
+set(BX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/bx")
+set(BIMG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/bimg")
+set(BGFX_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/bgfx")
+set(BGFX_CMAKE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/vendor/bgfx.cmake")
 
 option(BUILD_MACOS_BUNDLE "Build as macOS .app bundle" OFF)
 option(ENABLE_NEON_OPTIMISATIONS "Enable ARM NEON SIMD optimisations" ON)
 option(ENABLE_OSC "Enable OSC transport" ON)
 option(ENABLE_MIDI "Enable MIDI input support" ON)
-option(VULKAN_WINDOWS "Use Vulkan instead of DirectX 12 on Windows (for older Windows compatibility)" OFF)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/updating/version.h.in"
@@ -45,7 +48,7 @@ add_midi_sources()
 add_neon_sources()
 add_sse_sources()
 
-include(cmake/platform.cmake)
+include(cmake/renderer.cmake)
 include(cmake/ffmpeg.cmake)
 
 configure_include_directories()

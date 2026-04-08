@@ -40,3 +40,15 @@
 [submodule "vendor/oscpack"]
 	path = vendor/oscpack
 	url = https://github.com/jcckg/oscpack.git
+[submodule "vendor/bgfx.cmake"]
+	path = vendor/bgfx.cmake
+	url = https://github.com/bkaradzic/bgfx.cmake.git
+[submodule "vendor/bx"]
+	path = vendor/bx
+	url = https://github.com/bkaradzic/bx.git
+[submodule "vendor/bgfx"]
+	path = vendor/bgfx
+	url = https://github.com/bkaradzic/bgfx.git
+[submodule "vendor/bimg"]
+	path = vendor/bimg
+	url = https://github.com/bkaradzic/bimg.git

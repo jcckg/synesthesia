@@ -1,8 +1,6 @@
 if(WIN32)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app.ico
         ${CMAKE_BINARY_DIR}/app.ico COPYONLY)
-    configure_file(${SRC_DIR}/platforms/dx12/resource.h
-        ${CMAKE_BINARY_DIR}/resource.h COPYONLY)
 
     set(SYN_EMBED_ASSET_OUTPUTS "")
     function(syn_register_embedded_asset source relative output_var)
@@ -23,7 +21,7 @@ if(WIN32)
     syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/icons/fa-solid-900.ttf" "embedded_assets/fonts/icons/fa-solid-900.ttf" SYN_ASSET_FONT_AWESOME_SOLID)
     syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/luts/ReSyne_Display_v1.cube" "embedded_assets/luts/ReSyne_Display_v1.cube" SYN_ASSET_RESYNE_DISPLAY_LUT)
 
-    file(READ ${CMAKE_SOURCE_DIR}/src/platforms/dx12/app.rc.in APP_RC_TEMPLATE)
+    file(READ ${CMAKE_SOURCE_DIR}/src/renderer/windows/app.rc.in APP_RC_TEMPLATE)
     string(REPLACE "@SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM@" "${SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM}" APP_RC_CONTENT "${APP_RC_TEMPLATE}")
     string(REPLACE "@SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT@" "${SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT}" APP_RC_CONTENT "${APP_RC_CONTENT}")
     string(REPLACE "@SYN_ASSET_FONT_AWESOME_SOLID@" "${SYN_ASSET_FONT_AWESOME_SOLID}" APP_RC_CONTENT "${APP_RC_CONTENT}")
@@ -32,37 +30,33 @@ if(WIN32)
     file(WRITE ${CMAKE_BINARY_DIR}/app.rc "${APP_RC_CONTENT}")
 endif()
 
+list(APPEND SOURCES
+    ${SRC_DIR}/renderer/main.cpp
+    ${SRC_DIR}/renderer/bgfx_context.cpp
+    ${SRC_DIR}/renderer/window.cpp
+    ${SRC_DIR}/renderer/font_loader.cpp
+    ${SRC_DIR}/renderer/imgui_impl_bgfx.cpp
+)
+
 if(WIN32)
-    if(VULKAN_WINDOWS)
-        message(STATUS "Configuring for Windows (Vulkan)")
-        find_package(Vulkan REQUIRED)
-        message(STATUS "Found Vulkan: ${Vulkan_LIBRARIES}")
-        list(APPEND SOURCES
-            ${SRC_DIR}/platforms/vulkan/main.cpp
-            ${CMAKE_BINARY_DIR}/app.rc
-            ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
-        )
-    else()
-        message(STATUS "Configuring for Windows (DirectX 12)")
-        list(APPEND SOURCES
-            ${SRC_DIR}/platforms/dx12/main.cpp
-            ${CMAKE_BINARY_DIR}/app.rc
-            ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
-        )
-        set(DX12_LIBS d3d12 dxgi d3dcompiler)
-    endif()
-elseif(APPLE)
-    message(STATUS "Configuring for macOS (Metal)")
+    message(STATUS "Configuring renderer for Windows (BGFX)")
     list(APPEND SOURCES
-        ${SRC_DIR}/platforms/metal/main.mm
+        ${SRC_DIR}/renderer/styling/windows.cpp
+        ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
+        ${CMAKE_BINARY_DIR}/app.rc
+    )
+elseif(APPLE)
+    message(STATUS "Configuring renderer for macOS (BGFX)")
+    list(APPEND SOURCES
+        ${SRC_DIR}/renderer/styling/mac.mm
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm
         ${SRC_DIR}/ui/input/trackpad_gestures_mac.mm
     )
     set(OBJC_FLAGS "-ObjC++ -fobjc-arc -fobjc-weak")
 else()
-    message(STATUS "Configuring for Linux (Vulkan)")
+    message(STATUS "Configuring renderer for Linux (BGFX)")
     list(APPEND SOURCES
-        ${SRC_DIR}/platforms/vulkan/main.cpp
+        ${SRC_DIR}/renderer/styling/linux.cpp
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.cpp
     )
 endif()
@@ -120,10 +114,15 @@ elseif(APPLE)
         "-O3" "-ffast-math" "-march=native"
     )
 
-    set_source_files_properties(${SRC_DIR}/platforms/metal/main.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/renderer/styling/mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/input/trackpad_gestures_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/updating/update.cpp PROPERTIES COMPILE_FLAGS "-Wno-nan-infinity-disabled")
+
+    set_property(SOURCE ${SRC_DIR}/renderer/imgui_impl_bgfx.cpp APPEND PROPERTY COMPILE_OPTIONS
+        "-Wno-sign-conversion" "-Wno-implicit-float-conversion" "-Wno-double-promotion")
+    set_property(SOURCE ${SRC_DIR}/renderer/window.cpp APPEND PROPERTY COMPILE_OPTIONS
+        "-Wno-nullability-extension" "-Wno-deprecated-declarations" "-Wno-invalid-utf8" "-Wno-undef" "-Wno-double-promotion")
 
     set_property(SOURCE ${SRC_DIR}/ui/ui.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
     set_property(SOURCE ${SRC_DIR}/ui/controls/controls.cpp APPEND PROPERTY COMPILE_OPTIONS "-Wno-c99-extensions")
@@ -157,6 +156,9 @@ if(APPLE)
         ${COREVIDEO_FRAMEWORK}
         ${QUARTZCORE_FRAMEWORK}
         ${COREMIDI_FRAMEWORK}
+        bgfx
+        bimg
+        bx
         ${GLFW_TARGET}
         ${PORTAUDIO_TARGET}
         nlohmann_json::nlohmann_json
@@ -173,43 +175,32 @@ if(APPLE)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})
     endif()
 elseif(WIN32)
-    if(VULKAN_WINDOWS)
-        target_link_libraries(${EXECUTABLE_NAME} PRIVATE
-            ${GLFW_TARGET}
-            ${PORTAUDIO_TARGET}
-            Vulkan::Vulkan
-            nlohmann_json::nlohmann_json
-            vendor_imgui
-            vendor_implot
-            vendor_kissfft
-            vendor_lodepng
-            vendor_oscpack
-            vendor_imgui_backends
-        )
-    else()
-        target_link_libraries(${EXECUTABLE_NAME} PRIVATE
-            ${GLFW_TARGET}
-            ${PORTAUDIO_TARGET}
-            ${DX12_LIBS}
-            nlohmann_json::nlohmann_json
-            vendor_imgui
-            vendor_implot
-            vendor_kissfft
-            vendor_lodepng
-            vendor_oscpack
-            vendor_imgui_backends
-            windowsapp
-        )
-    endif()
+    target_link_libraries(${EXECUTABLE_NAME} PRIVATE
+        bgfx
+        bimg
+        bx
+        ${GLFW_TARGET}
+        ${PORTAUDIO_TARGET}
+        nlohmann_json::nlohmann_json
+        vendor_imgui
+        vendor_implot
+        vendor_kissfft
+        vendor_lodepng
+        vendor_oscpack
+        vendor_imgui_backends
+        windowsapp
+    )
 
     if(ENABLE_MIDI AND RTMIDI_TARGET)
         target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${RTMIDI_TARGET})
     endif()
 else()
     target_link_libraries(${EXECUTABLE_NAME} PRIVATE
+        bgfx
+        bimg
+        bx
         ${GLFW_TARGET}
         ${PORTAUDIO_TARGET}
-        Vulkan::Vulkan
         ${ALSA_LIBRARIES}
         nlohmann_json::nlohmann_json
         vendor_imgui
@@ -229,6 +220,9 @@ else()
 endif()
 
 if(APPLE AND BUILD_MACOS_BUNDLE)
+    set(ICON_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app.icns")
+    set(ICON_DEST "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources/app.icns")
+
     set_target_properties(${EXECUTABLE_NAME} PROPERTIES
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/Info.plist"
         MACOSX_BUNDLE_ICON_FILE "app.icns"
@@ -245,9 +239,6 @@ if(APPLE AND BUILD_MACOS_BUNDLE)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/assets/mac/Info.plist.in ${CMAKE_BINARY_DIR}/Info.plist)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/assets/mac/entitlements.plist ${CMAKE_BINARY_DIR}/entitlements.plist COPYONLY)
 
-    set(ICON_SRC "${CMAKE_CURRENT_SOURCE_DIR}/assets/icon/app.icns")
-    set(ICON_DEST "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources/app.icns")
-
     add_custom_command(TARGET ${EXECUTABLE_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources"
         COMMAND ${CMAKE_COMMAND} -E copy "${ICON_SRC}" "${ICON_DEST}"
@@ -259,21 +250,5 @@ if(APPLE AND BUILD_MACOS_BUNDLE)
         "${CMAKE_CURRENT_SOURCE_DIR}/assets"
         "${CMAKE_BINARY_DIR}/${EXECUTABLE_NAME}.app/Contents/Resources/assets"
         COMMENT "Copying assets directory to bundle resources"
-    )
-endif()
-
-if(WIN32 AND CMAKE_BUILD_TYPE STREQUAL "Release")
-    install(TARGETS ${EXECUTABLE_NAME}
-        RUNTIME DESTINATION bin
-    )
-    install(FILES
-        $<TARGET_RUNTIME_DLLS:${EXECUTABLE_NAME}>
-        DESTINATION bin
-    )
-elseif(APPLE)
-    install(TARGETS ${EXECUTABLE_NAME} BUNDLE DESTINATION ".")
-else()
-    install(TARGETS ${EXECUTABLE_NAME}
-        RUNTIME DESTINATION bin
     )
 endif()

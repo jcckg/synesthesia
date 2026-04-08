@@ -142,6 +142,9 @@ function(configure_include_directories)
         ${SRC_DIR}/resyne/conversions
         ${SRC_DIR}/colour
         ${SRC_DIR}/ui
+        ${SRC_DIR}/renderer
+        ${SRC_DIR}/renderer/styling
+        ${SRC_DIR}/renderer/windows
         ${SRC_DIR}/ui/handlers
         ${SRC_DIR}/ui/controls
         ${SRC_DIR}/ui/device_manager

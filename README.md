@@ -14,7 +14,7 @@ Synesthesia is automatically built by GitHub Actions, you can download the appli
 
 ### Manual Building & Running
 
-Synesthesia runs on Windows (DirectX 12) and macOS (Metal). To run this project, make sure `cmake` is installed, and just clone this repository with submodules (we build app dependencies locally):
+Synesthesia runs through a universal [BGFX](https://github.com/bkaradzic/bgfx) renderer backend across desktop platforms. To run this project, make sure `cmake` is installed, and clone the repository with submodules so the local third-party dependencies are available:
 
 ```sh
 # Clone the repository with submodules
@@ -29,7 +29,7 @@ cmake ..
 cmake --build .
 
 # Run Synesthesia
-./synesthesia
+./Synesthesia
 ```
 
 #### Building an App Bundle on macOS
