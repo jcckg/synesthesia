@@ -190,6 +190,53 @@ void HeadlessInterface::displayFrequencyInfo() {
             if (pendingSettings.gamutMappingEnabled.has_value()) {
                 oscGamutMappingEnabled = *pendingSettings.gamutMappingEnabled;
             }
+            if (pendingSettings.smoothingEnabled.has_value()) {
+                smoothingEnabled = *pendingSettings.smoothingEnabled;
+            }
+            if (pendingSettings.colourSmoothingSpeed.has_value()) {
+                colourSmoothingSpeed = *pendingSettings.colourSmoothingSpeed;
+                colourSmoother.setSmoothingAmount(colourSmoothingSpeed);
+            }
+            if (pendingSettings.spectrumSmoothingAmount.has_value()) {
+                spectrumSmoothingAmount = *pendingSettings.spectrumSmoothingAmount;
+            }
+            
+            static auto lastTime = std::chrono::steady_clock::now();
+            auto currentTime = std::chrono::steady_clock::now();
+            float deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(currentTime - lastTime).count();
+            lastTime = currentTime;
+
+            if (smoothingEnabled) {
+                colourSmoother.setTargetColour(currentR, currentG, currentB);
+
+                if (!manualSmoothing) {
+                    SmoothingSignalFeatures features{};
+                    features.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
+                    features.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
+                    features.spectralFlatness = colourResult.spectralFlatness;
+                    features.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
+                    features.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
+
+                    constexpr float minCentroid = 100.0f;
+                    constexpr float minRolloff = 20.0f;
+                    constexpr float rolloffLogMin = 4.32f;
+                    constexpr float rolloffLogMax = 14.29f;
+                    constexpr float crestLogScale = 4.0f;
+
+                    const float centroid = std::max(colourResult.spectralCentroid, minCentroid);
+                    features.spectralSpreadNorm = std::clamp(colourResult.spectralSpread / centroid * 0.5f, 0.0f, 1.0f);
+                    const float rolloffLog = std::log2(std::max(colourResult.spectralRolloff, minRolloff));
+                    features.spectralRolloffNorm = std::clamp((rolloffLog - rolloffLogMin) / (rolloffLogMax - rolloffLogMin), 0.0f, 1.0f);
+                    features.spectralCrestNorm = std::clamp(std::log2(std::max(colourResult.spectralCrestFactor, 1.0f)) / crestLogScale, 0.0f, 1.0f);
+
+                    colourSmoother.update(deltaTime * 1.2f, features);
+                } else {
+                    colourSmoother.update(deltaTime * 1.2f);
+                }
+
+                colourSmoother.getCurrentColour(currentR, currentG, currentB);
+            }
+
             osc.updateColourData(magnitudes, phases, currentDominantFreq, audioInput.getSampleRate(),
                                  currentR, currentG, currentB);
         }

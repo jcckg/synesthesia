@@ -274,17 +274,7 @@ void processPlaybackState(AudioInput& audioInput,
             playbackSignalFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
             populateSpectralNorms(colourResult, playbackSignalFeatures);
 
-#ifdef ENABLE_OSC
-            auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-            osc.updateColourData(
-                visualiserMagnitudes,
-                frame.phases,
-                colourResult.dominantFrequency,
-                frame.sampleRate,
-                playbackColour.x,
-                playbackColour.y,
-                playbackColour.z);
-#endif
+
         }
     }
 
@@ -369,6 +359,20 @@ void processPlaybackState(AudioInput& audioInput,
     state.resyneState.displayColour[0] = currentDisplayR;
     state.resyneState.displayColour[1] = currentDisplayG;
     state.resyneState.displayColour[2] = currentDisplayB;
+
+#ifdef ENABLE_OSC
+    if (hasPlaybackColourResult && !visualiserMagnitudes.empty()) {
+        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+        osc.updateColourData(
+            visualiserMagnitudes,
+            frame.phases,
+            playbackColourResult.dominantFrequency,
+            frame.sampleRate,
+            currentDisplayR,
+            currentDisplayG,
+            currentDisplayB);
+    }
+#endif
 
     ReSyne::updateFromFFT(
         state.resyneState,

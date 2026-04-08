@@ -9,6 +9,7 @@
 #include "audio_input.h"
 #include "colour_mapper.h"
 #include "fft_processor.h"
+#include "ui/smoothing/smoothing.h"
 
 namespace CLI {
 
@@ -39,6 +40,12 @@ private:
 	size_t lastPeakCount = 0;
 	float lastR = -1.0f, lastG = -1.0f, lastB = -1.0f;
 	float lastLoudnessDb = -200.0f;
+    
+    SpringSmoother colourSmoother{8.0f, 1.0f, 0.3f};
+    bool smoothingEnabled = true;
+    bool manualSmoothing = false;
+    float colourSmoothingSpeed = 0.6f;
+    float spectrumSmoothingAmount = 0.2f;
     
     void setupTerminal();
     void restoreTerminal();
