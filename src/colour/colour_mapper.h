@@ -42,6 +42,9 @@ public:
 		float transientMix;
 		float estimatedSPL;
 		float luminanceCdM2;
+		float phaseInstabilityNorm = 0.0f;
+		float phaseCoherenceNorm = 0.0f;
+		float phaseTransientNorm = 0.0f;
 	};
 
 	struct SpectralCharacteristics {

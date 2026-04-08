@@ -19,7 +19,8 @@ struct CacheSettings {
 CacheSettings currentSettings(const RecorderState& state);
 
 SampleColourEntry computeSampleColour(const AudioColourSample& sample,
-    const CacheSettings& settings);
+    const CacheSettings& settings,
+    const AudioColourSample* previousSample = nullptr);
 
 void markSettingsIfChanged(RecorderState& state,
     const CacheSettings& settings);

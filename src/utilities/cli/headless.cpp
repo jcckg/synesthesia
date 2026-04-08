@@ -9,6 +9,7 @@
 #include <chrono>
 #include <thread>
 
+#include "audio/analysis/presentation/spectral_presentation.h"
 #include "colour_mapper.h"
 
 #ifdef ENABLE_OSC
@@ -169,10 +170,32 @@ void HeadlessInterface::displayFrequencyInfo() {
 
 	float currentLoudnessDb = loudnessDb;
 	if (!magnitudes.empty() && !phases.empty()) {
-		auto colourResult = ColourMapper::spectrumToColour(
-			magnitudes, phases, {}, audioInput.getSampleRate(), 2.2f,
-			oscColourSpace, oscGamutMappingEnabled,
-			loudnessDb);
+        SpectralPresentation::Settings settings{};
+        settings.gamma = 2.2f;
+        settings.colourSpace = oscColourSpace;
+        settings.applyGamutMapping = oscGamutMappingEnabled;
+
+        SpectralPresentation::Frame frame{};
+        frame.magnitudes = magnitudes;
+        frame.phases = phases;
+        frame.sampleRate = audioInput.getSampleRate();
+
+        const uint64_t frameCounter = audioInput.getFFTProcessor().getFrameCounter();
+        const bool hasNewFrame = !hasPreviousFrame || frameCounter != previousFrameCounter;
+        const auto preparedFrame = SpectralPresentation::prepareFrame(
+            frame,
+            settings,
+            loudnessDb,
+            hasNewFrame && hasPreviousFrame ? &previousFrame : nullptr,
+            frame.sampleRate > 0.0f
+                ? static_cast<float>(audioInput.getFFTProcessor().getHopSize()) / frame.sampleRate
+                : (1.0f / 60.0f));
+        if (hasNewFrame) {
+            previousFrame = frame;
+            previousFrameCounter = frameCounter;
+            hasPreviousFrame = true;
+        }
+		auto colourResult = preparedFrame.colourResult;
 
 		currentDominantFreq = colourResult.dominantFrequency;
 		currentR = colourResult.r;
@@ -216,6 +239,9 @@ void HeadlessInterface::displayFrequencyInfo() {
                     features.spectralFlatness = colourResult.spectralFlatness;
                     features.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
                     features.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
+                    features.phaseInstabilityNorm = std::clamp(colourResult.phaseInstabilityNorm, 0.0f, 1.0f);
+                    features.phaseCoherenceNorm = std::clamp(colourResult.phaseCoherenceNorm, 0.0f, 1.0f);
+                    features.phaseTransientNorm = std::clamp(colourResult.phaseTransientNorm, 0.0f, 1.0f);
 
                     constexpr float minCentroid = 100.0f;
                     constexpr float minRolloff = 20.0f;

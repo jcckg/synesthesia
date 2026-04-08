@@ -63,6 +63,11 @@ FFTProcessor::~FFTProcessor() {
 	}
 }
 
+uint64_t FFTProcessor::getFrameCounter() const {
+    std::lock_guard lock(dataMutex);
+    return frameCounter;
+}
+
 void FFTProcessor::setEQGains(const float low, const float mid, const float high) {
 	equaliser.setGains(low, mid, high);
 }

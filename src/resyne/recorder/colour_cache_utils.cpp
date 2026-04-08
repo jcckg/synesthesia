@@ -88,6 +88,7 @@ struct CacheFrameData {
 };
 
 CacheFrameData computeEntryInternal(const AudioColourSample& sample,
+                                    const AudioColourSample* previousSample,
                                     const CacheSettings& settings) {
     const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
         ? sample.loudnessLUFS
@@ -98,11 +99,24 @@ CacheFrameData computeEntryInternal(const AudioColourSample& sample,
         sample.frequencies,
         sample.channels,
         sample.sampleRate);
+    SpectralPresentation::Frame previousFrame{};
+    const SpectralPresentation::Frame* previousFramePtr = nullptr;
+    if (previousSample != nullptr) {
+        previousFrame = SpectralPresentation::mixChannels(
+            previousSample->magnitudes,
+            previousSample->phases,
+            previousSample->frequencies,
+            previousSample->channels,
+            previousSample->sampleRate);
+        previousFramePtr = &previousFrame;
+    }
         
     const auto preparedFrame = SpectralPresentation::prepareFrame(
         frame,
         buildPresentationSettings(settings),
-        loudnessOverride);
+        loudnessOverride,
+        previousFramePtr,
+        resolveDeltaTime(previousSample, sample));
 
     SampleColourEntry entry{};
     entry.rgb.x = std::clamp(preparedFrame.colourResult.r, 0.0f, 1.0f);
@@ -183,6 +197,9 @@ void smoothEntriesInPlace(std::vector<CacheFrameData>& entries,
             features.spectralFlatness = entries[index].colourResult.spectralFlatness;
             features.loudnessNormalised = std::clamp(entries[index].colourResult.loudnessNormalised, 0.0f, 1.0f);
             features.brightnessNormalised = std::clamp(entries[index].colourResult.brightnessNormalised, 0.0f, 1.0f);
+            features.phaseInstabilityNorm = std::clamp(entries[index].colourResult.phaseInstabilityNorm, 0.0f, 1.0f);
+            features.phaseCoherenceNorm = std::clamp(entries[index].colourResult.phaseCoherenceNorm, 0.0f, 1.0f);
+            features.phaseTransientNorm = std::clamp(entries[index].colourResult.phaseTransientNorm, 0.0f, 1.0f);
             populateSpectralNorms(entries[index].colourResult, features);
 
             smoother.update(deltaTime * kSmoothingUpdateFactor, features);
@@ -244,7 +261,7 @@ SampleColourEntry smoothEntryAgainstPrevious(const SampleColourEntry& previousEn
 
     if (!settings.manualSmoothing && previousSample != nullptr) {
         // Compute features for single frame
-        CacheFrameData previousData = computeEntryInternal(*previousSample, settings);
+        CacheFrameData previousData = computeEntryInternal(*previousSample, nullptr, settings);
         
         float playbackFlux = 0.0f;
         bool fluxComputed = false;
@@ -267,6 +284,9 @@ SampleColourEntry smoothEntryAgainstPrevious(const SampleColourEntry& previousEn
         features.spectralFlatness = currentEntryData.colourResult.spectralFlatness;
         features.loudnessNormalised = std::clamp(currentEntryData.colourResult.loudnessNormalised, 0.0f, 1.0f);
         features.brightnessNormalised = std::clamp(currentEntryData.colourResult.brightnessNormalised, 0.0f, 1.0f);
+        features.phaseInstabilityNorm = std::clamp(currentEntryData.colourResult.phaseInstabilityNorm, 0.0f, 1.0f);
+        features.phaseCoherenceNorm = std::clamp(currentEntryData.colourResult.phaseCoherenceNorm, 0.0f, 1.0f);
+        features.phaseTransientNorm = std::clamp(currentEntryData.colourResult.phaseTransientNorm, 0.0f, 1.0f);
         populateSpectralNorms(currentEntryData.colourResult, features);
 
         smoother.update(resolveDeltaTime(previousSample, currentSample) * kSmoothingUpdateFactor, features);
@@ -298,8 +318,9 @@ CacheSettings currentSettings(const RecorderState& state) {
 }
 
 SampleColourEntry computeSampleColour(const AudioColourSample& sample,
-                                      const CacheSettings& settings) {
-    return computeEntryInternal(sample, settings).entry;
+                                      const CacheSettings& settings,
+                                      const AudioColourSample* previousSample) {
+    return computeEntryInternal(sample, previousSample, settings).entry;
 }
 
 void markSettingsIfChanged(RecorderState& state,
@@ -338,8 +359,9 @@ void ensureCacheLocked(RecorderState& state) {
 
     std::vector<CacheFrameData> frameDataList;
     frameDataList.reserve(state.samples.size());
-    for (const auto& sample : state.samples) {
-        frameDataList.push_back(computeEntryInternal(sample, settings));
+    for (size_t index = 0; index < state.samples.size(); ++index) {
+        const AudioColourSample* previousSample = index > 0 ? &state.samples[index - 1] : nullptr;
+        frameDataList.push_back(computeEntryInternal(state.samples[index], previousSample, settings));
     }
 
     smoothEntriesInPlace(frameDataList, state.samples, settings);
@@ -363,7 +385,8 @@ void appendSampleLocked(RecorderState& state,
         return;
     }
 
-    CacheFrameData entryData = computeEntryInternal(sample, settings);
+    const AudioColourSample* previousSampleForEntry = state.samples.size() >= 2 ? &state.samples[state.samples.size() - 2] : nullptr;
+    CacheFrameData entryData = computeEntryInternal(sample, previousSampleForEntry, settings);
     SampleColourEntry entry = entryData.entry;
     if (!state.sampleColourCache.empty() && state.samples.size() >= 2) {
         const auto& previousSample = state.samples[state.samples.size() - 2];

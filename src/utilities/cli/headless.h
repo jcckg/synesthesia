@@ -7,6 +7,7 @@
 #include <thread>
 
 #include "audio_input.h"
+#include "audio/analysis/presentation/spectral_presentation.h"
 #include "colour_mapper.h"
 #include "fft_processor.h"
 #include "ui/smoothing/smoothing.h"
@@ -46,6 +47,9 @@ private:
     bool manualSmoothing = false;
     float colourSmoothingSpeed = 0.6f;
     float spectrumSmoothingAmount = 0.2f;
+    SpectralPresentation::Frame previousFrame;
+    uint64_t previousFrameCounter = 0;
+    bool hasPreviousFrame = false;
     
     void setupTerminal();
     void restoreTerminal();

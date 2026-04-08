@@ -9,6 +9,9 @@ struct SmoothingSignalFeatures {
     float spectralSpreadNorm = 0.0f;   // [0,1] — spread/centroid ratio, normalised
     float spectralRolloffNorm = 0.0f;  // [0,1] — log-normalised rolloff frequency
     float spectralCrestNorm = 0.0f;    // [0,1] — log2(crestFactor), normalised
+    float phaseInstabilityNorm = 0.0f;
+    float phaseCoherenceNorm = 0.0f;
+    float phaseTransientNorm = 0.0f;
 };
 
 float resolveAdaptiveSmoothingAmount(float baseSmoothingAmount,

@@ -1,8 +1,10 @@
 set(SOURCES
     ${SRC_DIR}/main.cpp
     ${SRC_DIR}/audio/analysis/fft/fft_processor.cpp
+    ${SRC_DIR}/audio/analysis/phase/phase_features.cpp
     ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
     ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
+    ${SRC_DIR}/audio/analysis/presentation/phase_colour.cpp
     ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
     ${SRC_DIR}/audio/analysis/eq/shared_eq_model.cpp
     ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp

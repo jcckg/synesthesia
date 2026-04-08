@@ -43,6 +43,16 @@ float applyAdaptiveStiffness(const float baseStiffness,
     constexpr float crestStiffnessGain = 0.35f;
     adaptiveStiffness *= (1.0f + features.spectralCrestNorm * crestStiffnessGain);
 
+    constexpr float phaseTransientGain = 0.55f;
+    adaptiveStiffness *= (1.0f + features.phaseTransientNorm * phaseTransientGain);
+
+    constexpr float phaseCoherenceGain = 0.12f;
+    adaptiveStiffness *= (1.0f + features.phaseCoherenceNorm * phaseCoherenceGain);
+
+    constexpr float phaseInstabilitySuppression = 0.28f;
+    const float instabilityPenalty = features.phaseInstabilityNorm * (1.0f - 0.65f * features.phaseTransientNorm);
+    adaptiveStiffness *= std::clamp(1.0f - instabilityPenalty * phaseInstabilitySuppression, 0.7f, 1.0f);
+
     constexpr float psychoacousticRange = 0.5f;
     const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
     const float brightness = std::clamp(features.brightnessNormalised, 0.0f, 1.0f);
@@ -200,8 +210,12 @@ bool SpringSmoother::update(const float deltaTime, const SmoothingSignalFeatures
     // warm timbre (low rolloff) = more sluggish, smoother transitions
     constexpr float ROLLOFF_DAMPING_RANGE = 0.15f;
     const float rolloffDampingOffset = (0.5f - features.spectralRolloffNorm) * ROLLOFF_DAMPING_RANGE;
+    const float phaseDampingOffset =
+        features.phaseInstabilityNorm * 0.12f -
+        features.phaseCoherenceNorm * 0.05f -
+        features.phaseTransientNorm * 0.04f;
     const float dampingRatio = std::clamp(
-        BASE_DAMPING_RATIO + (1.0f - loudness) * DAMPING_RANGE + rolloffDampingOffset,
+        BASE_DAMPING_RATIO + (1.0f - loudness) * DAMPING_RANGE + rolloffDampingOffset + phaseDampingOffset,
         0.45f, 0.95f);
     m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * dampingRatio;
 

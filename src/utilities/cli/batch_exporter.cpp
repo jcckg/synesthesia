@@ -270,10 +270,11 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
     settings.smoothingEnabled = false;
     settings.smoothingAmount = 0.0f;
 
-    for (const auto& sample : samples) {
+    for (size_t index = 0; index < samples.size(); ++index) {
         const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
-            sample,
-            settings);
+            samples[index],
+            settings,
+            index > 0 ? &samples[index - 1] : nullptr);
         frameColours.push_back({entry.labL, entry.labA, entry.labB});
     }
 

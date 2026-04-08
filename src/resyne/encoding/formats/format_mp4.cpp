@@ -137,7 +137,8 @@ public:
 
     RGB colourAt(double timeSeconds) {
         timeSeconds = std::max(timeSeconds, 0.0);
-        const AudioColourSample& sample = sampleForTime(timeSeconds);
+        const size_t sampleIndex = sampleIndexForTime(timeSeconds);
+        const AudioColourSample& sample = samples_[sampleIndex];
         ReSyne::RecorderColourCache::CacheSettings settings{};
         settings.gamma = gamma_;
         settings.colourSpace = colourSpace_;
@@ -146,7 +147,8 @@ public:
         settings.smoothingAmount = 0.0f;
         const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
             sample,
-            settings);
+            settings,
+            sampleIndex > 0 ? &samples_[sampleIndex - 1] : nullptr);
 
         RGB rgb{std::clamp(entry.rgb.x, 0.0f, 1.0f),
                 std::clamp(entry.rgb.y, 0.0f, 1.0f),
@@ -165,21 +167,20 @@ public:
         return RGB{outR, outG, outB};
     }
 
-    const AudioColourSample& sampleForTime(double timeSeconds) const {
+    size_t sampleIndexForTime(double timeSeconds) const {
         if (samples_.empty()) {
-            return fallbackSample_;
+            return 0;
         }
         if (timestamps_.empty()) {
-            return samples_.front();
+            return 0;
         }
 
         const double targetTime = timeSeconds + startTime_;
         auto it = std::lower_bound(timestamps_.begin(), timestamps_.end(), targetTime);
         if (it == timestamps_.end()) {
-            return samples_.back();
+            return samples_.size() - 1;
         }
-        const size_t index = static_cast<size_t>(std::distance(timestamps_.begin(), it));
-        return samples_[index];
+        return static_cast<size_t>(std::distance(timestamps_.begin(), it));
     }
 
 private:
@@ -192,7 +193,6 @@ private:
     double frameInterval_;
     bool initialised_ = false;
     double startTime_ = 0.0;
-    AudioColourSample fallbackSample_{};
 };
 
 void paintColourFrame(std::vector<uint8_t>& buffer, int width, int height, const RGB& colour) {

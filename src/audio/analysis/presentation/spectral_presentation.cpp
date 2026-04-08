@@ -5,6 +5,7 @@
 
 #include "audio/analysis/eq/shared_eq_model.h"
 #include "audio/analysis/fft/fft_processor.h"
+#include "audio/analysis/presentation/phase_colour.h"
 
 namespace SpectralPresentation {
 
@@ -117,7 +118,8 @@ std::vector<float> buildColourMagnitudes(const Frame& frame,
 
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,
-                           const float loudnessDb) {
+                           const float loudnessDb,
+                           const PhaseAnalysis::PhaseFeatureMetrics& phaseMetrics) {
     PreparedFrame prepared{};
     prepared.visualiserMagnitudes = buildVisualiserMagnitudes(frame, settings);
     const std::vector<float> colourMagnitudes = buildColourMagnitudes(frame, settings);
@@ -130,7 +132,26 @@ PreparedFrame prepareFrame(const Frame& frame,
         settings.colourSpace,
         settings.applyGamutMapping,
         loudnessDb);
+    applyPhaseColourInfluence(prepared.colourResult, phaseMetrics, settings);
     return prepared;
+}
+
+PreparedFrame prepareFrame(const Frame& frame,
+                           const Settings& settings,
+                           const float loudnessDb,
+                           const Frame* previousFrame,
+                           const float deltaTimeSeconds) {
+    const PhaseAnalysis::PhaseFeatureMetrics phaseMetrics =
+        previousFrame != nullptr
+            ? PhaseAnalysis::analyseTransition(previousFrame, frame, deltaTimeSeconds)
+            : PhaseAnalysis::PhaseFeatureMetrics{};
+    return prepareFrame(frame, settings, loudnessDb, phaseMetrics);
+}
+
+PreparedFrame prepareFrame(const Frame& frame,
+                           const Settings& settings,
+                           const float loudnessDb) {
+    return prepareFrame(frame, settings, loudnessDb, PhaseAnalysis::PhaseFeatureMetrics{});
 }
 
 std::array<float, 3> displayRGBFromXYZ(const float X,

@@ -6,6 +6,10 @@
 
 #include "colour/colour_mapper.h"
 
+namespace PhaseAnalysis {
+struct PhaseFeatureMetrics;
+}
+
 namespace SpectralPresentation {
 
 struct Settings {
@@ -40,6 +44,17 @@ std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
 
 std::vector<float> buildColourMagnitudes(const Frame& frame,
                                          const Settings& settings);
+
+PreparedFrame prepareFrame(const Frame& frame,
+                           const Settings& settings,
+                           float loudnessDb,
+                           const PhaseAnalysis::PhaseFeatureMetrics& phaseMetrics);
+
+PreparedFrame prepareFrame(const Frame& frame,
+                           const Settings& settings,
+                           float loudnessDb,
+                           const Frame* previousFrame,
+                           float deltaTimeSeconds);
 
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,

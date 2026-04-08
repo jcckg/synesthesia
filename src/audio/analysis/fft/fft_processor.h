@@ -94,6 +94,7 @@ public:
 	float getMaxMagnitude() const { return maxMagnitude; }
 	float getSpectralFlux() const { return spectralFlux; }
 	bool getOnsetDetected() const { return onsetDetected; }
+    uint64_t getFrameCounter() const;
 
 	static float calculateMelWeight(float frequency);
 	static float calculateERB(float frequency);
