@@ -9,6 +9,7 @@
 #include "controls.h"
 #include "device_manager.h"
 #include "resyne/recorder/recorder.h"
+#include "resyne/ui/recorder/recorder_constants.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace Sidebar {
@@ -74,6 +75,9 @@ void renderViewTabs(RenderArgs& args) {
     ImGui::PushID("SidebarViewTabs");
     for (int i = 0; i < 2; ++i) {
         const bool isActive = args.uiState.visualSettings.activeView == tabs[i].view;
+        const bool detachedVisualisationOpen = args.recorderState.detachedVisualisation.isOpen;
+        const bool tabEnabled =
+            !(detachedVisualisationOpen && tabs[i].view == UIState::View::Visualisation);
         const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
 
         ImVec4 baseColour;
@@ -102,8 +106,15 @@ void renderViewTabs(RenderArgs& args) {
         ImGui::PushStyleColor(ImGuiCol_ButtonActive, activeColour);
         ImGui::PushStyleColor(ImGuiCol_Text, textColour);
 
+        ImGui::BeginDisabled(!tabEnabled);
         if (ImGui::Button(tabs[i].label, ImVec2(buttonWidth, TAB_HEIGHT))) {
             args.uiState.visualSettings.activeView = tabs[i].view;
+        }
+        ImGui::EndDisabled();
+        if (!tabEnabled &&
+            tabs[i].view == UIState::View::Visualisation &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationAlreadyOpenTooltip);
         }
 
         ImGui::PopStyleColor(4);

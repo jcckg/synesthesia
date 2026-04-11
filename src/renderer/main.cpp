@@ -1,6 +1,7 @@
 #include "renderer/bgfx_context.h"
-#include "renderer/font_loader.h"
-#include "renderer/imgui_impl_bgfx.h"
+#include "renderer/detached_visualisation_window.h"
+#include "renderer/imgui_window_context.h"
+#include "renderer/render_utils.h"
 #include "renderer/styling/platform_styling.h"
 #include "renderer/window.h"
 
@@ -17,13 +18,8 @@
 #include "midi_device_manager.h"
 #endif
 
-#include "imgui.h"
-#include "imgui_impl_glfw.h"
-#include "implot.h"
-
 #include <algorithm>
 #include <chrono>
-#include <cstdint>
 #include <cstdio>
 #include <thread>
 #include <vector>
@@ -48,28 +44,6 @@ void getThemeBackgroundColour(float* colour) {
         colour[2] = 0.0f;
         colour[3] = 1.0f;
     }
-}
-
-uint32_t packRgba8(float red, float green, float blue, float alpha) {
-    const auto toByte = [](float value) -> uint8_t {
-        const float clamped = std::clamp(value, 0.0f, 1.0f);
-        return static_cast<uint8_t>(clamped * 255.0f + 0.5f);
-    };
-
-    const uint32_t rr = static_cast<uint32_t>(toByte(red));
-    const uint32_t gg = static_cast<uint32_t>(toByte(green));
-    const uint32_t bb = static_cast<uint32_t>(toByte(blue));
-    const uint32_t aa = static_cast<uint32_t>(toByte(alpha));
-    return (rr << 24) | (gg << 16) | (bb << 8) | aa;
-}
-
-float uiDpiScale(const Renderer::Window& window) {
-    const float rawScale = std::max(1.0f, ImGui_ImplGlfw_GetContentScaleForWindow(window.handle()));
-#if defined(_WIN32)
-    return 1.0f + (rawScale - 1.0f) * 0.65f;
-#else
-    return rawScale;
-#endif
 }
 
 #ifdef ENABLE_MIDI
@@ -123,40 +97,9 @@ int app_main(int, char**) {
         return 1;
     }
 
-    IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
-    ImPlot::CreateContext();
-
-    ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
-
-    const float dpiScale = uiDpiScale(window);
-    Renderer::loadFonts(io, dpiScale);
-
-    ImGui::StyleColorsDark();
-    ImGui::GetStyle().ScaleAllSizes(dpiScale);
-
-    if (!ImGui_ImplGlfw_InitForOther(window.handle(), true)) {
-        std::fprintf(stderr, "Failed to initialise ImGui GLFW backend\n");
-        ImPlot::DestroyContext();
-        ImGui::DestroyContext();
-        bgfxContext.shutdown();
-        window.destroy();
-        Renderer::shutdownWindowing();
-        return 1;
-    }
-
-    if (!ImGui_Implbgfx_Init(Renderer::BgfxContext::kImGuiViewId)) {
-        std::fprintf(
-            stderr,
-            "Failed to initialise ImGui bgfx backend (renderer=%s)\n",
-            bgfx::getRendererName(bgfxContext.rendererType())
-        );
-        ImGui_ImplGlfw_Shutdown();
-        ImPlot::DestroyContext();
-        ImGui::DestroyContext();
+    Renderer::ImGuiWindowContext mainWindowContext;
+    if (!mainWindowContext.initialise(window, Renderer::BgfxContext::kImGuiViewId)) {
+        std::fprintf(stderr, "Failed to initialise ImGui window context\n");
         bgfxContext.shutdown();
         window.destroy();
         Renderer::shutdownWindowing();
@@ -182,6 +125,9 @@ int app_main(int, char**) {
     getThemeBackgroundColour(clearColour);
 
     UIState uiState;
+    auto& recorderState = uiState.resyneState.recorderState;
+    recorderState.detachedVisualisation.available = bgfxContext.supportsMultipleWindows();
+    Renderer::DetachedVisualisationWindow detachedVisualisationWindow;
 
 #ifdef ENABLE_MIDI
     initialiseMidiState(uiState, midiInput, midiDevices);
@@ -199,38 +145,56 @@ int app_main(int, char**) {
         const Renderer::FramebufferSize currentSize = window.framebufferSize();
         const int framebufferWidth = currentSize.width;
         const int framebufferHeight = currentSize.height;
+        const bool mainWindowVisible = framebufferWidth > 0 && framebufferHeight > 0;
 
-        if (framebufferWidth <= 0 || framebufferHeight <= 0) {
-            bgfx::frame();
-            std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            continue;
-        }
-
-        if (framebufferWidth != previousWidth || framebufferHeight != previousHeight) {
+        if (mainWindowVisible && (framebufferWidth != previousWidth || framebufferHeight != previousHeight)) {
             bgfxContext.reset(static_cast<uint32_t>(framebufferWidth), static_cast<uint32_t>(framebufferHeight));
             previousWidth = framebufferWidth;
             previousHeight = framebufferHeight;
         }
 
-        bgfxContext.setViewRects(static_cast<uint16_t>(framebufferWidth), static_cast<uint16_t>(framebufferHeight));
+        if (mainWindowVisible) {
+            bgfxContext.setViewRects(static_cast<uint16_t>(framebufferWidth), static_cast<uint16_t>(framebufferHeight));
+        }
 
-        ImGui_Implbgfx_NewFrame();
-        ImGui_ImplGlfw_NewFrame();
-        ImGui::NewFrame();
+        mainWindowContext.beginFrame();
 
-        updateUI(audioInput, inputDevices, outputDevices, clearColour, io, uiState
+        updateUI(audioInput, inputDevices, outputDevices, clearColour, ImGui::GetIO(), uiState
 #ifdef ENABLE_MIDI
                  , &midiInput, &midiDevices
 #endif
         );
 
-        ImGui::Render();
+        mainWindowContext.endFrame();
 
-        const uint32_t packedClear = packRgba8(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
-        bgfx::setViewClear(Renderer::BgfxContext::kClearViewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, packedClear, 1.0f, 0);
-        bgfx::touch(Renderer::BgfxContext::kClearViewId);
+        if (recorderState.detachedVisualisation.openRequested && !recorderState.detachedVisualisation.isOpen) {
+            uiState.visualSettings.activeView = UIState::View::ReSyne;
+            uiState.visibility.showUI = true;
 
-        ImGui_Implbgfx_RenderDrawData(ImGui::GetDrawData());
+            if (!recorderState.detachedVisualisation.available) {
+                recorderState.detachedVisualisation.openRequested = false;
+                recorderState.statusMessage = "Detached visualisation is not supported by the current renderer";
+                recorderState.statusMessageTimer = 4.0f;
+            } else if (!detachedVisualisationWindow.open(recorderState)) {
+                recorderState.statusMessage = "Unable to open detached visualisation window";
+                recorderState.statusMessageTimer = 4.0f;
+            }
+
+            mainWindowContext.makeCurrent();
+        }
+
+        if (mainWindowVisible) {
+            const uint32_t packedClear = Renderer::packRgba8(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
+            bgfx::setViewClear(Renderer::BgfxContext::kClearViewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, packedClear, 1.0f, 0);
+            bgfx::touch(Renderer::BgfxContext::kClearViewId);
+            mainWindowContext.renderDrawData();
+        }
+
+        if (recorderState.detachedVisualisation.isOpen) {
+            detachedVisualisationWindow.renderFrame(uiState, audioInput);
+            mainWindowContext.makeCurrent();
+        }
+
         bgfx::frame();
 
         const auto frameEnd = std::chrono::steady_clock::now();
@@ -240,12 +204,13 @@ int app_main(int, char**) {
         }
     }
 
-    ImGui_Implbgfx_Shutdown();
-    ImGui_ImplGlfw_Shutdown();
-    TrackpadGestures::shutdown();
-    ImPlot::DestroyContext();
-    ImGui::DestroyContext();
+    if (recorderState.detachedVisualisation.isOpen) {
+        detachedVisualisationWindow.close(recorderState);
+        mainWindowContext.makeCurrent();
+    }
 
+    TrackpadGestures::shutdown();
+    mainWindowContext.shutdown();
     bgfxContext.shutdown();
     window.destroy();
     Renderer::shutdownWindowing();

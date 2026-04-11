@@ -1,6 +1,5 @@
 #include "spectrum_analyser.h"
 #include "fft_processor.h"
-#include <portaudio.h>
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -14,9 +13,8 @@ constexpr ImVec4 SPECTRUM_COLOUR = ImVec4(1.0f, 1.0f, 1.0f, 0.9f);
 
 void SpectrumAnalyser::drawSpectrumWindow(
     const std::vector<std::vector<float>>& smoothedMagnitudes,
-    const std::vector<AudioInput::DeviceInfo>& devices,
-    int selectedDeviceIndex,
     const ImVec2& displaySize,
+    float sampleRate,
     float sidebarWidth,
     bool sidebarOnLeft,
     float bottomPanelHeight
@@ -43,7 +41,7 @@ void SpectrumAnalyser::drawSpectrumWindow(
         initialiseBuffers(numChannels);
     }
 
-    float sampleRate = getSampleRate(devices, selectedDeviceIndex);
+    sampleRate = sampleRate > 0.0f ? sampleRate : 44100.0f;
 
     for (size_t ch = 0; ch < numChannels; ++ch) {
          prepareSpectrumData(smoothingBuffer1[ch], smoothingBuffer2[ch], smoothedMagnitudes[ch], sampleRate);
@@ -108,16 +106,6 @@ void SpectrumAnalyser::drawSpectrumWindow(
     ImGui::PopStyleVar();
 }
 
-float SpectrumAnalyser::getSampleRate(const std::vector<AudioInput::DeviceInfo>& devices, int selectedDeviceIndex) {
-    float sampleRate = 44100.0f;
-    if (selectedDeviceIndex >= 0 && static_cast<size_t>(selectedDeviceIndex) < devices.size()) {
-        if (const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(devices[static_cast<size_t>(selectedDeviceIndex)].paIndex)) {
-            sampleRate = static_cast<float>(deviceInfo->defaultSampleRate);
-        }
-    }
-    return sampleRate;
-}
-
 void SpectrumAnalyser::prepareSpectrumData(std::vector<float>& xData, std::vector<float>& yData,
                                            const std::vector<float>& magnitudes, float sampleRate) {
     if (cachedFrequencies.empty()) {
@@ -147,7 +135,7 @@ void SpectrumAnalyser::prepareSpectrumData(std::vector<float>& xData, std::vecto
 
             float binIndex = freq / binSize;
             int binIndexFloor = static_cast<int>(binIndex);
-            float t = binIndex - binIndexFloor;
+            float t = binIndex - static_cast<float>(binIndexFloor);
 
             int idx0 = std::min(std::max(binIndexFloor, 0),
                                static_cast<int>(magnitudes.size()) - 1);
@@ -258,8 +246,8 @@ float SpectrumAnalyser::calculateLocalVariance(const std::vector<float>& yData, 
     
     if (count <= 1) return 0.0f;
     
-    float mean = sum / count;
-    float variance = (sumSquares / count) - (mean * mean);
+    float mean = sum / static_cast<float>(count);
+    float variance = (sumSquares / static_cast<float>(count)) - (mean * mean);
     return std::max(variance, 0.0f);
 }
 

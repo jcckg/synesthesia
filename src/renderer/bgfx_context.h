@@ -21,6 +21,7 @@ public:
     [[nodiscard]] bool isInitialised() const;
     [[nodiscard]] uint32_t resetFlags() const;
     [[nodiscard]] bgfx::RendererType::Enum rendererType() const;
+    [[nodiscard]] bool supportsMultipleWindows() const;
 
 private:
     uint32_t reset_flags_ = BGFX_RESET_VSYNC;

@@ -35,6 +35,12 @@ enum class RecorderExportFormat {
     MP4
 };
 
+struct DetachedVisualisationState {
+    bool available = false;
+    bool isOpen = false;
+    bool openRequested = false;
+};
+
 struct RecorderState {
     ~RecorderState();
     bool isRecording = false;
@@ -100,6 +106,7 @@ struct RecorderState {
     bool showExportDialog = false;
     bool focusRequested = false;
     int outputDeviceIndex = -1;
+    DetachedVisualisationState detachedVisualisation;
 
     int videoWidth = 1920;
     int videoHeight = 1080;

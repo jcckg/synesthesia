@@ -3,7 +3,6 @@
 #include <imgui.h>
 #include <implot.h>
 #include <vector>
-#include "audio_input.h"
 
 class SpectrumAnalyser {
 public:
@@ -11,9 +10,8 @@ public:
 
     void drawSpectrumWindow(
         const std::vector<std::vector<float>>& smoothedMagnitudes,
-        const std::vector<AudioInput::DeviceInfo>& devices,
-        int selectedDeviceIndex,
         const ImVec2& displaySize,
+        float sampleRate,
         float sidebarWidth,
         bool sidebarOnLeft = false,
         float bottomPanelHeight = 0.0f
@@ -38,9 +36,8 @@ private:
     float lastCachedSampleRate = 0.0f;
     bool buffersInitialised = false;
 
-    static float getSampleRate(const std::vector<AudioInput::DeviceInfo>& devices, int selectedDeviceIndex);
     void prepareSpectrumData(std::vector<float>& xData, std::vector<float>& yData,
-                            const std::vector<float>& magnitudes, float sampleRate);
+                             const std::vector<float>& magnitudes, float sampleRate);
     void smoothData(std::vector<float>& yData);
     void applyGaussianSmoothing(std::vector<float>& yData);
     void applyDynamicRangeCompensation(std::vector<float>& yData);

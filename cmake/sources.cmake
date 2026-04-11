@@ -45,6 +45,7 @@ set(SOURCES
     ${SRC_DIR}/ui/spectrum_analyser/spectrum_analyser.cpp
     ${SRC_DIR}/ui/sidebar/sidebar.cpp
     ${SRC_DIR}/ui/audio_visualisation/presentation_state.cpp
+    ${SRC_DIR}/ui/audio_visualisation/visualisation_surface.cpp
     ${SRC_DIR}/ui/dragdrop/file_drop_manager.cpp
     ${SRC_DIR}/ui/input/trackpad_gestures.cpp
     ${SRC_DIR}/utilities/midi/input/midi_input.cpp
@@ -79,6 +80,9 @@ set(SOURCES
     ${SRC_DIR}/resyne/ui/timeline/timeline_viewport.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline_render.cpp
     ${SRC_DIR}/resyne/controller/controller.cpp
+    ${SRC_DIR}/renderer/render_utils.cpp
+    ${SRC_DIR}/renderer/imgui_window_context.cpp
+    ${SRC_DIR}/renderer/detached_visualisation_window.cpp
     ${SRC_DIR}/utilities/cli/batch_exporter.cpp
 )
 

@@ -142,9 +142,11 @@ void Recorder::drawBottomPanel(RecorderState& state,
     const float toolbarWidth = toolbarButtonCount * transportButtonSize +
                                std::max(0, toolbarButtonCount - 1) * toolbarButtonSpacing;
     const float controlsSpacing = transportSpacing * 1.5f;
-    const float lockToExportSpacing = 6.0f;
-    const float lockAndExportWidth = transportButtonSize + lockToExportSpacing + buttonWidth;
-    const float rightGroupWidth = toolbarWidth + controlsSpacing + lockAndExportWidth;
+    const float lockToVisualisationSpacing = 6.0f;
+    const float visualisationToExportSpacing = 6.0f;
+    const float utilityControlsWidth =
+        transportButtonSize + lockToVisualisationSpacing + transportButtonSize + visualisationToExportSpacing + buttonWidth;
+    const float rightGroupWidth = toolbarWidth + controlsSpacing + utilityControlsWidth;
 
     if (ImGui::BeginTable("RecorderBottomControls",
                           3,
@@ -275,7 +277,31 @@ void Recorder::drawBottomPanel(RecorderState& state,
         }
         ImGui::PopStyleColor(3);
 
-        ImGui::SameLine(0.0f, lockToExportSpacing);
+        ImGui::SameLine(0.0f, lockToVisualisationSpacing);
+
+        const bool detachedVisualisationEnabled =
+            hasData &&
+            state.detachedVisualisation.available &&
+            !state.detachedVisualisation.isOpen;
+        if (UI::Utilities::drawToolButton(
+                ICON_FA_WINDOW_RESTORE,
+                nullptr,
+                state.detachedVisualisation.isOpen,
+                detachedVisualisationEnabled,
+                transportButtonSize)) {
+            state.detachedVisualisation.openRequested = true;
+        }
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            if (!state.detachedVisualisation.available) {
+                ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationUnsupportedTooltip);
+            } else if (state.detachedVisualisation.isOpen) {
+                ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationAlreadyOpenTooltip);
+            } else {
+                ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationTooltip);
+            }
+        }
+
+        ImGui::SameLine(0.0f, visualisationToExportSpacing);
 
         if (ImGui::Button("Export", ImVec2(buttonWidth, buttonHeight))) {
             state.showExportDialog = true;

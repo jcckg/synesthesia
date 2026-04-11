@@ -140,4 +140,13 @@ bgfx::RendererType::Enum BgfxContext::rendererType() const {
     return initialised_ ? bgfx::getRendererType() : bgfx::RendererType::Noop;
 }
 
+bool BgfxContext::supportsMultipleWindows() const {
+    if (!initialised_) {
+        return false;
+    }
+
+    const bgfx::Caps* caps = bgfx::getCaps();
+    return caps != nullptr && (caps->supported & BGFX_CAPS_SWAP_CHAIN) != 0;
+}
+
 } // namespace Renderer

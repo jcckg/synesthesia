@@ -24,6 +24,7 @@
 #include "resyne/ui/timeline/timeline_gradient.h"
 #include "sidebar.h"
 #include "ui/audio_visualisation/presentation_state.h"
+#include "ui/audio_visualisation/visualisation_surface.h"
 #include "ui/dragdrop/file_drop_manager.h"
 #include "ui/input/trackpad_gestures.h"
 #include "system_theme_detector.h"
@@ -199,6 +200,11 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 	auto& recorderState = state.resyneState.recorderState;
 	recorderState.trackpadInput = trackpadInput;
+	if (recorderState.detachedVisualisation.isOpen &&
+	    state.visualSettings.activeView == UIState::View::Visualisation) {
+		state.visualSettings.activeView = UIState::View::ReSyne;
+		state.visibility.showUI = true;
+	}
 	recorderState.timeline.gradientRegionValid = false;
 	recorderState.timeline.hoverOverlayAlpha =
 	    std::max(0.0f, recorderState.timeline.hoverOverlayAlpha - io.DeltaTime * 3.0f);
@@ -222,7 +228,10 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		                       : UIState::View::ReSyne;
 	};
 
-	if (state.visibility.showUI && ImGui::IsKeyPressed(ImGuiKey_Tab, false) && io.KeyShift) {
+	if (!recorderState.detachedVisualisation.isOpen &&
+	    state.visibility.showUI &&
+	    ImGui::IsKeyPressed(ImGuiKey_Tab, false) &&
+	    io.KeyShift) {
 		toggleActiveView();
 	}
 
@@ -389,21 +398,17 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
 		Sidebar::render(sidebarArgs);
 
-		bool showSpectrum = (state.deviceState.selectedDeviceIndex >= 0 && !state.deviceState.streamError) || hasPlaybackSession;
-
-		bool showSpectrumInCurrentView = state.visualSettings.activeView == UIState::View::Visualisation;
-
-		if (showSpectrum &&
-		    state.visibility.showSpectrumAnalyser &&
-		    showSpectrumInCurrentView) {
-			state.spectrumAnalyser.drawSpectrumWindow(
-				state.audioSettings.smoothedMagnitudes,
-				devices,
-				state.deviceState.selectedDeviceIndex,
-				displaySize,
-				SIDEBAR_WIDTH,
-				state.visibility.sidebarOnLeft,
-				bottomPanelHeight
+		if (state.visualSettings.activeView == UIState::View::Visualisation) {
+			UI::AudioVisualisation::SurfaceLayout layout;
+			layout.displaySize = displaySize;
+			layout.sidebarWidth = SIDEBAR_WIDTH;
+			layout.sidebarOnLeft = state.visibility.sidebarOnLeft;
+			layout.bottomPanelHeight = bottomPanelHeight;
+			UI::AudioVisualisation::renderSpectrumOverlay(
+				state,
+				audioInput,
+				layout,
+				hasPlaybackSession
 			);
 		}
 
