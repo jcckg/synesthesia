@@ -274,11 +274,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
             recorderState.statusMessage = "Unable to switch output device";
             recorderState.statusMessageTimer = 4.0f;
         } else {
-            recorderState.audioOutput->setPlaybackEQEnabled(state.audioSettings.audibleEQEnabled);
-            recorderState.audioOutput->setPlaybackEQGains(
-                state.audioSettings.lowGain,
-                state.audioSettings.midGain,
-                state.audioSettings.highGain);
             recorderState.audioOutput->seek(playbackPosition);
             if (wasPlaying) {
                 recorderState.audioOutput->play();
@@ -303,14 +298,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	static float currentDisplayR = 0.0f;
 	static float currentDisplayG = 0.0f;
 	static float currentDisplayB = 0.0f;
-
-	if (recorderState.audioOutput) {
-		recorderState.audioOutput->setPlaybackEQEnabled(state.audioSettings.audibleEQEnabled);
-		recorderState.audioOutput->setPlaybackEQGains(
-			state.audioSettings.lowGain,
-			state.audioSettings.midGain,
-			state.audioSettings.highGain);
-	}
 
 	bool hasPlaybackSession = UI::AudioVisualisation::hasPlaybackSession(recorderState);
 

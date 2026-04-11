@@ -7,8 +7,8 @@
 #include <imgui.h>
 
 #include "controls.h"
-#include "controls.h"
 #include "device_manager.h"
+#include "resyne/recorder/recorder.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace Sidebar {
@@ -120,7 +120,9 @@ void renderViewTabs(RenderArgs& args) {
     ImGui::Spacing();
 }
 
-void renderVisualisationSections(const RenderArgs& args) {
+void renderVisualisationSections(const RenderArgs& args,
+                                 const bool liveInputActive,
+                                 const bool showEQControls) {
     Controls::renderVisualiserSettingsPanel(
         args.colourSmoother,
         args.uiState.visualSettings.colourSmoothingSpeed,
@@ -132,17 +134,19 @@ void renderVisualisationSections(const RenderArgs& args) {
         args.layout.controlWidth,
         args.layout.buttonHeight);
 
-    Controls::renderEQControlsPanel(
-        args.uiState.audioSettings.lowGain,
-        args.uiState.audioSettings.midGain,
-        args.uiState.audioSettings.highGain,
-        args.uiState.audioSettings.audibleEQEnabled,
-        args.layout.width,
-        args.layout.padding,
-        args.layout.labelWidth,
-        args.layout.controlWidth,
-        args.layout.buttonHeight,
-        args.layout.contentWidth);
+    if (showEQControls) {
+        Controls::renderEQControlsPanel(
+            args.uiState.audioSettings.lowGain,
+            args.uiState.audioSettings.midGain,
+            args.uiState.audioSettings.highGain,
+            liveInputActive,
+            args.layout.width,
+            args.layout.padding,
+            args.layout.labelWidth,
+            args.layout.controlWidth,
+            args.layout.buttonHeight,
+            args.layout.contentWidth);
+    }
 }
 
 void renderReSyneSections(const RenderArgs& args) {
@@ -202,6 +206,8 @@ void render(RenderArgs& args) {
     bool deviceSelected = args.uiState.deviceState.selectedDeviceIndex >= 0;
     bool streamHealthy = !args.uiState.deviceState.streamError;
     bool hasLiveInput = (deviceSelected && streamHealthy) && !args.isPlaybackActive;
+    const bool hasProcessedAudio = args.recorderState.isRecording || ReSyne::Recorder::hasLoadedAudio(args.recorderState);
+    const bool showEQControls = !hasProcessedAudio;
 
     bool showFrequencyInfo = (deviceSelected && streamHealthy) || args.isPlaybackActive;
 
@@ -210,7 +216,7 @@ void render(RenderArgs& args) {
             Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.uiState, args.recorderState);
         }
         renderReSyneSections(args);
-        renderVisualisationSections(args);
+        renderVisualisationSections(args, hasLiveInput, showEQControls);
     }
 
     if (hasLiveInput) {
@@ -219,7 +225,7 @@ void render(RenderArgs& args) {
 
     if (args.uiState.visualSettings.activeView == UIState::View::Visualisation && showFrequencyInfo) {
         Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.uiState, args.recorderState);
-        renderVisualisationSections(args);
+        renderVisualisationSections(args, hasLiveInput, showEQControls);
     }
 
     Controls::renderAdvancedSettingsPanel(args.uiState

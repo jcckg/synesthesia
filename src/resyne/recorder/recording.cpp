@@ -31,9 +31,6 @@ RecorderState::~RecorderState() {
     if (exportThread.joinable()) {
         exportThread.join();
     }
-    if (audiblePlaybackThread.joinable()) {
-        audiblePlaybackThread.join();
-    }
 }
 
 bool Recorder::hasLoadedAudio(RecorderState& state) {
@@ -61,17 +58,7 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     state.colourCacheDirty = true;
     state.timelinePreviewCache.clear();
     state.timelinePreviewCacheDirty = true;
-    state.sourcePlaybackAudio.clear();
     state.playbackAudio.clear();
-    state.audiblePlaybackBuffer.clear();
-    state.audiblePlaybackReady.store(false, std::memory_order_release);
-    state.audiblePlaybackRequestedSerial.store(0, std::memory_order_release);
-    state.audiblePlaybackCompletedSerial.store(0, std::memory_order_release);
-    state.audiblePlaybackEnabled = false;
-    state.audiblePlaybackApplied = false;
-    state.audiblePlaybackLowGain = 1.0f;
-    state.audiblePlaybackMidGain = 1.0f;
-    state.audiblePlaybackHighGain = 1.0f;
     state.metadata = {};
     state.firstFrameCounter = 0;
     state.fallbackSampleRate = 0.0f;

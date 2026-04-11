@@ -3,7 +3,6 @@
 #include <imgui.h>
 
 #include <atomic>
-#include <chrono>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -94,20 +93,8 @@ struct RecorderState {
     std::string pendingExportPath;
 
     std::unique_ptr<AudioOutput> audioOutput;
-    std::vector<float> sourcePlaybackAudio;
     std::vector<float> playbackAudio;
     bool isPlaybackInitialised = false;
-    std::thread audiblePlaybackThread;
-    std::atomic<bool> audiblePlaybackRunning{false};
-    std::atomic<bool> audiblePlaybackReady{false};
-    std::atomic<uint64_t> audiblePlaybackRequestedSerial{0};
-    std::atomic<uint64_t> audiblePlaybackCompletedSerial{0};
-    std::vector<float> audiblePlaybackBuffer;
-    bool audiblePlaybackEnabled = false;
-    bool audiblePlaybackApplied = false;
-    float audiblePlaybackLowGain = 1.0f;
-    float audiblePlaybackMidGain = 1.0f;
-    float audiblePlaybackHighGain = 1.0f;
 
     bool loopEnabled = true;
     bool showExportDialog = false;
@@ -143,7 +130,6 @@ struct RecorderState {
     size_t timelinePreviewCacheMaxSamples = 0;
     size_t timelinePreviewCacheSourceCount = 0;
     bool timelinePreviewCacheUsesPreviewSamples = false;
-    std::chrono::steady_clock::time_point timelinePreviewCacheLastBuildTime{};
     float timelinePreviewCacheGamma = 0.8f;
     ColourMapper::ColourSpace timelinePreviewCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool timelinePreviewCacheGamutMapping = true;
@@ -153,8 +139,6 @@ struct RecorderState {
     bool timelinePreviewCacheSmoothingEnabled = true;
     bool timelinePreviewCacheManualSmoothing = false;
     float timelinePreviewCacheSmoothingAmount = 0.6f;
-    std::chrono::steady_clock::time_point presentationSettingsLastChangedTime{};
-    bool presentationSettingsSettling = false;
 };
 
 class Recorder {
@@ -217,11 +201,6 @@ public:
     static void seekPlayback(RecorderState& state, float normalisedPosition);
     static void reconstructAudio(RecorderState& state);
     static bool refreshPlaybackOutput(RecorderState& state);
-    static void syncAudiblePlayback(RecorderState& state,
-                                    bool enabled,
-                                    float lowGain,
-                                    float midGain,
-                                    float highGain);
     static void importFromFileThreaded(RecorderState& state,
                                        std::string filepath,
                                        float gamma,

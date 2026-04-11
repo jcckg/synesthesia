@@ -31,7 +31,6 @@ struct AudioSettings {
     float lowGain = 1.0f;
     float midGain = 1.0f;
     float highGain = 1.0f;
-    bool audibleEQEnabled = false;
     std::vector<std::vector<float>> smoothedMagnitudes;
     float spectrumSmoothingFactor = UIConstants::DEFAULT_SPECTRUM_SMOOTHING;
 };

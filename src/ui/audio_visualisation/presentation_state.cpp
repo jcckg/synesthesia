@@ -37,15 +37,35 @@ LivePhaseState livePhaseState;
 
 constexpr float kSilenceMagnitudeThreshold = 1e-5f;
 
-SpectralPresentation::Settings buildPresentationSettings(const UIState& state) {
+SpectralPresentation::Settings buildPresentationSettings(const UIState& state,
+                                                         const float lowGain,
+                                                         const float midGain,
+                                                         const float highGain) {
     SpectralPresentation::Settings settings{};
-    settings.lowGain = state.audioSettings.lowGain;
-    settings.midGain = state.audioSettings.midGain;
-    settings.highGain = state.audioSettings.highGain;
+    settings.lowGain = lowGain;
+    settings.midGain = midGain;
+    settings.highGain = highGain;
     settings.gamma = UIConstants::DEFAULT_GAMMA;
     settings.colourSpace = state.visualSettings.colourSpace;
     settings.applyGamutMapping = state.visualSettings.gamutMappingEnabled;
     return settings;
+}
+
+SpectralPresentation::Settings buildLivePresentationSettings(const UIState& state) {
+    return buildPresentationSettings(
+        state,
+        state.audioSettings.lowGain,
+        state.audioSettings.midGain,
+        state.audioSettings.highGain);
+}
+
+SpectralPresentation::Settings buildPlaybackPresentationSettings(const UIState& state,
+                                                                 const ReSyne::RecorderState& recorderState) {
+    return buildPresentationSettings(
+        state,
+        recorderState.importLowGain,
+        recorderState.importMidGain,
+        recorderState.importHighGain);
 }
 
 void populateSpectralNorms(const ColourMapper::ColourResult& result,
@@ -168,13 +188,14 @@ float resolveSpectrumHistoryFactor(const UIState& state,
 
 void syncRecorderPresentationSettings(UIState& state) {
     auto& recorderState = state.resyneState.recorderState;
+    constexpr float kNeutralGain = 1.0f;
     const bool changed =
         recorderState.importGamma != UIConstants::DEFAULT_GAMMA ||
         recorderState.importColourSpace != state.visualSettings.colourSpace ||
         recorderState.importGamutMapping != state.visualSettings.gamutMappingEnabled ||
-        recorderState.importLowGain != state.audioSettings.lowGain ||
-        recorderState.importMidGain != state.audioSettings.midGain ||
-        recorderState.importHighGain != state.audioSettings.highGain ||
+        recorderState.importLowGain != kNeutralGain ||
+        recorderState.importMidGain != kNeutralGain ||
+        recorderState.importHighGain != kNeutralGain ||
         recorderState.presentationSmoothingEnabled != state.visualSettings.smoothingEnabled ||
         recorderState.presentationManualSmoothing != state.visualSettings.manualSmoothing ||
         recorderState.presentationSmoothingAmount != state.visualSettings.colourSmoothingSpeed;
@@ -182,19 +203,13 @@ void syncRecorderPresentationSettings(UIState& state) {
     recorderState.importGamma = UIConstants::DEFAULT_GAMMA;
     recorderState.importColourSpace = state.visualSettings.colourSpace;
     recorderState.importGamutMapping = state.visualSettings.gamutMappingEnabled;
-    recorderState.importLowGain = state.audioSettings.lowGain;
-    recorderState.importMidGain = state.audioSettings.midGain;
-    recorderState.importHighGain = state.audioSettings.highGain;
+    recorderState.importLowGain = kNeutralGain;
+    recorderState.importMidGain = kNeutralGain;
+    recorderState.importHighGain = kNeutralGain;
     recorderState.presentationSmoothingEnabled = state.visualSettings.smoothingEnabled;
     recorderState.presentationManualSmoothing = state.visualSettings.manualSmoothing;
     recorderState.presentationSmoothingAmount = state.visualSettings.colourSmoothingSpeed;
-
-    if (changed) {
-        recorderState.colourCacheDirty = true;
-        recorderState.timelinePreviewCacheDirty = true;
-        recorderState.presentationSettingsLastChangedTime = std::chrono::steady_clock::now();
-        recorderState.presentationSettingsSettling = true;
-    }
+    (void)changed;
 }
 
 bool hasPlaybackSession(const ReSyne::RecorderState& recorderState) {
@@ -234,7 +249,7 @@ void processPlaybackState(AudioInput& audioInput,
 
     if (!recorderState.samples.empty()) {
         const float scrubberPos = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f);
-        const auto presentationSettings = buildPresentationSettings(state);
+        const auto presentationSettings = buildPlaybackPresentationSettings(state, recorderState);
 
         std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
         ReSyne::RecorderColourCache::ensureCacheLocked(recorderState);
@@ -377,7 +392,7 @@ void processPlaybackState(AudioInput& audioInput,
     if (hasPlaybackColourResult) {
         applyColourSmoothing(
             playbackColourResult,
-            buildPresentationSettings(state),
+            buildPlaybackPresentationSettings(state, recorderState),
             currentDisplayR,
             currentDisplayG,
             currentDisplayB,
@@ -425,13 +440,11 @@ void processLiveAudioState(AudioInput& audioInput,
                            float& currentDisplayG,
                            float& currentDisplayB,
                            const ColourUpdateContext& ctx) {
-    const auto presentationSettings = buildPresentationSettings(state);
+    (void)recorderState;
+    const auto presentationSettings = buildLivePresentationSettings(state);
     const auto spectralData = audioInput.getSpectralData();
     const size_t numChannels = spectralData.magnitudes.size();
 
-    recorderState.importLowGain = state.audioSettings.lowGain;
-    recorderState.importMidGain = state.audioSettings.midGain;
-    recorderState.importHighGain = state.audioSettings.highGain;
     audioInput.setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
 
     const SpectralPresentation::Frame frame = SpectralPresentation::mixChannels(

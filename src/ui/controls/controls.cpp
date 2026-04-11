@@ -33,6 +33,37 @@ void renderWrappedStatusText(const char* text, const ImVec4* colour = nullptr) {
     ImGui::PopTextWrapPos();
 }
 
+SpectralPresentation::Settings buildPresentationSettings(const UIState& state,
+                                                         const float lowGain,
+                                                         const float midGain,
+                                                         const float highGain) {
+    SpectralPresentation::Settings settings{};
+    settings.lowGain = lowGain;
+    settings.midGain = midGain;
+    settings.highGain = highGain;
+    settings.gamma = UIConstants::DEFAULT_GAMMA;
+    settings.colourSpace = state.visualSettings.colourSpace;
+    settings.applyGamutMapping = state.visualSettings.gamutMappingEnabled;
+    return settings;
+}
+
+SpectralPresentation::Settings buildLivePresentationSettings(const UIState& state) {
+    return buildPresentationSettings(
+        state,
+        state.audioSettings.lowGain,
+        state.audioSettings.midGain,
+        state.audioSettings.highGain);
+}
+
+SpectralPresentation::Settings buildPlaybackPresentationSettings(const UIState& state,
+                                                                 const ReSyne::RecorderState& recorderState) {
+    return buildPresentationSettings(
+        state,
+        recorderState.importLowGain,
+        recorderState.importMidGain,
+        recorderState.importHighGain);
+}
+
 }
 
 namespace Controls {
@@ -41,18 +72,13 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
     if (ImGui::CollapsingHeader("Output Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
         ImGui::Indent(10);
 
-        const auto settings = SpectralPresentation::Settings{
-            state.audioSettings.lowGain,
-            state.audioSettings.midGain,
-            state.audioSettings.highGain,
-            UIConstants::DEFAULT_GAMMA,
-            state.visualSettings.colourSpace,
-            state.visualSettings.gamutMappingEnabled
-        };
         const bool hasPlaybackSession =
             recorderState.audioOutput != nullptr &&
             recorderState.audioOutput->getTotalFrames() > 0 &&
             !recorderState.samples.empty();
+        const auto settings = hasPlaybackSession
+            ? buildPlaybackPresentationSettings(state, recorderState)
+            : buildLivePresentationSettings(state);
 
         SpectralPresentation::Frame frame{};
 		float loudnessOverride = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
@@ -172,7 +198,7 @@ void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother,
 void renderEQControlsPanel(float& lowGain,
                           float& midGain,
                           float& highGain,
-                          bool& audibleEQEnabled,
+                          const bool enabled,
                           float sidebarWidth,
                           float sidebarPadding,
                           float labelWidth,
@@ -181,6 +207,12 @@ void renderEQControlsPanel(float& lowGain,
                           float contentWidth) {
     if (ImGui::CollapsingHeader("EQ/Gain")) {
         ImGui::Indent(10);
+
+        if (!enabled) {
+            ImGui::TextDisabled("Live input only");
+            ImGui::Spacing();
+            ImGui::BeginDisabled();
+        }
 
         ImGui::AlignTextToFramePadding();
         ImGui::Text("Lows");
@@ -203,15 +235,13 @@ void renderEQControlsPanel(float& lowGain,
         ImGui::SetNextItemWidth(controlWidth);
         ImGui::SliderFloat("##HighGain", &highGain, 0.0f, 2.0f);
 
-        ImGui::AlignTextToFramePadding();
-        ImGui::Text("Audible");
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(sidebarPadding + contentWidth - ImGui::GetFrameHeight());
-        ImGui::Checkbox("##AudibleEQ", &audibleEQEnabled);
-
         ImGui::SetCursorPosX(sidebarPadding);
         if (ImGui::Button("Reset EQ", ImVec2(contentWidth, buttonHeight))) {
             lowGain = midGain = highGain = 1.0f;
+        }
+
+        if (!enabled) {
+            ImGui::EndDisabled();
         }
 
         ImGui::Unindent(10);

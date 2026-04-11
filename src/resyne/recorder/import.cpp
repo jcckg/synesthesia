@@ -17,6 +17,7 @@ namespace ReSyne {
 namespace {
 
 constexpr float STATUS_MESSAGE_DURATION = 4.0f;
+constexpr float NEUTRAL_EQ_GAIN = 1.0f;
 
 std::string toLower(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
@@ -107,7 +108,7 @@ bool Recorder::importFromFile(RecorderState& state,
         success = ImportHelpers::importAudioFile(
             filepath, gamma, colourSpace, applyGamutMapping,
             FFTProcessor::HOP_SIZE,
-            state.importLowGain, state.importMidGain, state.importHighGain,
+            NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             importedSamples, metadata, errorMessage,
             [&state](float progress) { state.loadingProgress = progress; },
             nullptr,
@@ -131,7 +132,7 @@ bool Recorder::importFromFile(RecorderState& state,
 	} else if (extension == ".resyne" || extension == ".synesthesia") {
 		success = ImportHelpers::importResyneFile(
 			filepath, gamma, colourSpace, applyGamutMapping, state.fallbackSampleRate,
-			state.importLowGain, state.importMidGain, state.importHighGain,
+			NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
 			importedSamples, metadata, errorMessage,
 			[&state](float progress) { state.loadingProgress = progress; },
 			nullptr
@@ -157,7 +158,6 @@ bool Recorder::importFromFile(RecorderState& state,
 
     state.loadingProgress = 0.95f;
     if (!playbackAudio.empty()) {
-        state.sourcePlaybackAudio = playbackAudio;
         state.playbackAudio = std::move(playbackAudio);
         refreshPlaybackOutput(state);
     } else {
@@ -218,7 +218,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         success = ImportHelpers::importAudioFile(
             filepath, gamma, colourSpace, applyGamutMapping,
             FFTProcessor::HOP_SIZE,
-            state.importLowGain, state.importMidGain, state.importHighGain,
+            NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             samples, metadata, errorMessage,
             updateProgress,
             updatePreview,
@@ -245,7 +245,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 		setStatus("Loading .resyne file...");
 		success = ImportHelpers::importResyneFile(
             filepath, gamma, colourSpace, applyGamutMapping, state.fallbackSampleRate,
-            state.importLowGain, state.importMidGain, state.importHighGain,
+            NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             samples, metadata, errorMessage,
             updateProgress,
             updatePreview
@@ -348,10 +348,8 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             state.importErrorMessage.clear();
 
             if (reconstructionSuccess) {
-                state.sourcePlaybackAudio = resolvedPlaybackAudio;
                 state.playbackAudio = std::move(resolvedPlaybackAudio);
             } else {
-                state.sourcePlaybackAudio.clear();
                 state.playbackAudio.clear();
             }
 

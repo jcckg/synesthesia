@@ -1,7 +1,7 @@
 #include "resyne/ui/recorder/shared_components.h"
 
+#include <array>
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 
 #include "imgui.h"
@@ -13,8 +13,6 @@
 namespace ReSyne::UI {
 
 namespace {
-
-constexpr auto kInteractivePreviewRebuildDebounce = std::chrono::milliseconds(120);
 
 bool previewSettingsMatch(const RecorderState& state,
                           const RecorderColourCache::CacheSettings& settings,
@@ -36,28 +34,6 @@ bool previewSettingsMatch(const RecorderState& state,
         state.timelinePreviewCacheSmoothingAmount == settings.smoothingAmount;
 }
 
-bool shouldThrottlePreviewRebuild(const RecorderState& state) {
-    if (state.timelinePreviewCache.empty()) {
-        return false;
-    }
-
-    using namespace std::chrono;
-    const auto now = steady_clock::now();
-    const auto elapsed = duration_cast<milliseconds>(now - state.timelinePreviewCacheLastBuildTime);
-    return elapsed.count() < 50;
-}
-
-bool shouldDeferInteractivePreviewRebuild(const RecorderState& state) {
-    if (!state.presentationSettingsSettling || state.timelinePreviewCache.empty()) {
-        return false;
-    }
-
-    using namespace std::chrono;
-    const auto elapsed = duration_cast<milliseconds>(
-        steady_clock::now() - state.presentationSettingsLastChangedTime);
-    return elapsed < kInteractivePreviewRebuildDebounce;
-}
-
 void storePreviewSettings(RecorderState& state,
                           const RecorderColourCache::CacheSettings& settings,
                           const size_t maxSamples,
@@ -76,7 +52,6 @@ void storePreviewSettings(RecorderState& state,
     state.timelinePreviewCacheManualSmoothing = settings.manualSmoothing;
     state.timelinePreviewCacheSmoothingAmount = settings.smoothingAmount;
     state.timelinePreviewCacheDirty = false;
-    state.timelinePreviewCacheLastBuildTime = std::chrono::steady_clock::now();
 }
 
 SpectralPresentation::Settings buildPresentationSettings(const RecorderColourCache::CacheSettings& settings) {
@@ -93,7 +68,8 @@ SpectralPresentation::Settings buildPresentationSettings(const RecorderColourCac
 Timeline::TimelineSample buildTimelineSample(const AudioColourSample& sample,
                                              const AudioColourSample* previousSample,
                                              const RecorderColourCache::CacheSettings& settings) {
-    const auto entry = RecorderColourCache::computeSampleColour(sample, settings, previousSample);
+    (void)previousSample;
+    const auto entry = RecorderColourCache::computeSampleColour(sample, settings);
     Timeline::TimelineSample output{};
     output.timestamp = sample.timestamp;
     output.colour = entry.rgb;
@@ -217,36 +193,16 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             const float currentLoudness = std::isfinite(currentSample.loudnessLUFS)
                 ? currentSample.loudnessLUFS
                 : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-            SpectralPresentation::Frame previousFrame{};
-            const SpectralPresentation::Frame* previousFramePtr = nullptr;
-            const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
-            if (index > 0 && sampledIndices[index - 1] < sourceSamples.size()) {
-                const auto& previousSample = sourceSamples[sampledIndices[index - 1]];
-                previousFrame = SpectralPresentation::mixChannels(
-                    previousSample.magnitudes,
-                    previousSample.phases,
-                    previousSample.frequencies,
-                    previousSample.channels,
-                    previousSample.sampleRate);
-                previousFramePtr = &previousFrame;
-            }
             const auto preparedFrame = SpectralPresentation::prepareFrame(
                 currentFrame,
                 presentationSettings,
-                currentLoudness,
-                previousFramePtr,
-                std::isfinite(deltaSeconds) && deltaSeconds > 0.0 ? static_cast<float>(deltaSeconds) : (1.0f / 60.0f));
+                currentLoudness);
 
             SmoothingSignalFeatures features{};
-            const auto& modulatedColour = preparedFrame.colourResult;
-            features.spectralFlatness = modulatedColour.spectralFlatness;
-            features.loudnessNormalised = std::clamp(modulatedColour.loudnessNormalised, 0.0f, 1.0f);
-
-            features.brightnessNormalised = std::clamp(modulatedColour.brightnessNormalised, 0.0f, 1.0f);
-            features.phaseInstabilityNorm = std::clamp(modulatedColour.phaseInstabilityNorm, 0.0f, 1.0f);
-            features.phaseCoherenceNorm = std::clamp(modulatedColour.phaseCoherenceNorm, 0.0f, 1.0f);
-            features.phaseTransientNorm = std::clamp(modulatedColour.phaseTransientNorm, 0.0f, 1.0f);
-            populateSpectralNorms(modulatedColour, features);
+            features.spectralFlatness = preparedFrame.colourResult.spectralFlatness;
+            features.loudnessNormalised = std::clamp(preparedFrame.colourResult.loudnessNormalised, 0.0f, 1.0f);
+            features.brightnessNormalised = std::clamp(preparedFrame.colourResult.brightnessNormalised, 0.0f, 1.0f);
+            populateSpectralNorms(preparedFrame.colourResult, features);
 
             float spectralFlux = 0.0f;
             bool fluxComputed = false;
@@ -276,6 +232,7 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
                 spectralFlux > maxFlux * 1.3f &&
                 spectralFlux > 0.001f;
 
+            const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
             const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
                 ? static_cast<float>(deltaSeconds)
                 : (1.0f / 60.0f);
@@ -284,9 +241,9 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             float targetA = 0.0f;
             float targetB = 0.0f;
             ColourMapper::XYZtoOklab(
-                modulatedColour.X,
-                modulatedColour.Y,
-                modulatedColour.Z,
+                preparedFrame.colourResult.X,
+                preparedFrame.colourResult.Y,
+                preparedFrame.colourResult.Z,
                 targetL,
                 targetA,
                 targetB);
@@ -328,32 +285,17 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
         const float currentLoudness = std::isfinite(currentSample.loudnessLUFS)
             ? currentSample.loudnessLUFS
             : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-        SpectralPresentation::Frame previousFrame{};
-        const SpectralPresentation::Frame* previousFramePtr = nullptr;
-        if (index > 0 && sampledIndices[index - 1] < sourceSamples.size()) {
-            const auto& previousSample = sourceSamples[sampledIndices[index - 1]];
-            previousFrame = SpectralPresentation::mixChannels(
-                previousSample.magnitudes,
-                previousSample.phases,
-                previousSample.frequencies,
-                previousSample.channels,
-                previousSample.sampleRate);
-            previousFramePtr = &previousFrame;
-        }
         const auto preparedFrame = SpectralPresentation::prepareFrame(
             currentFrame,
             buildPresentationSettings(settings),
-            currentLoudness,
-            previousFramePtr,
-            std::isfinite(deltaSeconds) && deltaSeconds > 0.0 ? static_cast<float>(deltaSeconds) : (1.0f / 60.0f));
-        const auto& modulatedColour = preparedFrame.colourResult;
+            currentLoudness);
         float targetL = 0.0f;
         float targetA = 0.0f;
         float targetB = 0.0f;
         ColourMapper::XYZtoOklab(
-            modulatedColour.X,
-            modulatedColour.Y,
-            modulatedColour.Z,
+            preparedFrame.colourResult.X,
+            preparedFrame.colourResult.Y,
+            preparedFrame.colourResult.Z,
             targetL,
             targetA,
             targetB);
@@ -399,12 +341,6 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
     if (previewSettingsMatch(state, settings, maxSamples, samplesSize, usePreview)) {
         return state.timelinePreviewCache;
     }
-    if (shouldDeferInteractivePreviewRebuild(state)) {
-        return state.timelinePreviewCache;
-    }
-    if (shouldThrottlePreviewRebuild(state)) {
-        return state.timelinePreviewCache;
-    }
 
     auto unsmoothedSettings = settings;
     unsmoothedSettings.smoothingEnabled = false;
@@ -428,7 +364,7 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
         sampledIndices.reserve(maxSamples);
         const double step = static_cast<double>(samplesSize) / static_cast<double>(maxSamples);
         for (size_t i = 0; i < maxSamples; ++i) {
-            const size_t index = static_cast<size_t>(i * step);
+            const size_t index = static_cast<size_t>(static_cast<double>(i) * step);
             sampledIndices.push_back(index);
             previewData.push_back(convertSample(index));
         }
@@ -437,7 +373,6 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
     applyPreviewSmoothing(previewData, sourceSamples, sampledIndices, settings);
     state.timelinePreviewCache = previewData;
     storePreviewSettings(state, settings, maxSamples, samplesSize, usePreview);
-    state.presentationSettingsSettling = false;
     return state.timelinePreviewCache;
 }
 

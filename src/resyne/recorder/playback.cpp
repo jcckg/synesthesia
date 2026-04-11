@@ -3,105 +3,10 @@
 
 #include <algorithm>
 #include <mutex>
-#include <utility>
 
-#include "audio/analysis/presentation/spectral_presentation.h"
 #include "resyne/encoding/audio/wav_encoder.h"
 
 namespace ReSyne {
-
-namespace {
-
-void applyPlaybackBuffer(RecorderState& state,
-                         std::vector<float> buffer,
-                         const bool preservePosition,
-                         const bool audibleApplied) {
-    const bool wasPlaying = state.audioOutput && state.audioOutput->isPlaying();
-    const size_t playbackPosition = state.audioOutput ? state.audioOutput->getPlaybackPosition() : 0;
-
-    state.playbackAudio = std::move(buffer);
-    state.audiblePlaybackApplied = audibleApplied;
-
-    if (!state.audioOutput || !state.isPlaybackInitialised) {
-        Recorder::refreshPlaybackOutput(state);
-        if (preservePosition && state.audioOutput && !state.playbackAudio.empty()) {
-            const uint32_t numChannels = state.metadata.channels > 0 ? state.metadata.channels : 1;
-            const size_t totalFrames = numChannels > 0 ? state.playbackAudio.size() / numChannels : state.playbackAudio.size();
-            if (totalFrames > 0) {
-                state.audioOutput->seek(std::min(playbackPosition, totalFrames - 1));
-            }
-        }
-        return;
-    }
-
-    const uint32_t numChannels = state.metadata.channels > 0
-        ? state.metadata.channels
-        : (!state.samples.empty() ? state.samples.front().channels : 1);
-
-    if (wasPlaying) {
-        state.audioOutput->pause();
-    }
-
-    state.audioOutput->setAudioData(state.playbackAudio, numChannels);
-    state.audioOutput->setLoopEnabled(state.loopEnabled);
-    state.isPlaybackInitialised = true;
-
-    if (preservePosition && !state.playbackAudio.empty()) {
-        const size_t totalFrames = state.audioOutput->getTotalFrames();
-        if (totalFrames > 0) {
-            state.audioOutput->seek(std::min(playbackPosition, totalFrames - 1));
-        }
-    }
-
-    if (wasPlaying) {
-        state.audioOutput->play();
-    }
-}
-
-std::vector<float> buildAudiblePlaybackBuffer(const std::vector<AudioColourSample>& samples,
-                                              const AudioMetadata& metadata,
-                                              const SpectralPresentation::Settings& settings) {
-    std::vector<SpectralSample> spectralSamples;
-    spectralSamples.reserve(samples.size());
-
-    for (const auto& sample : samples) {
-        SpectralSample spectral;
-        spectral.magnitudes.reserve(sample.magnitudes.size());
-        spectral.phases = sample.phases;
-        spectral.frequencies = sample.frequencies;
-        spectral.timestamp = sample.timestamp;
-        spectral.sampleRate = sample.sampleRate;
-
-        for (size_t channelIndex = 0; channelIndex < sample.magnitudes.size(); ++channelIndex) {
-            SpectralPresentation::Frame frame{};
-            frame.magnitudes = sample.magnitudes[channelIndex];
-            if (channelIndex < sample.phases.size()) {
-                frame.phases = sample.phases[channelIndex];
-            }
-            if (channelIndex < sample.frequencies.size()) {
-                frame.frequencies = sample.frequencies[channelIndex];
-            }
-            frame.sampleRate = sample.sampleRate;
-            spectral.magnitudes.push_back(SpectralPresentation::buildColourMagnitudes(frame, settings));
-        }
-
-        spectralSamples.push_back(std::move(spectral));
-    }
-
-    auto result = WAVEncoder::reconstructFromSpectralData(
-        spectralSamples,
-        metadata.sampleRate,
-        metadata.fftSize,
-        metadata.hopSize);
-
-    if (!result.success) {
-        return {};
-    }
-
-    return result.audioSamples;
-}
-
-}
 
 bool Recorder::refreshPlaybackOutput(RecorderState& state) {
     if (state.playbackAudio.empty()) {
@@ -192,119 +97,20 @@ void Recorder::reconstructAudio(RecorderState& state) {
         maxLength = std::max(maxLength, channelAudioData[ch].size());
     }
 
-    state.sourcePlaybackAudio.clear();
-    state.sourcePlaybackAudio.reserve(maxLength * numChannels);
+    state.playbackAudio.clear();
+    state.playbackAudio.reserve(maxLength * numChannels);
 
     for (size_t i = 0; i < maxLength; ++i) {
         for (uint32_t ch = 0; ch < numChannels; ++ch) {
             if (i < channelAudioData[ch].size()) {
-                state.sourcePlaybackAudio.push_back(channelAudioData[ch][i]);
+                state.playbackAudio.push_back(channelAudioData[ch][i]);
             } else {
-                state.sourcePlaybackAudio.push_back(0.0f);
+                state.playbackAudio.push_back(0.0f);
             }
         }
     }
 
-    state.playbackAudio = state.sourcePlaybackAudio;
     refreshPlaybackOutput(state);
-}
-
-void Recorder::syncAudiblePlayback(RecorderState& state,
-                                   const bool enabled,
-                                   const float lowGain,
-                                   const float midGain,
-                                   const float highGain) {
-    if (state.audioOutput == nullptr || state.samples.empty() || state.sourcePlaybackAudio.empty()) {
-        state.audiblePlaybackEnabled = enabled;
-        state.audiblePlaybackLowGain = lowGain;
-        state.audiblePlaybackMidGain = midGain;
-        state.audiblePlaybackHighGain = highGain;
-        return;
-    }
-
-    if (state.audiblePlaybackReady.load(std::memory_order_acquire)) {
-        if (state.audiblePlaybackThread.joinable()) {
-            state.audiblePlaybackThread.join();
-        }
-
-        const uint64_t completedSerial = state.audiblePlaybackCompletedSerial.load(std::memory_order_acquire);
-        const uint64_t requestedSerial = state.audiblePlaybackRequestedSerial.load(std::memory_order_acquire);
-        if (completedSerial == requestedSerial) {
-            if (state.audiblePlaybackEnabled && !state.audiblePlaybackBuffer.empty()) {
-                applyPlaybackBuffer(state, state.audiblePlaybackBuffer, true, true);
-            } else {
-                applyPlaybackBuffer(state, state.sourcePlaybackAudio, true, false);
-            }
-        }
-        state.audiblePlaybackReady.store(false, std::memory_order_release);
-        state.audiblePlaybackRunning.store(false, std::memory_order_release);
-    }
-
-    const bool changed =
-        state.audiblePlaybackEnabled != enabled ||
-        state.audiblePlaybackLowGain != lowGain ||
-        state.audiblePlaybackMidGain != midGain ||
-        state.audiblePlaybackHighGain != highGain;
-
-    state.audiblePlaybackEnabled = enabled;
-    state.audiblePlaybackLowGain = lowGain;
-    state.audiblePlaybackMidGain = midGain;
-    state.audiblePlaybackHighGain = highGain;
-
-    const bool neutralGains =
-        std::abs(lowGain - 1.0f) < 1e-6f &&
-        std::abs(midGain - 1.0f) < 1e-6f &&
-        std::abs(highGain - 1.0f) < 1e-6f;
-
-    if (!enabled || neutralGains) {
-        if (changed && state.audiblePlaybackApplied) {
-            applyPlaybackBuffer(state, state.sourcePlaybackAudio, true, false);
-        }
-        return;
-    }
-
-    if (!changed && state.audiblePlaybackApplied) {
-        return;
-    }
-
-    if (state.audiblePlaybackRunning.load(std::memory_order_acquire)) {
-        if (changed) {
-            state.audiblePlaybackRequestedSerial.fetch_add(1, std::memory_order_release);
-        }
-        return;
-    }
-
-    if (state.audiblePlaybackThread.joinable()) {
-        state.audiblePlaybackThread.join();
-    }
-
-    const uint64_t serial = state.audiblePlaybackRequestedSerial.fetch_add(1, std::memory_order_release) + 1;
-
-    std::vector<AudioColourSample> samplesCopy;
-    AudioMetadata metadataCopy;
-    {
-        std::lock_guard<std::mutex> lock(state.samplesMutex);
-        samplesCopy = state.samples;
-        metadataCopy = state.metadata;
-    }
-
-    state.audiblePlaybackRunning.store(true, std::memory_order_release);
-    state.audiblePlaybackThread = std::thread(
-        [&state, serial, lowGain, midGain, highGain, samples = std::move(samplesCopy), metadata = std::move(metadataCopy)]() mutable {
-            SpectralPresentation::Settings settings{};
-            settings.lowGain = lowGain;
-            settings.midGain = midGain;
-            settings.highGain = highGain;
-            const auto rebuiltAudio = buildAudiblePlaybackBuffer(samples, metadata, settings);
-            if (serial == state.audiblePlaybackRequestedSerial.load(std::memory_order_acquire) && !rebuiltAudio.empty()) {
-                state.audiblePlaybackBuffer = rebuiltAudio;
-                state.audiblePlaybackCompletedSerial.store(serial, std::memory_order_release);
-                state.audiblePlaybackReady.store(true, std::memory_order_release);
-            } else {
-                state.audiblePlaybackCompletedSerial.store(serial, std::memory_order_release);
-                state.audiblePlaybackReady.store(true, std::memory_order_release);
-            }
-        });
 }
 
 void Recorder::startPlayback(RecorderState& state) {
