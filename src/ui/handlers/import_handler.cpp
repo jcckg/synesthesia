@@ -32,7 +32,6 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 			&ReSyne::Recorder::importFromFileThreaded,
 			std::ref(recorderState),
 			pathToImport,
-			recorderState.importGamma,
 			recorderState.importColourSpace,
 			recorderState.importGamutMapping);
 

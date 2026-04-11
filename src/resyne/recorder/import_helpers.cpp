@@ -61,7 +61,6 @@ std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& deco
 
 bool importAudioFile(
     const std::string& filepath,
-    float gamma,
     ColourMapper::ColourSpace colourSpace,
     bool applyGamutMapping,
     int analysisHopSize,
@@ -77,7 +76,6 @@ bool importAudioFile(
     const bool enableMelWeighting,
     std::vector<float>* playbackAudio
 ) {
-    (void)gamma;
     (void)colourSpace;
     (void)applyGamutMapping;
     if (onProgress) onProgress(0.1f);
@@ -245,7 +243,6 @@ bool importAudioFile(
 
 bool importResyneFile(
     const std::string& filepath,
-    float gamma,
     ColourMapper::ColourSpace colourSpace,
     bool applyGamutMapping,
     float fallbackSampleRate,
@@ -258,7 +255,6 @@ bool importResyneFile(
     const ProgressCallback& onProgress,
     const PreviewCallback& onPreview
 ) {
-    (void)gamma;
     (void)colourSpace;
     (void)applyGamutMapping;
     (void)importLowGain;

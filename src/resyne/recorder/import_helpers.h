@@ -19,7 +19,6 @@ using PreviewCallback = std::function<void(const std::vector<AudioColourSample>&
 
 bool importAudioFile(
     const std::string& filepath,
-    float gamma,
     ColourMapper::ColourSpace colourSpace,
     bool applyGamutMapping,
     int analysisHopSize,
@@ -38,7 +37,6 @@ bool importAudioFile(
 
 bool importResyneFile(
     const std::string& filepath,
-    float gamma,
     ColourMapper::ColourSpace colourSpace,
     bool applyGamutMapping,
     float fallbackSampleRate,

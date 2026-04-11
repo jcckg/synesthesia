@@ -5,7 +5,6 @@
 namespace ReSyne::RecorderColourCache {
 
 struct CacheSettings {
-    float gamma = 0.8f;
     ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
     bool gamutMapping = true;
     float lowGain = 1.0f;

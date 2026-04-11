@@ -16,24 +16,6 @@ std::array<float, 3> encodeDisplayRGB(const float X,
     float b = 0.0f;
     ColourMapper::XYZtoRGB(X, Y, Z, r, g, b, settings.colourSpace, true, settings.applyGamutMapping);
 
-    const float clampedGamma = std::clamp(settings.gamma, 0.1f, 5.0f);
-    if (settings.applyGamutMapping) {
-        r = std::pow(std::clamp(r, 0.0f, 1.0f), clampedGamma);
-        g = std::pow(std::clamp(g, 0.0f, 1.0f), clampedGamma);
-        b = std::pow(std::clamp(b, 0.0f, 1.0f), clampedGamma);
-    } else {
-        const auto applyCurve = [clampedGamma](const float value) {
-            if (value <= 0.0f) {
-                return value;
-            }
-            return std::pow(value, clampedGamma);
-        };
-
-        r = applyCurve(r);
-        g = applyCurve(g);
-        b = applyCurve(b);
-    }
-
     return {r, g, b};
 }
 

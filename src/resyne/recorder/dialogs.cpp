@@ -38,7 +38,6 @@ bool Recorder::exportRecording(RecorderState& state,
             }
             ReSyne::Encoding::Video::ExportOptions options;
             options.ffmpegExecutable = ffmpegLocator.executablePath();
-            options.gamma = state.videoGamma;
             options.colourSpace = state.videoColourSpace;
             options.applyGamutMapping = state.videoGamutMapping;
             options.smoothingAmount = state.videoSmoothingAmount;
@@ -141,7 +140,6 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 					updateProgress(0.02f);
 					ReSyne::Encoding::Video::ExportOptions options;
 					options.ffmpegExecutable = ffmpegLocator.executablePath();
-					options.gamma = state.videoGamma;
 					options.colourSpace = state.videoColourSpace;
 					options.applyGamutMapping = state.videoGamutMapping;
 					options.smoothingAmount = state.videoSmoothingAmount;

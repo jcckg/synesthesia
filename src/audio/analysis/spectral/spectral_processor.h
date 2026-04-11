@@ -42,7 +42,6 @@ public:
 		std::span<const float> phases,
 		std::span<const float> frequencies,
 		float sampleRate,
-		float gamma = 1.0f,
 		ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020,
 		bool applyGamutMapping = true,
 		float overrideLoudnessDb = std::numeric_limits<float>::quiet_NaN()
@@ -50,7 +49,6 @@ public:
 
 	static SpectralColourResult spectrumToColour(
 		const std::vector<FFTProcessor::ComplexBin>& spectrum,
-		float gamma = 1.0f,
 		ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020,
 		bool applyGamutMapping = true,
 		float overrideLoudnessDb = std::numeric_limits<float>::quiet_NaN()

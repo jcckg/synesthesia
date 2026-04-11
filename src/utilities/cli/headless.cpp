@@ -171,7 +171,6 @@ void HeadlessInterface::displayFrequencyInfo() {
 	float currentLoudnessDb = loudnessDb;
 	if (!magnitudes.empty() && !phases.empty()) {
         SpectralPresentation::Settings settings{};
-        settings.gamma = 2.2f;
         settings.colourSpace = oscColourSpace;
         settings.applyGamutMapping = oscGamutMappingEnabled;
 

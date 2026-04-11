@@ -23,7 +23,6 @@ bool previewSettingsMatch(const RecorderState& state,
         state.timelinePreviewCacheMaxSamples == maxSamples &&
         state.timelinePreviewCacheSourceCount == sourceCount &&
         state.timelinePreviewCacheUsesPreviewSamples == usePreview &&
-        state.timelinePreviewCacheGamma == settings.gamma &&
         state.timelinePreviewCacheColourSpace == settings.colourSpace &&
         state.timelinePreviewCacheGamutMapping == settings.gamutMapping &&
         state.timelinePreviewCacheLowGain == settings.lowGain &&
@@ -42,7 +41,6 @@ void storePreviewSettings(RecorderState& state,
     state.timelinePreviewCacheMaxSamples = maxSamples;
     state.timelinePreviewCacheSourceCount = sourceCount;
     state.timelinePreviewCacheUsesPreviewSamples = usePreview;
-    state.timelinePreviewCacheGamma = settings.gamma;
     state.timelinePreviewCacheColourSpace = settings.colourSpace;
     state.timelinePreviewCacheGamutMapping = settings.gamutMapping;
     state.timelinePreviewCacheLowGain = settings.lowGain;
@@ -59,7 +57,6 @@ SpectralPresentation::Settings buildPresentationSettings(const RecorderColourCac
     presentation.lowGain = settings.lowGain;
     presentation.midGain = settings.midGain;
     presentation.highGain = settings.highGain;
-    presentation.gamma = settings.gamma;
     presentation.colourSpace = settings.colourSpace;
     presentation.applyGamutMapping = settings.gamutMapping;
     return presentation;

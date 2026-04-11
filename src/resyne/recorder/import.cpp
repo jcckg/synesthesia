@@ -90,7 +90,6 @@ bool Recorder::isSupportedImportFile(const std::string& filepath) {
 
 bool Recorder::importFromFile(RecorderState& state,
                               const std::string& filepath,
-                              float gamma,
                               ColourMapper::ColourSpace colourSpace,
                               bool applyGamutMapping) {
     state.loadingProgress = 0.0f;
@@ -106,7 +105,7 @@ bool Recorder::importFromFile(RecorderState& state,
         extension == ".mpeg3" || extension == ".mpga" || extension == ".ogg" ||
         extension == ".oga") {
         success = ImportHelpers::importAudioFile(
-            filepath, gamma, colourSpace, applyGamutMapping,
+            filepath, colourSpace, applyGamutMapping,
             FFTProcessor::HOP_SIZE,
             NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             importedSamples, metadata, errorMessage,
@@ -131,7 +130,7 @@ bool Recorder::importFromFile(RecorderState& state,
 		state.loadingProgress = 0.9f;
 	} else if (extension == ".resyne" || extension == ".synesthesia") {
 		success = ImportHelpers::importResyneFile(
-			filepath, gamma, colourSpace, applyGamutMapping, state.fallbackSampleRate,
+			filepath, colourSpace, applyGamutMapping, state.fallbackSampleRate,
 			NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
 			importedSamples, metadata, errorMessage,
 			[&state](float progress) { state.loadingProgress = progress; },
@@ -172,7 +171,6 @@ bool Recorder::importFromFile(RecorderState& state,
 
 void Recorder::importFromFileThreaded(RecorderState& state,
                                       std::string filepath,
-                                      float gamma,
                                       ColourMapper::ColourSpace colourSpace,
                                       bool applyGamutMapping) {
     state.importRunning.store(true, std::memory_order_release);
@@ -216,7 +214,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         extension == ".oga") {
         setStatus("Processing audio...");
         success = ImportHelpers::importAudioFile(
-            filepath, gamma, colourSpace, applyGamutMapping,
+            filepath, colourSpace, applyGamutMapping,
             FFTProcessor::HOP_SIZE,
             NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             samples, metadata, errorMessage,
@@ -244,7 +242,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 	} else if (extension == ".resyne" || extension == ".synesthesia") {
 		setStatus("Loading .resyne file...");
 		success = ImportHelpers::importResyneFile(
-            filepath, gamma, colourSpace, applyGamutMapping, state.fallbackSampleRate,
+            filepath, colourSpace, applyGamutMapping, state.fallbackSampleRate,
             NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             samples, metadata, errorMessage,
             updateProgress,

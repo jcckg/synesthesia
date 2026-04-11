@@ -56,7 +56,6 @@ struct RecorderState {
     float fallbackSampleRate = 0.0f;
     int fallbackFftSize = 0;
     int fallbackHopSize = 0;
-    float importGamma = 0.8f;
     ColourMapper::ColourSpace importColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool importGamutMapping = true;
     float importLowGain = 1.0f;
@@ -111,7 +110,6 @@ struct RecorderState {
     int videoWidth = 1920;
     int videoHeight = 1080;
     int videoFrameRate = 60;
-    float videoGamma = 0.8f;
     ColourMapper::ColourSpace videoColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool videoGamutMapping = true;
     float videoSmoothingAmount = 0.6f;
@@ -119,7 +117,6 @@ struct RecorderState {
 
     std::vector<SampleColourEntry> sampleColourCache;
     bool colourCacheDirty = true;
-    float colourCacheGamma = 0.8f;
     ColourMapper::ColourSpace colourCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool colourCacheGamutMapping = true;
     float colourCacheLowGain = 1.0f;
@@ -137,7 +134,6 @@ struct RecorderState {
     size_t timelinePreviewCacheMaxSamples = 0;
     size_t timelinePreviewCacheSourceCount = 0;
     bool timelinePreviewCacheUsesPreviewSamples = false;
-    float timelinePreviewCacheGamma = 0.8f;
     ColourMapper::ColourSpace timelinePreviewCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
     bool timelinePreviewCacheGamutMapping = true;
     float timelinePreviewCacheLowGain = 1.0f;
@@ -179,7 +175,6 @@ public:
 
     static bool importFromFile(RecorderState& state,
                                const std::string& filepath,
-                               float gamma,
                                ColourMapper::ColourSpace colourSpace,
                                bool applyGamutMapping);
 
@@ -210,7 +205,6 @@ public:
     static bool refreshPlaybackOutput(RecorderState& state);
     static void importFromFileThreaded(RecorderState& state,
                                        std::string filepath,
-                                       float gamma,
                                        ColourMapper::ColourSpace colourSpace,
                                        bool applyGamutMapping);
 

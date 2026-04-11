@@ -114,13 +114,11 @@ VideoColourProfile getVideoColourProfile(const ColourMapper::ColourSpace colourS
 class ColourTimelineSampler {
 public:
     ColourTimelineSampler(const std::vector<AudioColourSample>& source,
-                          float gamma,
                           ColourMapper::ColourSpace colourSpace,
                           bool gamut,
                           float smoothingAmount,
                           double frameInterval)
         : samples_(source),
-          gamma_(gamma),
           colourSpace_(colourSpace),
           gamut_(gamut),
           smoother_(8.0f, 1.0f, 0.3f),
@@ -140,7 +138,6 @@ public:
         const size_t sampleIndex = sampleIndexForTime(timeSeconds);
         const AudioColourSample& sample = samples_[sampleIndex];
         ReSyne::RecorderColourCache::CacheSettings settings{};
-        settings.gamma = gamma_;
         settings.colourSpace = colourSpace_;
         settings.gamutMapping = gamut_;
         settings.smoothingEnabled = false;
@@ -186,7 +183,6 @@ public:
 private:
     const std::vector<AudioColourSample>& samples_;
     std::vector<double> timestamps_;
-    float gamma_;
     ColourMapper::ColourSpace colourSpace_;
     bool gamut_;
     SpringSmoother smoother_;
@@ -363,7 +359,6 @@ bool renderVideo(const std::string& ffmpegCommand,
     std::vector<uint8_t> frame(frameBytes, 0);
 
     ColourTimelineSampler sampler(samples,
-                                  options.gamma,
                                   options.colourSpace,
                                   options.applyGamutMapping,
                                   options.smoothingAmount,

@@ -41,7 +41,6 @@ SpectralPresentation::Settings buildPresentationSettings(const UIState& state,
     settings.lowGain = lowGain;
     settings.midGain = midGain;
     settings.highGain = highGain;
-    settings.gamma = UIConstants::DEFAULT_GAMMA;
     settings.colourSpace = state.visualSettings.colourSpace;
     settings.applyGamutMapping = state.visualSettings.gamutMappingEnabled;
     return settings;

@@ -11,7 +11,6 @@ namespace ReSyne::Encoding::Video {
 
 struct ExportOptions {
     std::string ffmpegExecutable;
-    float gamma = 0.8f;
     ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
     bool applyGamutMapping = true;
     float smoothingAmount = 0.6f;

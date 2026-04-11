@@ -29,7 +29,6 @@ namespace {
 
 static constexpr int   kDefaultPixelsPerSecond = 20;
 static constexpr int   kDefaultHeight          = 800;
-static constexpr float kDefaultGamma           = 0.8f;
 
 static const std::vector<std::string> kAudioExtensions = {
     ".wav", ".flac", ".mp3", ".mpeg3", ".mpga", ".ogg", ".oga"
@@ -243,7 +242,6 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
 
     const bool imported = ReSyne::ImportHelpers::importAudioFile(
         audioPath.string(),
-        kDefaultGamma,
         ColourMapper::ColourSpace::Rec2020,
         true,
         analysisHop,
@@ -264,7 +262,6 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
     std::vector<FrameLab> frameColours;
     frameColours.reserve(samples.size());
     ReSyne::RecorderColourCache::CacheSettings settings{};
-    settings.gamma = kDefaultGamma;
     settings.colourSpace = ColourMapper::ColourSpace::Rec2020;
     settings.gamutMapping = true;
     settings.smoothingEnabled = false;

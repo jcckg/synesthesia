@@ -16,7 +16,6 @@ struct Settings {
     float lowGain = 1.0f;
     float midGain = 1.0f;
     float highGain = 1.0f;
-    float gamma = 0.8f;
     ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
     bool applyGamutMapping = true;
 };

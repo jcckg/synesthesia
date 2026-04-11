@@ -19,7 +19,6 @@ SpectralPresentation::Settings buildPresentationSettings(const CacheSettings& se
     presentation.lowGain = settings.lowGain;
     presentation.midGain = settings.midGain;
     presentation.highGain = settings.highGain;
-    presentation.gamma = settings.gamma;
     presentation.colourSpace = settings.colourSpace;
     presentation.applyGamutMapping = settings.gamutMapping;
     return presentation;
@@ -129,8 +128,7 @@ void smoothEntriesInPlace(std::vector<SampleColourEntry>& entries,
 
 bool settingsMatch(const RecorderState& state,
                    const CacheSettings& settings) {
-    return state.colourCacheGamma == settings.gamma &&
-        state.colourCacheColourSpace == settings.colourSpace &&
+    return state.colourCacheColourSpace == settings.colourSpace &&
         state.colourCacheGamutMapping == settings.gamutMapping &&
         !state.colourCacheDirty;
 }
@@ -166,7 +164,6 @@ SampleColourEntry smoothEntryAgainstPrevious(const SampleColourEntry& previousEn
 
 CacheSettings currentSettings(const RecorderState& state) {
     CacheSettings settings{};
-    settings.gamma = state.importGamma;
     settings.colourSpace = state.importColourSpace;
     settings.gamutMapping = state.importGamutMapping;
     settings.lowGain = state.importLowGain;
@@ -187,11 +184,9 @@ SampleColourEntry computeSampleColour(const AudioColourSample& sample,
 
 void markSettingsIfChanged(RecorderState& state,
                            const CacheSettings& settings) {
-    if (state.colourCacheGamma != settings.gamma ||
-        state.colourCacheColourSpace != settings.colourSpace ||
+    if (state.colourCacheColourSpace != settings.colourSpace ||
         state.colourCacheGamutMapping != settings.gamutMapping) {
         state.colourCacheDirty = true;
-        state.colourCacheGamma = settings.gamma;
         state.colourCacheColourSpace = settings.colourSpace;
         state.colourCacheGamutMapping = settings.gamutMapping;
     }

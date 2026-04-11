@@ -45,7 +45,6 @@ SpectralPresentation::Settings buildPresentationSettings(const UIState& state,
     settings.lowGain = lowGain;
     settings.midGain = midGain;
     settings.highGain = highGain;
-    settings.gamma = UIConstants::DEFAULT_GAMMA;
     settings.colourSpace = state.visualSettings.colourSpace;
     settings.applyGamutMapping = state.visualSettings.gamutMappingEnabled;
     return settings;
@@ -190,7 +189,6 @@ void syncRecorderPresentationSettings(UIState& state) {
     auto& recorderState = state.resyneState.recorderState;
     constexpr float kNeutralGain = 1.0f;
     const bool changed =
-        recorderState.importGamma != UIConstants::DEFAULT_GAMMA ||
         recorderState.importColourSpace != state.visualSettings.colourSpace ||
         recorderState.importGamutMapping != state.visualSettings.gamutMappingEnabled ||
         recorderState.importLowGain != kNeutralGain ||
@@ -200,7 +198,6 @@ void syncRecorderPresentationSettings(UIState& state) {
         recorderState.presentationManualSmoothing != state.visualSettings.manualSmoothing ||
         recorderState.presentationSmoothingAmount != state.visualSettings.colourSmoothingSpeed;
 
-    recorderState.importGamma = UIConstants::DEFAULT_GAMMA;
     recorderState.importColourSpace = state.visualSettings.colourSpace;
     recorderState.importGamutMapping = state.visualSettings.gamutMappingEnabled;
     recorderState.importLowGain = kNeutralGain;

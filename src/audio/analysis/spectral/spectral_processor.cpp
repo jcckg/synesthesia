@@ -164,7 +164,6 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	std::span<const float> /* phases */,
 	std::span<const float> frequencies,
 	const float sampleRate,
-	const float gamma,
 	const ColourMapper::ColourSpace colourSpace,
 	const bool applyGamutMapping,
 	const float overrideLoudnessDb
@@ -381,23 +380,6 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	result.dominantFrequency = result.spectralCentroid;
 	result.dominantWavelength = ColourMapper::logFrequencyToWavelength(result.dominantFrequency);
 
-	const float clampedGamma = std::clamp(gamma, 0.1f, 5.0f);
-	if (applyGamutMapping) {
-		result.r = std::pow(std::clamp(result.r, 0.0f, 1.0f), clampedGamma);
-		result.g = std::pow(std::clamp(result.g, 0.0f, 1.0f), clampedGamma);
-		result.b = std::pow(std::clamp(result.b, 0.0f, 1.0f), clampedGamma);
-	} else {
-		auto applyCurve = [clampedGamma](float value) {
-			if (value <= 0.0f) {
-				return value;
-			}
-			return std::pow(value, clampedGamma);
-		};
-		result.r = applyCurve(result.r);
-		result.g = applyCurve(result.g);
-		result.b = applyCurve(result.b);
-	}
-
 	if (!isFiniteColourResult(result)) {
 		std::cerr
 			<< "[Synesthesia] Non-finite colour frame:"
@@ -427,7 +409,6 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 
 SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 	const std::vector<FFTProcessor::ComplexBin>& spectrum,
-	const float gamma,
 	const ColourMapper::ColourSpace colourSpace,
 	const bool applyGamutMapping,
 	const float overrideLoudnessDb
@@ -448,7 +429,7 @@ SpectralProcessor::SpectralColourResult SpectralProcessor::spectrumToColour(
 		sampleRate = binSize * 2.0f * (spectrum.size() - 1);
 	}
 
-	return spectrumToColour(magnitudes, phases, {}, sampleRate, gamma, colourSpace, applyGamutMapping, overrideLoudnessDb);
+	return spectrumToColour(magnitudes, phases, {}, sampleRate, colourSpace, applyGamutMapping, overrideLoudnessDb);
 }
 
 float SpectralProcessor::calculateSpectralCentroid(
