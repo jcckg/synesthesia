@@ -6,7 +6,7 @@
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/analysis/loudness/loudness_meter.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "constants.h"
 #include "resyne/encoding/audio/wav_encoder.h"
 
@@ -97,7 +97,7 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 	if (!reconstructionResult.success || reconstructionResult.audioSamples.empty()) {
 		for (auto& sample : samples) {
 			if (!std::isfinite(sample.loudnessLUFS)) {
-				sample.loudnessLUFS = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+				sample.loudnessLUFS = ColourCore::LOUDNESS_DB_UNSPECIFIED;
 				sample.splDb = std::numeric_limits<float>::quiet_NaN();
 			}
 		}
@@ -200,7 +200,7 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 			sample.loudnessLUFS = loudness;
 			sample.splDb = loudness + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
 		} else {
-			sample.loudnessLUFS = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+			sample.loudnessLUFS = ColourCore::LOUDNESS_DB_UNSPECIFIED;
 			sample.splDb = std::numeric_limits<float>::quiet_NaN();
 		}
 	}

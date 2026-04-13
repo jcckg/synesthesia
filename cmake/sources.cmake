@@ -2,9 +2,9 @@ set(SOURCES
     ${SRC_DIR}/main.cpp
     ${SRC_DIR}/audio/analysis/fft/fft_processor.cpp
     ${SRC_DIR}/audio/analysis/phase/phase_features.cpp
-    ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
     ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
-    ${SRC_DIR}/audio/analysis/presentation/phase_colour.cpp
+    ${SRC_DIR}/audio/analysis/presentation/sample_sequence.cpp
+    ${SRC_DIR}/colour/colour_core.cpp
     ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
     ${SRC_DIR}/audio/analysis/eq/shared_eq_model.cpp
     ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp
@@ -34,13 +34,13 @@ set(SOURCES
     ${SRC_DIR}/resyne/conversions/colour_space.cpp
     ${SRC_DIR}/resyne/encoding/audio/wav_encoder.cpp
     ${SRC_DIR}/resyne/decoding/wav_decoder_impl.cpp
-    ${SRC_DIR}/colour/colour_mapper.cpp
     ${SRC_DIR}/ui/ui.cpp
     ${SRC_DIR}/ui/handlers/import_handler.cpp
     ${SRC_DIR}/ui/controls/controls.cpp
     ${SRC_DIR}/ui/device_manager/device_manager.cpp
     ${SRC_DIR}/ui/updating/update.cpp
     ${SRC_DIR}/ui/smoothing/smoothing.cpp
+    ${SRC_DIR}/ui/smoothing/smoothing_features.cpp
     ${SRC_DIR}/ui/styling/styling.cpp
     ${SRC_DIR}/ui/spectrum_analyser/spectrum_analyser.cpp
     ${SRC_DIR}/ui/sidebar/sidebar.cpp

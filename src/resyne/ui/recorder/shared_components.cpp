@@ -6,9 +6,12 @@
 
 #include "imgui.h"
 
+#include "audio/analysis/presentation/sample_sequence.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
+#include "colour/colour_core.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "ui/smoothing/smoothing.h"
+#include "ui/smoothing/smoothing_features.h"
 
 namespace ReSyne::UI {
 
@@ -65,8 +68,7 @@ SpectralPresentation::Settings buildPresentationSettings(const RecorderColourCac
 Timeline::TimelineSample buildTimelineSample(const AudioColourSample& sample,
                                              const AudioColourSample* previousSample,
                                              const RecorderColourCache::CacheSettings& settings) {
-    (void)previousSample;
-    const auto entry = RecorderColourCache::computeSampleColour(sample, settings);
+    const auto entry = RecorderColourCache::computeSampleColour(sample, settings, previousSample);
     Timeline::TimelineSample output{};
     output.timestamp = sample.timestamp;
     output.colour = entry.rgb;
@@ -93,23 +95,8 @@ Timeline::TimelineSample buildTimelineSampleFromXYZ(const double timestamp,
         std::clamp(rgb[1], 0.0f, 1.0f),
         std::clamp(rgb[2], 0.0f, 1.0f),
         1.0f);
-    ColourMapper::XYZtoLab(X, Y, Z, output.labL, output.labA, output.labB);
+    ColourCore::XYZtoLab(X, Y, Z, output.labL, output.labA, output.labB);
     return output;
-}
-
-void populateSpectralNorms(const ColourMapper::ColourResult& result,
-                           SmoothingSignalFeatures& features) {
-    constexpr float minCentroid = 100.0f;
-    constexpr float minRolloff = 20.0f;
-    constexpr float rolloffLogMin = 4.32f;
-    constexpr float rolloffLogMax = 14.29f;
-    constexpr float crestLogScale = 4.0f;
-
-    const float centroid = std::max(result.spectralCentroid, minCentroid);
-    features.spectralSpreadNorm = std::clamp(result.spectralSpread / centroid * 0.5f, 0.0f, 1.0f);
-    const float rolloffLog = std::log2(std::max(result.spectralRolloff, minRolloff));
-    features.spectralRolloffNorm = std::clamp((rolloffLog - rolloffLogMin) / (rolloffLogMax - rolloffLogMin), 0.0f, 1.0f);
-    features.spectralCrestNorm = std::clamp(std::log2(std::max(result.spectralCrestFactor, 1.0f)) / crestLogScale, 0.0f, 1.0f);
 }
 
 void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
@@ -123,24 +110,18 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
     SpringSmoother smoother(8.0f, 1.0f, 0.3f);
     smoother.setSmoothingAmount(settings.smoothingAmount);
     if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
-        const auto& initialSample = sourceSamples[sampledIndices.front()];
-        const auto initialFrame = SpectralPresentation::mixChannels(
-            initialSample.magnitudes,
-            initialSample.phases,
-            initialSample.frequencies,
-            initialSample.channels,
-            initialSample.sampleRate);
-        const float initialLoudness = std::isfinite(initialSample.loudnessLUFS)
-            ? initialSample.loudnessLUFS
-            : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-        const auto initialPreparedFrame = SpectralPresentation::prepareFrame(
-            initialFrame,
+        const size_t initialIndex = sampledIndices.front();
+        const auto& initialSample = sourceSamples[initialIndex];
+        const AudioColourSample* initialPreviousSample =
+            initialIndex > 0 ? &sourceSamples[initialIndex - 1] : nullptr;
+        const auto initialPreparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+            initialSample,
             buildPresentationSettings(settings),
-            initialLoudness);
+            initialPreviousSample);
         float initialL = 0.0f;
         float initialA = 0.0f;
         float initialB = 0.0f;
-        ColourMapper::XYZtoOklab(
+        ColourCore::XYZtoOklab(
             initialPreparedFrame.colourResult.X,
             initialPreparedFrame.colourResult.Y,
             initialPreparedFrame.colourResult.Z,
@@ -154,25 +135,17 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
 
     if (!settings.manualSmoothing) {
         const auto presentationSettings = buildPresentationSettings(settings);
-        std::vector<float> previousMagnitudes;
-        std::array<float, 12> fluxHistory{};
-        size_t fluxHistoryIndex = 0;
-
+        ::UI::Smoothing::MagnitudeHistory fluxHistory;
         if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
-            const auto& initialSample = sourceSamples[sampledIndices.front()];
-            const auto initialFrame = SpectralPresentation::mixChannels(
-                initialSample.magnitudes,
-                initialSample.phases,
-                initialSample.frequencies,
-                initialSample.channels,
-                initialSample.sampleRate);
-            const float initialLoudness = std::isfinite(initialSample.loudnessLUFS)
-                ? initialSample.loudnessLUFS
-                : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-            previousMagnitudes = SpectralPresentation::prepareFrame(
-                initialFrame,
-                presentationSettings,
-                initialLoudness).visualiserMagnitudes;
+            const size_t initialIndex = sampledIndices.front();
+            const auto& initialSample = sourceSamples[initialIndex];
+            const AudioColourSample* initialPreviousSample =
+                initialIndex > 0 ? &sourceSamples[initialIndex - 1] : nullptr;
+            fluxHistory.previousMagnitudes =
+                SpectralPresentation::SampleSequence::prepareSampleFrame(
+                    initialSample,
+                    presentationSettings,
+                    initialPreviousSample).visualiserMagnitudes;
         }
 
         for (size_t index = 1; index < previewData.size(); ++index) {
@@ -180,54 +153,20 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
                 continue;
             }
 
-            const auto& currentSample = sourceSamples[sampledIndices[index]];
-            const auto currentFrame = SpectralPresentation::mixChannels(
-                currentSample.magnitudes,
-                currentSample.phases,
-                currentSample.frequencies,
-                currentSample.channels,
-                currentSample.sampleRate);
-            const float currentLoudness = std::isfinite(currentSample.loudnessLUFS)
-                ? currentSample.loudnessLUFS
-                : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-            const auto preparedFrame = SpectralPresentation::prepareFrame(
-                currentFrame,
+            const size_t sampleIndex = sampledIndices[index];
+            const auto& currentSample = sourceSamples[sampleIndex];
+            const AudioColourSample* previousSample =
+                sampleIndex > 0 ? &sourceSamples[sampleIndex - 1] : nullptr;
+            const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+                currentSample,
                 presentationSettings,
-                currentLoudness);
+                previousSample);
 
-            SmoothingSignalFeatures features{};
-            features.spectralFlatness = preparedFrame.colourResult.spectralFlatness;
-            features.loudnessNormalised = std::clamp(preparedFrame.colourResult.loudnessNormalised, 0.0f, 1.0f);
-            features.brightnessNormalised = std::clamp(preparedFrame.colourResult.brightnessNormalised, 0.0f, 1.0f);
-            populateSpectralNorms(preparedFrame.colourResult, features);
-
-            float spectralFlux = 0.0f;
-            bool fluxComputed = false;
-            if (previousMagnitudes.size() == preparedFrame.visualiserMagnitudes.size()) {
-                for (size_t magnitudeIndex = 0; magnitudeIndex < preparedFrame.visualiserMagnitudes.size(); ++magnitudeIndex) {
-                    const float diff = preparedFrame.visualiserMagnitudes[magnitudeIndex] - previousMagnitudes[magnitudeIndex];
-                    spectralFlux += std::max(diff, 0.0f);
-                }
-                spectralFlux /= static_cast<float>(preparedFrame.visualiserMagnitudes.size());
-                fluxComputed = true;
-            }
-            previousMagnitudes = preparedFrame.visualiserMagnitudes;
-
-            if (fluxComputed) {
-                fluxHistory[fluxHistoryIndex] = spectralFlux;
-                fluxHistoryIndex = (fluxHistoryIndex + 1) % fluxHistory.size();
-            }
-
-            float maxFlux = 0.0f;
-            for (const float flux : fluxHistory) {
-                maxFlux = std::max(maxFlux, flux);
-            }
-
-            features.spectralFlux = fluxComputed ? spectralFlux : 0.0f;
-            features.onsetDetected = fluxComputed &&
-                maxFlux > 0.0f &&
-                spectralFlux > maxFlux * 1.3f &&
-                spectralFlux > 0.001f;
+            auto features = ::UI::Smoothing::buildSignalFeatures(preparedFrame.colourResult);
+            ::UI::Smoothing::updateFluxHistory(
+                preparedFrame.visualiserMagnitudes,
+                fluxHistory,
+                features);
 
             const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
             const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
@@ -237,7 +176,7 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             float targetL = 0.0f;
             float targetA = 0.0f;
             float targetB = 0.0f;
-            ColourMapper::XYZtoOklab(
+            ColourCore::XYZtoOklab(
                 preparedFrame.colourResult.X,
                 preparedFrame.colourResult.Y,
                 preparedFrame.colourResult.Z,
@@ -254,7 +193,7 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             float smoothedX = 0.0f;
             float smoothedY = 0.0f;
             float smoothedZ = 0.0f;
-            ColourMapper::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
+            ColourCore::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
             previewData[index] = buildTimelineSampleFromXYZ(
                 previewData[index].timestamp,
                 smoothedX,
@@ -272,24 +211,18 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             ? static_cast<float>(deltaSeconds)
             : (1.0f / 60.0f);
 
-        const auto& currentSample = sourceSamples[sampledIndices[index]];
-        const auto currentFrame = SpectralPresentation::mixChannels(
-            currentSample.magnitudes,
-            currentSample.phases,
-            currentSample.frequencies,
-            currentSample.channels,
-            currentSample.sampleRate);
-        const float currentLoudness = std::isfinite(currentSample.loudnessLUFS)
-            ? currentSample.loudnessLUFS
-            : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-        const auto preparedFrame = SpectralPresentation::prepareFrame(
-            currentFrame,
+        const size_t sampleIndex = sampledIndices[index];
+        const auto& currentSample = sourceSamples[sampleIndex];
+        const AudioColourSample* previousSample =
+            sampleIndex > 0 ? &sourceSamples[sampleIndex - 1] : nullptr;
+        const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+            currentSample,
             buildPresentationSettings(settings),
-            currentLoudness);
+            previousSample);
         float targetL = 0.0f;
         float targetA = 0.0f;
         float targetB = 0.0f;
-        ColourMapper::XYZtoOklab(
+        ColourCore::XYZtoOklab(
             preparedFrame.colourResult.X,
             preparedFrame.colourResult.Y,
             preparedFrame.colourResult.Z,
@@ -306,7 +239,7 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
         float smoothedX = 0.0f;
         float smoothedY = 0.0f;
         float smoothedZ = 0.0f;
-        ColourMapper::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
+        ColourCore::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
         previewData[index] = buildTimelineSampleFromXYZ(
             previewData[index].timestamp,
             smoothedX,

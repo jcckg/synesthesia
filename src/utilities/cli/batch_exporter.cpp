@@ -16,7 +16,7 @@
 #include <lodepng.h>
 
 #include "audio/analysis/fft/fft_processor.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "resyne/recorder/import_helpers.h"
@@ -153,7 +153,8 @@ bool writeGradientMetadata(const fs::path& outputPath,
 bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
                        const std::string& outputPath,
                        int imageWidth,
-                       int imageHeight) {
+                       int imageHeight,
+                       const ColourCore::ColourSpace colourSpace) {
     if (frameColours.empty()) {
         return false;
     }
@@ -180,7 +181,7 @@ bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
 
         // Convert Lab → RGB
         float r = 0.0f, g = 0.0f, b = 0.0f;
-        ColourMapper::LabtoRGB(L, labA, labB, r, g, b, ColourMapper::ColourSpace::Rec2020);
+        ColourCore::LabtoRGB(L, labA, labB, r, g, b, colourSpace, true);
         r = std::clamp(r, 0.0f, 1.0f);
         g = std::clamp(g, 0.0f, 1.0f);
         b = std::clamp(b, 0.0f, 1.0f);
@@ -207,6 +208,18 @@ bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
     state.info_png.color.colortype = LCT_RGB;
     state.info_png.color.bitdepth = 16;
     state.encoder.auto_convert = 0;
+    const auto& pngProfile = ColourCore::pngProfileFor(colourSpace);
+    if (pngProfile.useSrgbChunk) {
+        state.info_png.srgb_defined = 1;
+        state.info_png.srgb_intent = pngProfile.renderingIntent;
+    }
+    if (pngProfile.useCicpChunk) {
+        state.info_png.cicp_defined = 1;
+        state.info_png.cicp_color_primaries = pngProfile.colourPrimaries;
+        state.info_png.cicp_transfer_function = pngProfile.transferCharacteristics;
+        state.info_png.cicp_matrix_coefficients = pngProfile.matrixCoefficients;
+        state.info_png.cicp_video_full_range_flag = pngProfile.fullRangeFlag;
+    }
 
     std::vector<unsigned char> encoded;
     const unsigned error = lodepng::encode(encoded, pixels, static_cast<unsigned>(imageWidth), static_cast<unsigned>(imageHeight), state);
@@ -242,7 +255,7 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
 
     const bool imported = ReSyne::ImportHelpers::importAudioFile(
         audioPath.string(),
-        ColourMapper::ColourSpace::Rec2020,
+        ColourCore::ColourSpace::Rec2020,
         true,
         analysisHop,
         1.0f, 1.0f, 1.0f,
@@ -262,7 +275,7 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
     std::vector<FrameLab> frameColours;
     frameColours.reserve(samples.size());
     ReSyne::RecorderColourCache::CacheSettings settings{};
-    settings.colourSpace = ColourMapper::ColourSpace::Rec2020;
+    settings.colourSpace = ColourCore::ColourSpace::Rec2020;
     settings.gamutMapping = true;
     settings.smoothingEnabled = false;
     settings.smoothingAmount = 0.0f;
@@ -315,7 +328,7 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
 
     if (exportsPreviewPNG(gradientOutputMode)) {
         const fs::path pngPath = gradientsDir / (stem + ".png");
-        if (!renderGradientPNG(frameColours, pngPath.string(), imageWidth, imageHeight)) {
+        if (!renderGradientPNG(frameColours, pngPath.string(), imageWidth, imageHeight, settings.colourSpace)) {
             result.detail = "failed (PNG write error)";
             return result;
         }

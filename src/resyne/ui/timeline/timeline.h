@@ -6,7 +6,7 @@
 #include <vector>
 
 #include "resyne/ui/toolbar/tool_state.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 
 enum class TimelineScrubBehaviour {
     None,
@@ -59,7 +59,7 @@ struct RenderContext {
     ImVec2 size = ImVec2(0.0f, 0.0f);
     float dropFlashAlpha = 0.0f;
     float deltaTime = 0.0f;
-    ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
     bool applyGamutMapping = true;
     std::optional<float> playbackNormalisedPosition;
     bool allowScrubbing = false;
@@ -81,7 +81,7 @@ RenderResult renderTimeline(TimelineState& state, const RenderContext& context);
 
 ImVec4 getColourAt(const std::vector<TimelineSample>& samples,
                    float normalisedPosition,
-                   ColourMapper::ColourSpace colourSpace,
+                   ColourCore::ColourSpace colourSpace,
                    bool applyGamutMapping = true);
 
 }

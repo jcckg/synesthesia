@@ -1,4 +1,4 @@
-#include "colour_mapper.h"
+#include "colour/colour_core.h"
 #include "smoothing.h"
 
 #include <algorithm>
@@ -85,8 +85,14 @@ void SpringSmoother::initialiseToDefaults() {
 }
 
 void SpringSmoother::reset(const float r, const float g, const float b) {
-    float L, a, b_comp;
-    ColourMapper::RGBtoOklab(r, g, b, L, a, b_comp);
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    float L = 0.0f;
+    float a = 0.0f;
+    float b_comp = 0.0f;
+    ColourCore::RGBtoXYZ(r, g, b, X, Y, Z, ColourCore::ColourSpace::Rec2020);
+    ColourCore::XYZtoOklab(X, Y, Z, L, a, b_comp);
 
     resetOklab(L, a, b_comp);
 }
@@ -99,7 +105,11 @@ void SpringSmoother::resetOklab(const float L, const float a, const float b_comp
     float r = 0.0f;
     float g = 0.0f;
     float b = 0.0f;
-    ColourMapper::OklabtoRGB(L, a, b_comp, r, g, b);
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    ColourCore::OklabtoXYZ(L, a, b_comp, X, Y, Z);
+    ColourCore::XYZtoRGB(X, Y, Z, r, g, b, ColourCore::ColourSpace::Rec2020, true, true);
     m_currentRGB[0] = r;
     m_currentRGB[1] = g;
     m_currentRGB[2] = b;
@@ -108,7 +118,11 @@ void SpringSmoother::resetOklab(const float L, const float a, const float b_comp
 
 void SpringSmoother::setTargetColour(const float r, const float g, const float b) {
     float L, a, b_comp;
-    ColourMapper::RGBtoOklab(r, g, b, L, a, b_comp);
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    ColourCore::RGBtoXYZ(r, g, b, X, Y, Z, ColourCore::ColourSpace::Rec2020);
+    ColourCore::XYZtoOklab(X, Y, Z, L, a, b_comp);
 
     setTargetOklab(L, a, b_comp);
 }
@@ -160,8 +174,12 @@ bool SpringSmoother::update(float deltaTime) {
 
 void SpringSmoother::updateRGBCache() const {
     float r, g, b;
-    ColourMapper::OklabtoRGB(m_channels[0].position, m_channels[1].position,
-                          m_channels[2].position, r, g, b);
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    ColourCore::OklabtoXYZ(m_channels[0].position, m_channels[1].position,
+                           m_channels[2].position, X, Y, Z);
+    ColourCore::XYZtoRGB(X, Y, Z, r, g, b, ColourCore::ColourSpace::Rec2020, true, true);
 
     m_currentRGB[0] = std::clamp(r, 0.0f, 1.0f);
     m_currentRGB[1] = std::clamp(g, 0.0f, 1.0f);

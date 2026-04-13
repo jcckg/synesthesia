@@ -46,27 +46,27 @@ std::string toLowerCopy(const char* value) {
     return normalised;
 }
 
-ColourMapper::ColourSpace parseColourSpace(const osc::ReceivedMessageArgument& argument) {
+ColourCore::ColourSpace parseColourSpace(const osc::ReceivedMessageArgument& argument) {
     if (argument.IsString()) {
         const std::string value = toLowerCopy(argument.AsStringUnchecked());
         if (value == "rec2020" || value == "rec.2020" || value == "0") {
-            return ColourMapper::ColourSpace::Rec2020;
+            return ColourCore::ColourSpace::Rec2020;
         }
         if (value == "displayp3" || value == "display p3" || value == "p3" || value == "1") {
-            return ColourMapper::ColourSpace::DisplayP3;
+            return ColourCore::ColourSpace::DisplayP3;
         }
         if (value == "srgb" || value == "s-rgb" || value == "2") {
-            return ColourMapper::ColourSpace::SRGB;
+            return ColourCore::ColourSpace::SRGB;
         }
     }
     if (argument.IsInt32()) {
         switch (argument.AsInt32Unchecked()) {
             case 0:
-                return ColourMapper::ColourSpace::Rec2020;
+                return ColourCore::ColourSpace::Rec2020;
             case 1:
-                return ColourMapper::ColourSpace::DisplayP3;
+                return ColourCore::ColourSpace::DisplayP3;
             case 2:
-                return ColourMapper::ColourSpace::SRGB;
+                return ColourCore::ColourSpace::SRGB;
             default:
                 break;
         }
@@ -127,7 +127,7 @@ void OSCPacketListener::ProcessMessage(const osc::ReceivedMessage& message, cons
                 throw osc::MissingArgumentException();
             }
 
-            const ColourMapper::ColourSpace colourSpace = parseColourSpace(*argument++);
+            const ColourCore::ColourSpace colourSpace = parseColourSpace(*argument++);
             if (argument != message.ArgumentsEnd()) {
                 throw osc::ExcessArgumentException();
             }

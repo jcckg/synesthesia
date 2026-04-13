@@ -1,168 +1,18 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cmath>
-#include <limits>
-#include <vector>
-#include "constants.h"
+#include <cstddef>
 
-#ifdef USE_NEON_OPTIMISATIONS
-#include "neon/colour_mapper_neon.h"
-#endif
+namespace Colour::CIE2006 {
 
-#if defined(__SSE__) || defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64)
-#include "sse/colour_mapper_sse.h"
-#endif
+constexpr size_t kTableSize = 441;
+constexpr float kSubAudioBrightnessBoost = 3.0f;
+constexpr float kEpsilonSmall = 1e-6f;
 
-class ColourMapper {
-public:
-	struct ColourResult {
-		float r;
-		float g;
-		float b;
-		float X;
-		float Y;
-		float Z;
-		float dominantWavelength;
-		float dominantFrequency;
-		float colourIntensity;
-		float L;
-		float a;
-		float b_comp;
-		float spectralCentroid;
-		float spectralFlatness;
-		float spectralSpread;
-		float spectralRolloff;
-		float spectralCrestFactor;
-		float loudnessDb;
-		float frameLoudnessDb;
-		float brightnessLoudnessDb;
-		float loudnessNormalised;
-		float brightnessNormalised;
-		float transientMix;
-		float estimatedSPL;
-		float luminanceCdM2;
-		float phaseInstabilityNorm = 0.0f;
-		float phaseCoherenceNorm = 0.0f;
-		float phaseTransientNorm = 0.0f;
-	};
-
-	struct SpectralCharacteristics {
-		float flatness;
-		float centroid;
-		float spread;
-		float normalisedSpread = 0.0f;
-	};
-
-	static constexpr float MIN_WAVELENGTH = synesthesia::constants::MIN_WAVELENGTH_NM;
-	static constexpr float MAX_WAVELENGTH = synesthesia::constants::MAX_WAVELENGTH_NM;
-	static constexpr float MIN_FREQ = synesthesia::constants::MIN_AUDIO_FREQ;
-	static constexpr float MAX_FREQ = synesthesia::constants::MAX_AUDIO_FREQ;
-	static constexpr size_t CIE_TABLE_SIZE = 441;
-
-	static constexpr float SUB_AUDIO_BRIGHTNESS_BOOST = 3.0f;
-	static constexpr float SPREAD_NORMALISATION = 5000.0f;
-	static constexpr float EPSILON_SMALL = 1e-6f;
-	static constexpr float EPSILON_TINY = 1e-10f;
-	static constexpr float SRGB_GAMMA_ENCODE_THRESHOLD = 0.0031308f;
-	static constexpr float SRGB_GAMMA_DECODE_THRESHOLD = 0.04045f;
-	static constexpr float LOUDNESS_DB_UNSPECIFIED = std::numeric_limits<float>::quiet_NaN();
-
-	using ColourSpace = ::ColourSpace;
-
-	static ColourResult spectrumToColour(const std::vector<float>& magnitudes,
-								 const std::vector<float>& phases,
-								 const std::vector<float>& frequencies = {},
-								 float sampleRate = 44100.0f,
-								 ColourSpace colourSpace = ColourSpace::Rec2020,
-								 bool applyGamutMapping = true,
-								 float overrideLoudnessDb = LOUDNESS_DB_UNSPECIFIED);
-
-	static float logFrequencyToWavelength(float freq);
-	static void wavelengthToRGBCIE(float wavelength, float& r, float& g, float& b,
-								   ColourSpace colourSpace = ColourSpace::Rec2020,
-								   bool applyGamutMapping = true);
-	static float wavelengthToLogFrequency(float wavelength);
-	static float XYZtoDominantWavelength(float X, float Y, float Z);
-	static void RGBtoLab(float r, float g, float b, float& L, float& a, float& b_comp,
-						 ColourSpace colourSpace = ColourSpace::Rec2020);
-	static void LabtoRGB(float L, float a, float b_comp, float& r, float& g, float& b,
-						 ColourSpace colourSpace = ColourSpace::Rec2020);
-	static void XYZtoLab(float X, float Y, float Z, float& L, float& a, float& b);
-	static void LabtoXYZ(float L, float a, float b, float& X, float& Y, float& Z);
-
-	static void RGBtoOklab(float r, float g, float b, float& L, float& a, float& b_comp,
-						   ColourSpace colourSpace = ColourSpace::Rec2020);
-	static void OklabtoRGB(float L, float a, float b_comp, float& r, float& g, float& b,
-						   ColourSpace colourSpace = ColourSpace::Rec2020);
-
-	static void XYZtoRGB(float X, float Y, float Z, float& r, float& g, float& b,
-						 ColourSpace colourSpace, bool applyGamma = true,
-						 bool applyGamutMapping = true);
-	static void RGBtoXYZ(float r, float g, float b, float& X, float& Y, float& Z,
-						 ColourSpace colourSpace);
-	static void XYZtoOklab(float X, float Y, float Z, float& L, float& a, float& b_comp);
-	static void OklabtoXYZ(float L, float a, float b_comp, float& X, float& Y, float& Z);
-	static void decodeRGB(float r, float g, float b,
-						  float& linearR, float& linearG, float& linearB,
-						  ColourSpace colourSpace);
-	static void encodeRGB(float linearR, float linearG, float linearB,
-						  float& r, float& g, float& b,
-						  ColourSpace colourSpace,
-						  bool applyGamutMapping = true);
-	static void linearRGBToXYZ(float linearR, float linearG, float linearB,
-							   float& X, float& Y, float& Z,
-							   ColourSpace colourSpace);
-	static void XYZtoLinearRGB(float X, float Y, float Z,
-							   float& linearR, float& linearG, float& linearB,
-							   ColourSpace colourSpace);
-	static const std::array<float, 9>& getRGBtoXYZMatrix(ColourSpace colourSpace);
-	static const std::array<float, 9>& getXYZtoRGBMatrix(ColourSpace colourSpace);
-	static void gamutMapRGB(float& r, float& g, float& b);
-
-	static SpectralCharacteristics calculateSpectralCharacteristics(
-		const std::vector<float>& spectrum, float sampleRate);
-
-	static void interpolateCIE(float wavelength, float& X, float& Y, float& Z);
-
-	// Nayatani (1997) Helmholtz-Kohlrausch VCC correction for luminous colours
-	// Returns the ratio of perceived brightness to CIE luminance
-	// Values > 1 indicate the colour appears brighter than its luminance suggests
-	// strength [0,1] controls blend: 0 = no correction, 1 = full Nayatani VCC
-	static float helmholtzKohlrauschCorrection(float X, float Y, float Z, float strength = 0.35f);
-
-private:
-	static bool isValidFrequencyMagnitudePair(float frequency, float magnitude) {
-		return std::isfinite(frequency) && std::isfinite(magnitude) &&
-		       frequency > 0.0f && magnitude >= 0.0f;
-	}
-
-	static constexpr bool isValidFrequency(float frequency) {
-		return frequency >= MIN_FREQ && frequency <= MAX_FREQ;
-	}
-
-	struct RayIntersectionResult {
-		bool found;
-		float wavelength;
-		float parameterT;
-	};
-
-	static RayIntersectionResult findSpectrumIntersection(
-		float rayDX, float rayDY, float whiteX, float whiteY);
-
-	static float findClosestSpectralMatch(
-		float rayDX, float rayDY, float whiteX, float whiteY, float rayLength);
-
-	// CIE Standard Illuminant D65 reference white point for CIE 2006 2° observer
-	static constexpr float REF_X = synesthesia::constants::CIE_D65_REF_X;
-	static constexpr float REF_Y = synesthesia::constants::CIE_D65_REF_Y;
-	static constexpr float REF_Z = synesthesia::constants::CIE_D65_REF_Z;
-
-	// CIE 2006 2-degree standard observer dataset
-	// Wavelength range: 390-830 nm with 1 nm steps
-	// Format: {wavelength (nm), x̄, ȳ, z̄}
-	// Reference: http://www.cvrl.org/
-	static constexpr std::array<std::array<float, 4>, CIE_TABLE_SIZE> CIE_2006 = {
+// CIE 2006 2° colour-matching functions from CVRL, 390-830 nm at 1 nm.
+constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{{390, 3.769647E-03f, 4.146161E-04f, 1.847260E-02f},
 		{391, 4.532416E-03f, 5.028333E-04f, 2.221101E-02f},
 		{392, 5.446553E-03f, 6.084991E-04f, 2.669819E-02f},
@@ -604,4 +454,45 @@ private:
 		{828, 1.978894E-06f, 7.914539E-07f, 0.000000E+00f},
 		{829, 1.867268E-06f, 7.470770E-07f, 0.000000E+00f},
 		{830, 1.762465E-06f, 7.053860E-07f, 0.000000E+00f}}};
-};
+
+inline void interpolate(float wavelength, float& X, float& Y, float& Z) {
+	const float tableMin = kTable.front()[0];
+	const float tableMax = kTable.back()[0];
+
+	if (wavelength > tableMax) {
+		const auto& lastEntry = kTable[kTableSize - 1];
+		X = lastEntry[1] * 0.1f * kSubAudioBrightnessBoost;
+		Y = lastEntry[2] * 0.1f * kSubAudioBrightnessBoost;
+		Z = lastEntry[3] * 0.1f * kSubAudioBrightnessBoost;
+		return;
+	}
+
+	if (!std::isfinite(wavelength)) {
+		wavelength = tableMin;
+	}
+
+	const float clamped = std::clamp(wavelength, tableMin, tableMax);
+	const float indexFloat = clamped - tableMin;
+	size_t index = static_cast<size_t>(std::floor(indexFloat));
+
+	if (index >= kTableSize - 1) {
+		index = kTableSize - 2;
+	}
+
+	const auto& entry0 = kTable[index];
+	const auto& entry1 = kTable[index + 1];
+	const float lambda0 = entry0[0];
+	const float lambda1 = entry1[0];
+
+	float t = 0.0f;
+	if (lambda1 - lambda0 > kEpsilonSmall) {
+		t = (clamped - lambda0) / (lambda1 - lambda0);
+		t = std::clamp(t, 0.0f, 1.0f);
+	}
+
+	X = std::lerp(entry0[1], entry1[1], t);
+	Y = std::lerp(entry0[2], entry1[2], t);
+	Z = std::lerp(entry0[3], entry1[3], t);
+}
+
+} // namespace Colour::CIE2006

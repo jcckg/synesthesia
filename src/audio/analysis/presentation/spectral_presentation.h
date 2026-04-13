@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 
 namespace PhaseAnalysis {
 struct PhaseFeatureMetrics;
@@ -16,7 +16,7 @@ struct Settings {
     float lowGain = 1.0f;
     float midGain = 1.0f;
     float highGain = 1.0f;
-    ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
     bool applyGamutMapping = true;
 };
 
@@ -29,7 +29,7 @@ struct Frame {
 
 struct PreparedFrame {
     std::vector<float> visualiserMagnitudes;
-    ColourMapper::ColourResult colourResult;
+    ColourCore::FrameResult colourResult;
 };
 
 Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
@@ -64,8 +64,8 @@ std::array<float, 3> displayRGBFromXYZ(float X,
                                        float Z,
                                        const Settings& settings);
 
-ColourMapper::ColourResult buildColourResult(const Frame& frame,
-                                             const Settings& settings,
-                                             float loudnessDb);
+ColourCore::FrameResult buildColourResult(const Frame& frame,
+                                          const Settings& settings,
+                                          float loudnessDb);
 
 }

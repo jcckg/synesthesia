@@ -8,7 +8,7 @@
 
 #include "audio_input.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
-#include "colour_mapper.h"
+#include "colour/colour_core.h"
 #include "fft_processor.h"
 #include "ui/smoothing/smoothing.h"
 
@@ -31,7 +31,7 @@ private:
     
     std::vector<AudioInput::DeviceInfo> devices;
     AudioInput audioInput;
-    ColourMapper::ColourSpace oscColourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace oscColourSpace = ColourCore::ColourSpace::Rec2020;
     bool oscGamutMappingEnabled = true;
     std::string oscDestination_ = "127.0.0.1";
     uint16_t oscSendPort_ = 7000;

@@ -4,7 +4,7 @@
 #include <vector>
 #include <functional>
 #include "resyne/encoding/formats/exporter.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 
 class FFTProcessor;
 class Equaliser;
@@ -19,7 +19,7 @@ using PreviewCallback = std::function<void(const std::vector<AudioColourSample>&
 
 bool importAudioFile(
     const std::string& filepath,
-    ColourMapper::ColourSpace colourSpace,
+    ColourCore::ColourSpace colourSpace,
     bool applyGamutMapping,
     int analysisHopSize,
     float importLowGain,
@@ -37,7 +37,7 @@ bool importAudioFile(
 
 bool importResyneFile(
     const std::string& filepath,
-    ColourMapper::ColourSpace colourSpace,
+    ColourCore::ColourSpace colourSpace,
     bool applyGamutMapping,
     float fallbackSampleRate,
     float importLowGain,

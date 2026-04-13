@@ -5,7 +5,7 @@
 #include "timeline_render.h"
 #include "timeline_gradient.h"
 #include "resyne/encoding/formats/exporter.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 
 namespace ReSyne::Timeline {
 
@@ -15,7 +15,7 @@ RenderResult renderTimeline(TimelineState& state, const RenderContext& context) 
 
 ImVec4 getColourAt(const std::vector<TimelineSample>& samples,
                    float normalisedPosition,
-                   ColourMapper::ColourSpace colourSpace,
+                   ColourCore::ColourSpace colourSpace,
                    const bool applyGamutMapping) {
     if (samples.empty()) {
         return ImVec4(0.0f, 0.0f, 0.0f, 1.0f);

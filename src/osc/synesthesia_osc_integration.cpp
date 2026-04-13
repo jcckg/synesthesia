@@ -1,6 +1,6 @@
 #include "synesthesia_osc_integration.h"
 
-#include "colour_mapper.h"
+#include "colour/colour_core.h"
 
 #include <algorithm>
 #include <chrono>
@@ -112,7 +112,7 @@ void SynesthesiaOSCIntegration::updateColourData(
         return;
     }
 
-    const auto spectralCharacteristics = ColourMapper::calculateSpectralCharacteristics(magnitudes, sampleRate);
+    const auto spectralCharacteristics = ColourCore::calculateSpectralCharacteristics(magnitudes, sampleRate);
 
     OSCFrameData frame;
     frame.sampleRate = static_cast<int32_t>(sampleRate);
@@ -121,7 +121,7 @@ void SynesthesiaOSCIntegration::updateColourData(
         : static_cast<int32_t>(magnitudes.size() * 2);
     frame.frameTimestamp = currentTimestampMicros();
     frame.frequency = spectralCentroid;
-    frame.wavelength = ColourMapper::logFrequencyToWavelength(spectralCentroid);
+    frame.wavelength = ColourCore::logFrequencyToWavelength(spectralCentroid);
     frame.r = r;
     frame.g = g;
     frame.b = b;

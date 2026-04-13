@@ -4,14 +4,14 @@
 #include <string>
 #include <vector>
 
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "resyne/encoding/formats/exporter.h"
 
 namespace ReSyne::Encoding::Video {
 
 struct ExportOptions {
     std::string ffmpegExecutable;
-    ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
     bool applyGamutMapping = true;
     float smoothingAmount = 0.6f;
     int width = 1920;

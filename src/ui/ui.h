@@ -6,7 +6,7 @@
 #include "styling.h"
 #include "device_manager.h"
 #include "resyne/controller/state.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "spectrum_analyser.h"
 #include "imgui.h"
 #include <array>
@@ -38,7 +38,7 @@ struct VisualSettings {
     float colourSmoothingSpeed = UIConstants::DEFAULT_SMOOTHING_SPEED;
     bool smoothingEnabled = true;
     bool manualSmoothing = false;
-    ColourMapper::ColourSpace colourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
     bool gamutMappingEnabled = true;
 
     enum class View {

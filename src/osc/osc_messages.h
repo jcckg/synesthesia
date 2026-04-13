@@ -1,6 +1,6 @@
 #pragma once
 
-#include "colour_mapper.h"
+#include "colour/colour_core.h"
 
 #include <cstdint>
 #include <optional>
@@ -49,7 +49,7 @@ struct SetSpectrumSmoothingCommand {
 };
 
 struct SetColourSpaceCommand {
-    ColourMapper::ColourSpace colourSpace;
+    ColourCore::ColourSpace colourSpace;
 };
 
 struct SetGamutMappingCommand {
@@ -68,7 +68,7 @@ struct PendingOSCSettings {
     std::optional<bool> smoothingEnabled;
     std::optional<float> colourSmoothingSpeed;
     std::optional<float> spectrumSmoothingAmount;
-    std::optional<ColourMapper::ColourSpace> colourSpace;
+    std::optional<ColourCore::ColourSpace> colourSpace;
     std::optional<bool> gamutMappingEnabled;
 };
 

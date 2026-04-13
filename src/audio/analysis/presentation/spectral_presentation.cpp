@@ -5,7 +5,7 @@
 
 #include "audio/analysis/eq/shared_eq_model.h"
 #include "audio/analysis/fft/fft_processor.h"
-#include "audio/analysis/presentation/phase_colour.h"
+#include "audio/analysis/phase/phase_features.h"
 
 namespace SpectralPresentation {
 
@@ -123,15 +123,17 @@ PreparedFrame prepareFrame(const Frame& frame,
     PreparedFrame prepared{};
     prepared.visualiserMagnitudes = buildVisualiserMagnitudes(frame, settings);
     const std::vector<float> colourMagnitudes = buildColourMagnitudes(frame, settings);
-    prepared.colourResult = ColourMapper::spectrumToColour(
+    prepared.colourResult = ColourCore::analyseSpectrum(
         colourMagnitudes,
         frame.phases,
         frame.frequencies,
         frame.sampleRate,
-        settings.colourSpace,
-        settings.applyGamutMapping,
-        loudnessDb);
-    applyPhaseColourInfluence(prepared.colourResult, phaseMetrics, settings);
+        ColourCore::OutputSettings{
+            .colourSpace = settings.colourSpace,
+            .applyGamutMapping = settings.applyGamutMapping
+        },
+        loudnessDb,
+        &phaseMetrics);
     return prepared;
 }
 
@@ -157,17 +159,18 @@ std::array<float, 3> displayRGBFromXYZ(const float X,
                                        const float Y,
                                        const float Z,
                                        const Settings& settings) {
-    float r = 0.0f;
-    float g = 0.0f;
-    float b = 0.0f;
-    ColourMapper::XYZtoRGB(X, Y, Z, r, g, b, settings.colourSpace, true, settings.applyGamutMapping);
-
-    return {r, g, b};
+    const auto rgb = ColourCore::projectToRGB(
+        ColourCore::XYZ{X, Y, Z},
+        ColourCore::OutputSettings{
+            .colourSpace = settings.colourSpace,
+            .applyGamutMapping = settings.applyGamutMapping
+        });
+    return {rgb.r, rgb.g, rgb.b};
 }
 
-ColourMapper::ColourResult buildColourResult(const Frame& frame,
-                                             const Settings& settings,
-                                             const float loudnessDb) {
+ColourCore::FrameResult buildColourResult(const Frame& frame,
+                                          const Settings& settings,
+                                          const float loudnessDb) {
     return prepareFrame(frame, settings, loudnessDb).colourResult;
 }
 

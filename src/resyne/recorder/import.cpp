@@ -90,7 +90,7 @@ bool Recorder::isSupportedImportFile(const std::string& filepath) {
 
 bool Recorder::importFromFile(RecorderState& state,
                               const std::string& filepath,
-                              ColourMapper::ColourSpace colourSpace,
+                              ColourCore::ColourSpace colourSpace,
                               bool applyGamutMapping) {
     state.loadingProgress = 0.0f;
 
@@ -171,7 +171,7 @@ bool Recorder::importFromFile(RecorderState& state,
 
 void Recorder::importFromFileThreaded(RecorderState& state,
                                       std::string filepath,
-                                      ColourMapper::ColourSpace colourSpace,
+                                      ColourCore::ColourSpace colourSpace,
                                       bool applyGamutMapping) {
     state.importRunning.store(true, std::memory_order_release);
     state.importComplete.store(false, std::memory_order_release);

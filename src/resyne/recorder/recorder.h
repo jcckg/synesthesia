@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "audio/output/audio_output.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/ui/timeline/timeline.h"
 #include "resyne/ui/toolbar/tool_state.h"
@@ -56,7 +56,7 @@ struct RecorderState {
     float fallbackSampleRate = 0.0f;
     int fallbackFftSize = 0;
     int fallbackHopSize = 0;
-    ColourMapper::ColourSpace importColourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace importColourSpace = ColourCore::ColourSpace::Rec2020;
     bool importGamutMapping = true;
     float importLowGain = 1.0f;
     float importMidGain = 1.0f;
@@ -110,14 +110,14 @@ struct RecorderState {
     int videoWidth = 1920;
     int videoHeight = 1080;
     int videoFrameRate = 60;
-    ColourMapper::ColourSpace videoColourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace videoColourSpace = ColourCore::ColourSpace::Rec2020;
     bool videoGamutMapping = true;
     float videoSmoothingAmount = 0.6f;
     bool exportGradient = false;
 
     std::vector<SampleColourEntry> sampleColourCache;
     bool colourCacheDirty = true;
-    ColourMapper::ColourSpace colourCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace colourCacheColourSpace = ColourCore::ColourSpace::Rec2020;
     bool colourCacheGamutMapping = true;
     float colourCacheLowGain = 1.0f;
     float colourCacheMidGain = 1.0f;
@@ -134,7 +134,7 @@ struct RecorderState {
     size_t timelinePreviewCacheMaxSamples = 0;
     size_t timelinePreviewCacheSourceCount = 0;
     bool timelinePreviewCacheUsesPreviewSamples = false;
-    ColourMapper::ColourSpace timelinePreviewCacheColourSpace = ColourMapper::ColourSpace::Rec2020;
+    ColourCore::ColourSpace timelinePreviewCacheColourSpace = ColourCore::ColourSpace::Rec2020;
     bool timelinePreviewCacheGamutMapping = true;
     float timelinePreviewCacheLowGain = 1.0f;
     float timelinePreviewCacheMidGain = 1.0f;
@@ -175,7 +175,7 @@ public:
 
     static bool importFromFile(RecorderState& state,
                                const std::string& filepath,
-                               ColourMapper::ColourSpace colourSpace,
+                               ColourCore::ColourSpace colourSpace,
                                bool applyGamutMapping);
 
     static bool isSupportedImportFile(const std::string& filepath);
@@ -205,7 +205,7 @@ public:
     static bool refreshPlaybackOutput(RecorderState& state);
     static void importFromFileThreaded(RecorderState& state,
                                        std::string filepath,
-                                       ColourMapper::ColourSpace colourSpace,
+                                       ColourCore::ColourSpace colourSpace,
                                        bool applyGamutMapping);
 
 private:

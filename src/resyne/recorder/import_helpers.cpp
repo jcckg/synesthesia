@@ -4,7 +4,7 @@
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/recorder/loudness_utils.h"
 #include "audio/analysis/fft/fft_processor.h"
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "constants.h"
 
 #include <algorithm>
@@ -61,7 +61,7 @@ std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& deco
 
 bool importAudioFile(
     const std::string& filepath,
-    ColourMapper::ColourSpace colourSpace,
+    ColourCore::ColourSpace colourSpace,
     bool applyGamutMapping,
     int analysisHopSize,
     float importLowGain,
@@ -243,7 +243,7 @@ bool importAudioFile(
 
 bool importResyneFile(
     const std::string& filepath,
-    ColourMapper::ColourSpace colourSpace,
+    ColourCore::ColourSpace colourSpace,
     bool applyGamutMapping,
     float fallbackSampleRate,
     float importLowGain,

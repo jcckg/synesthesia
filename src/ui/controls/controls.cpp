@@ -8,8 +8,9 @@
 #include <mutex>
 #include <vector>
 
+#include "audio/analysis/presentation/sample_sequence.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
-#include "colour_mapper.h"
+#include "colour/colour_core.h"
 #include "ui.h"
 #include "resyne/recorder/recorder.h"
 #ifdef ENABLE_OSC
@@ -80,7 +81,7 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
             : buildLivePresentationSettings(state);
 
         SpectralPresentation::Frame frame{};
-		float loudnessOverride = ColourMapper::LOUDNESS_DB_UNSPECIFIED;
+		float loudnessOverride = ColourCore::LOUDNESS_DB_UNSPECIFIED;
         if (hasPlaybackSession) {
             std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
             const float position = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f) *
@@ -89,15 +90,30 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
             const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
 
             const auto& currentSample = recorderState.samples[clampedIndex];
-            frame = SpectralPresentation::mixChannels(
-                currentSample.magnitudes,
-                currentSample.phases,
-                currentSample.frequencies,
-                currentSample.channels,
-                currentSample.sampleRate);
-			if (std::isfinite(currentSample.loudnessLUFS)) {
-				loudnessOverride = currentSample.loudnessLUFS;
-			}
+            frame = SpectralPresentation::SampleSequence::buildFrame(currentSample);
+            const AudioColourSample* previousSample =
+                clampedIndex > 0 ? &recorderState.samples[clampedIndex - 1] : nullptr;
+            const auto currentColourResult = SpectralPresentation::SampleSequence::buildSampleColourResult(
+                currentSample,
+                settings,
+                previousSample);
+            const bool hasFiniteLoudness = std::isfinite(currentColourResult.loudnessDb);
+            if (currentColourResult.dominantFrequency > 0.0f) {
+                ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(currentColourResult.dominantFrequency));
+                ImGui::Text("Wavelength: %.1f nm", static_cast<double>(currentColourResult.dominantWavelength));
+                ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]), static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
+                if (hasFiniteLoudness) {
+                    ImGui::Text("Loudness: %.1f LUFS", static_cast<double>(currentColourResult.loudnessDb));
+                } else {
+                    ImGui::TextDisabled("Loudness: -- LUFS");
+                }
+            } else {
+                ImGui::TextDisabled("No significant frequencies");
+            }
+
+            ImGui::Unindent(10);
+            ImGui::Spacing();
+            return;
         } else {
             const auto spectralData = audioInput.getSpectralData();
             frame = SpectralPresentation::mixChannels(
@@ -302,13 +318,13 @@ void renderAdvancedSettingsPanel(UIState& state
             ImGui::Spacing();
             int colourSpaceIndex = 0;
             switch (state.visualSettings.colourSpace) {
-                case ColourMapper::ColourSpace::Rec2020:
+                case ColourCore::ColourSpace::Rec2020:
                     colourSpaceIndex = 0;
                     break;
-                case ColourMapper::ColourSpace::DisplayP3:
+                case ColourCore::ColourSpace::DisplayP3:
                     colourSpaceIndex = 1;
                     break;
-                case ColourMapper::ColourSpace::SRGB:
+                case ColourCore::ColourSpace::SRGB:
                     colourSpaceIndex = 2;
                     break;
             }
@@ -317,14 +333,14 @@ void renderAdvancedSettingsPanel(UIState& state
             if (ImGui::Combo("##WorkingColourSpace", &colourSpaceIndex, colourSpaceLabels, IM_ARRAYSIZE(colourSpaceLabels))) {
                 switch (colourSpaceIndex) {
                     case 0:
-                        state.visualSettings.colourSpace = ColourMapper::ColourSpace::Rec2020;
+                        state.visualSettings.colourSpace = ColourCore::ColourSpace::Rec2020;
                         break;
                     case 1:
-                        state.visualSettings.colourSpace = ColourMapper::ColourSpace::DisplayP3;
+                        state.visualSettings.colourSpace = ColourCore::ColourSpace::DisplayP3;
                         break;
                     case 2:
                     default:
-                        state.visualSettings.colourSpace = ColourMapper::ColourSpace::SRGB;
+                        state.visualSettings.colourSpace = ColourCore::ColourSpace::SRGB;
                         break;
                 }
             }

@@ -6,10 +6,13 @@
 #include <mutex>
 #include <vector>
 
+#include "audio/analysis/presentation/sample_sequence.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
+#include "colour/colour_core.h"
 #include "resyne/controller/controller.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "resyne/ui/timeline/timeline_gradient.h"
+#include "ui/smoothing/smoothing_features.h"
 
 #ifdef ENABLE_OSC
 #include "synesthesia_osc_integration.h"
@@ -18,14 +21,7 @@
 namespace UI::AudioVisualisation {
 
 namespace {
-
-struct PlaybackSmoothingState {
-    std::vector<float> previousMagnitudes;
-    std::array<float, 12> fluxHistory{};
-    size_t fluxHistoryIndex = 0;
-};
-
-PlaybackSmoothingState playbackSmoothingState;
+::UI::Smoothing::MagnitudeHistory playbackSmoothingState;
 
 struct LivePhaseState {
     SpectralPresentation::Frame previousFrame;
@@ -67,28 +63,6 @@ SpectralPresentation::Settings buildPlaybackPresentationSettings(const UIState& 
         recorderState.importHighGain);
 }
 
-void populateSpectralNorms(const ColourMapper::ColourResult& result,
-                           SmoothingSignalFeatures& features) {
-    constexpr float minCentroid = 100.0f;
-    constexpr float minRolloff = 20.0f;
-    constexpr float rolloffLogMin = 4.32f;
-    constexpr float rolloffLogMax = 14.29f;
-    constexpr float crestLogScale = 4.0f;
-
-    const float centroid = std::max(result.spectralCentroid, minCentroid);
-    features.spectralSpreadNorm = std::clamp(result.spectralSpread / centroid * 0.5f, 0.0f, 1.0f);
-    const float rolloffLog = std::log2(std::max(result.spectralRolloff, minRolloff));
-    features.spectralRolloffNorm = std::clamp((rolloffLog - rolloffLogMin) / (rolloffLogMax - rolloffLogMin), 0.0f, 1.0f);
-    features.spectralCrestNorm = std::clamp(std::log2(std::max(result.spectralCrestFactor, 1.0f)) / crestLogScale, 0.0f, 1.0f);
-}
-
-void populatePhaseNorms(const ColourMapper::ColourResult& result,
-                        SmoothingSignalFeatures& features) {
-    features.phaseInstabilityNorm = std::clamp(result.phaseInstabilityNorm, 0.0f, 1.0f);
-    features.phaseCoherenceNorm = std::clamp(result.phaseCoherenceNorm, 0.0f, 1.0f);
-    features.phaseTransientNorm = std::clamp(result.phaseTransientNorm, 0.0f, 1.0f);
-}
-
 bool spectrumIsSilent(const std::vector<float>& magnitudes) {
     for (const float magnitude : magnitudes) {
         if (!std::isfinite(magnitude)) {
@@ -117,7 +91,7 @@ void resetAnalyserState(UIState& state,
     state.spectrumAnalyser.resetTemporalBuffers();
 }
 
-void applyColourSmoothing(const ColourMapper::ColourResult& targetColour,
+void applyColourSmoothing(const ColourCore::FrameResult& targetColour,
                           const SpectralPresentation::Settings& presentationSettings,
                           float& outR,
                           float& outG,
@@ -128,7 +102,7 @@ void applyColourSmoothing(const ColourMapper::ColourResult& targetColour,
         float targetL = 0.0f;
         float targetA = 0.0f;
         float targetB = 0.0f;
-        ColourMapper::XYZtoOklab(targetColour.X, targetColour.Y, targetColour.Z, targetL, targetA, targetB);
+        ColourCore::XYZtoOklab(targetColour.X, targetColour.Y, targetColour.Z, targetL, targetA, targetB);
         ctx.colourSmoother.setTargetOklab(targetL, targetA, targetB);
         if (!ctx.manualSmoothing && signalFeatures != nullptr) {
             ctx.colourSmoother.update(ctx.deltaTime * UIConstants::COLOUR_SMOOTH_UPDATE_FACTOR, *signalFeatures);
@@ -143,7 +117,7 @@ void applyColourSmoothing(const ColourMapper::ColourResult& targetColour,
         float smoothedX = 0.0f;
         float smoothedY = 0.0f;
         float smoothedZ = 0.0f;
-        ColourMapper::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
+        ColourCore::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
         const auto smoothedRGB = SpectralPresentation::displayRGBFromXYZ(
             smoothedX,
             smoothedY,
@@ -241,7 +215,7 @@ void processPlaybackState(AudioInput& audioInput,
     bool playbackSignalFeaturesValid = false;
     SpectralPresentation::Frame frame{};
     std::vector<float> visualiserMagnitudes;
-    ColourMapper::ColourResult playbackColourResult{};
+    ColourCore::FrameResult playbackColourResult{};
     bool hasPlaybackColourResult = false;
 
     if (!recorderState.samples.empty()) {
@@ -278,87 +252,34 @@ void processPlaybackState(AudioInput& audioInput,
         }
 
         const auto& currentSample = recorderState.samples[clampedIndex];
-        frame = SpectralPresentation::mixChannels(
-            currentSample.magnitudes,
-            currentSample.phases,
-            currentSample.frequencies,
-            currentSample.channels,
-            currentSample.sampleRate);
+        const AudioColourSample* previousSample =
+            clampedIndex > 0 ? &recorderState.samples[clampedIndex - 1] : nullptr;
+        frame = SpectralPresentation::SampleSequence::buildFrame(currentSample);
 
         if (!frame.magnitudes.empty()) {
-            const float sampleLoudness = std::isfinite(currentSample.loudnessLUFS)
-                ? currentSample.loudnessLUFS
-                : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-            SpectralPresentation::Frame previousFrame{};
-            const SpectralPresentation::Frame* previousFramePtr = nullptr;
-            if (clampedIndex > 0) {
-                const auto& previousSample = recorderState.samples[clampedIndex - 1];
-                previousFrame = SpectralPresentation::mixChannels(
-                    previousSample.magnitudes,
-                    previousSample.phases,
-                    previousSample.frequencies,
-                    previousSample.channels,
-                    previousSample.sampleRate);
-                previousFramePtr = &previousFrame;
-            }
-            const auto preparedFrame = SpectralPresentation::prepareFrame(
-                frame,
+            const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+                currentSample,
                 presentationSettings,
-                sampleLoudness,
-                previousFramePtr,
-                clampedIndex > 0
-                    ? static_cast<float>(std::max(0.0, currentSample.timestamp - recorderState.samples[clampedIndex - 1].timestamp))
-                    : ctx.deltaTime);
+                previousSample,
+                ctx.deltaTime);
             visualiserMagnitudes = preparedFrame.visualiserMagnitudes;
             const auto& colourResult = preparedFrame.colourResult;
             playbackColourResult = colourResult;
             hasPlaybackColourResult = true;
 
+            playbackSignalFeatures = ::UI::Smoothing::buildSignalFeatures(colourResult);
             playbackSignalFeaturesValid = true;
-            playbackSignalFeatures.spectralFlatness = colourResult.spectralFlatness;
-            playbackSignalFeatures.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
-            playbackSignalFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
-            populateSpectralNorms(colourResult, playbackSignalFeatures);
-            populatePhaseNorms(colourResult, playbackSignalFeatures);
-
-
         }
     }
 
     if (visualiserMagnitudes.empty()) {
         resetAnalyserState(state, 0);
     } else {
-        float playbackFlux = 0.0f;
-        bool fluxComputed = false;
-        if (playbackSmoothingState.previousMagnitudes.size() == visualiserMagnitudes.size()) {
-            for (size_t index = 0; index < visualiserMagnitudes.size(); ++index) {
-                const float diff = visualiserMagnitudes[index] - playbackSmoothingState.previousMagnitudes[index];
-                playbackFlux += std::max(diff, 0.0f);
-            }
-            playbackFlux /= static_cast<float>(visualiserMagnitudes.size());
-            fluxComputed = true;
-        }
-        playbackSmoothingState.previousMagnitudes = visualiserMagnitudes;
-
-        if (fluxComputed) {
-            playbackSmoothingState.fluxHistory[playbackSmoothingState.fluxHistoryIndex] = playbackFlux;
-            playbackSmoothingState.fluxHistoryIndex =
-                (playbackSmoothingState.fluxHistoryIndex + 1) % playbackSmoothingState.fluxHistory.size();
-        }
-
-        float maxFlux = 0.0f;
-        for (const float flux : playbackSmoothingState.fluxHistory) {
-            maxFlux = std::max(maxFlux, flux);
-        }
-
-        const bool playbackOnset = fluxComputed &&
-            maxFlux > 0.0f &&
-            playbackFlux > maxFlux * 1.3f &&
-            playbackFlux > 0.001f;
-
         if (playbackSignalFeaturesValid) {
-            playbackSignalFeatures.spectralFlux = fluxComputed ? playbackFlux : 0.0f;
-            playbackSignalFeatures.onsetDetected = playbackOnset;
+            ::UI::Smoothing::updateFluxHistory(
+                visualiserMagnitudes,
+                playbackSmoothingState,
+                playbackSignalFeatures);
         }
 
         const size_t channelIndex = 0;
@@ -483,13 +404,9 @@ void processLiveAudioState(AudioInput& audioInput,
     }
 
     if (std::isfinite(displayR) && std::isfinite(displayG) && std::isfinite(displayB)) {
+        liveFeatures = ::UI::Smoothing::buildSignalFeatures(colourResult);
         liveFeatures.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
         liveFeatures.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
-        liveFeatures.spectralFlatness = colourResult.spectralFlatness;
-        liveFeatures.loudnessNormalised = std::clamp(colourResult.loudnessNormalised, 0.0f, 1.0f);
-        liveFeatures.brightnessNormalised = std::clamp(colourResult.brightnessNormalised, 0.0f, 1.0f);
-        populateSpectralNorms(colourResult, liveFeatures);
-        populatePhaseNorms(colourResult, liveFeatures);
         liveFeaturesValid = true;
 
         applyColourSmoothing(

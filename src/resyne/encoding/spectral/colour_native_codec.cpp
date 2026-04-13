@@ -1,6 +1,6 @@
 #include "resyne/encoding/spectral/colour_native_codec.h"
 
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "resyne/encoding/reconstruction/phase_wrapping.h"
 #include "resyne/encoding/reconstruction/transient_detection.h"
 #include "resyne/encoding/reconstruction/damage_detection.h"
@@ -60,8 +60,8 @@ float snapToCommonSampleRate(float sampleRate) {
 	return sampleRate;
 }
 
-const float LOG_FREQ_MIN = std::log2(ColourMapper::MIN_FREQ);
-const float LOG_FREQ_MAX = std::log2(ColourMapper::MAX_FREQ);
+const float LOG_FREQ_MIN = std::log2(synesthesia::constants::MIN_AUDIO_FREQ);
+const float LOG_FREQ_MAX = std::log2(synesthesia::constants::MAX_AUDIO_FREQ);
 const float LOG_FREQ_RANGE = LOG_FREQ_MAX - LOG_FREQ_MIN;
 constexpr float UNIT_SCALE = 0.5f;
 constexpr float UNIT_OFFSET = 0.5f;
@@ -626,13 +626,13 @@ void ColourNativeCodec::encodeTimeFrame(const std::vector<float>& magnitudes,
 		const float magnitude = magnitudes[bin];
 		const float phase = phases[bin];
 
-		float frequency = ColourMapper::MIN_FREQ;
+		float frequency = synesthesia::constants::MIN_AUDIO_FREQ;
 		if (bin < frequencies.size() && frequencies[bin] > 0.0f) {
 			frequency = frequencies[bin];
 		} else {
 			frequency = (freqResolution > 0.0f)
 				? std::min(freqResolution * static_cast<float>(bin), sampleRate * 0.5f)
-				: ColourMapper::MIN_FREQ;
+				: synesthesia::constants::MIN_AUDIO_FREQ;
 		}
 
 		column[bin] = encodeFrequencyBin(frequency, magnitude, phase);
@@ -724,7 +724,9 @@ float ColourNativeCodec::normaliseLogFrequency(const float frequency) {
 	if (!std::isfinite(frequency) || frequency <= 0.0f) {
 		return 0.0f;
 	}
-	const float clamped = std::clamp(frequency, ColourMapper::MIN_FREQ, ColourMapper::MAX_FREQ);
+	const float clamped = std::clamp(frequency,
+		synesthesia::constants::MIN_AUDIO_FREQ,
+		synesthesia::constants::MAX_AUDIO_FREQ);
 	const float logValue = std::log2(clamped);
 	if (LOG_FREQ_RANGE <= EPSILON) {
 		return 0.0f;
@@ -735,7 +737,7 @@ float ColourNativeCodec::normaliseLogFrequency(const float frequency) {
 
 float ColourNativeCodec::denormaliseLogFrequency(const float normalised) {
 	if (LOG_FREQ_RANGE <= EPSILON) {
-		return ColourMapper::MIN_FREQ;
+		return synesthesia::constants::MIN_AUDIO_FREQ;
 	}
 	const float clamped = std::clamp(normalised, 0.0f, 1.0f);
 	const float logValue = LOG_FREQ_MIN + clamped * LOG_FREQ_RANGE;

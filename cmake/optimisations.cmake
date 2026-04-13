@@ -41,8 +41,6 @@ function(add_neon_sources)
     if(NEON_AVAILABLE AND ENABLE_NEON_OPTIMISATIONS)
         list(APPEND SOURCES
             ${SRC_DIR}/audio/analysis/fft/neon/fft_processor_neon.cpp
-            ${SRC_DIR}/colour/neon/colour_mapper_neon.cpp
-            ${SRC_DIR}/audio/analysis/spectral/neon/spectral_processor_neon.cpp
         )
         set(SOURCES ${SOURCES} PARENT_SCOPE)
         message(STATUS "Added NEON-optimised source files to build")
@@ -53,8 +51,6 @@ function(add_sse_sources)
     if(SSE_AVAILABLE)
         list(APPEND SOURCES
             ${SRC_DIR}/audio/analysis/fft/sse/fft_processor_sse.cpp
-            ${SRC_DIR}/colour/sse/colour_mapper_sse.cpp
-            ${SRC_DIR}/audio/analysis/spectral/sse/spectral_processor_sse.cpp
         )
         set(SOURCES ${SOURCES} PARENT_SCOPE)
         message(STATUS "Added SSE/AVX-optimised source files to build")
@@ -73,8 +69,6 @@ function(apply_neon_optimisations)
 
         set_source_files_properties(
             ${SRC_DIR}/audio/analysis/fft/neon/fft_processor_neon.cpp
-            ${SRC_DIR}/colour/neon/colour_mapper_neon.cpp
-            ${SRC_DIR}/audio/analysis/spectral/neon/spectral_processor_neon.cpp
             PROPERTIES COMPILE_FLAGS "-O3 -ffast-math ${NEON_CPU_FLAGS}"
         )
 
@@ -88,16 +82,12 @@ function(apply_sse_optimisations)
             target_compile_options(${EXECUTABLE_NAME} PRIVATE /arch:AVX2)
             set_source_files_properties(
                 ${SRC_DIR}/audio/analysis/fft/sse/fft_processor_sse.cpp
-                ${SRC_DIR}/colour/sse/colour_mapper_sse.cpp
-                ${SRC_DIR}/audio/analysis/spectral/sse/spectral_processor_sse.cpp
                 PROPERTIES COMPILE_FLAGS "$<$<CONFIG:Release>:/O2> /fp:fast /arch:AVX2"
             )
         else()
             target_compile_options(${EXECUTABLE_NAME} PRIVATE -msse4.2 -mavx2)
             set_source_files_properties(
                 ${SRC_DIR}/audio/analysis/fft/sse/fft_processor_sse.cpp
-                ${SRC_DIR}/colour/sse/colour_mapper_sse.cpp
-                ${SRC_DIR}/audio/analysis/spectral/sse/spectral_processor_sse.cpp
                 PROPERTIES COMPILE_FLAGS "-O3 -ffast-math -msse4.2 -mavx2"
             )
         endif()
@@ -108,23 +98,8 @@ endfunction()
 
 function(apply_colour_accuracy_flags)
     set(COLOUR_SOURCE_FILES
-        ${SRC_DIR}/colour/colour_mapper.cpp
-        ${SRC_DIR}/audio/analysis/spectral/spectral_processor.cpp
+        ${SRC_DIR}/colour/colour_core.cpp
     )
-
-    if(NEON_AVAILABLE AND ENABLE_NEON_OPTIMISATIONS)
-        list(APPEND COLOUR_SOURCE_FILES
-            ${SRC_DIR}/colour/neon/colour_mapper_neon.cpp
-            ${SRC_DIR}/audio/analysis/spectral/neon/spectral_processor_neon.cpp
-        )
-    endif()
-
-    if(SSE_AVAILABLE)
-        list(APPEND COLOUR_SOURCE_FILES
-            ${SRC_DIR}/colour/sse/colour_mapper_sse.cpp
-            ${SRC_DIR}/audio/analysis/spectral/sse/spectral_processor_sse.cpp
-        )
-    endif()
 
     if(MSVC)
         foreach(source_file IN LISTS COLOUR_SOURCE_FILES)

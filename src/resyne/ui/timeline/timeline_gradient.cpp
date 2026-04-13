@@ -6,15 +6,7 @@
 #include <vector>
 #include <imgui.h>
 
-#include "colour/colour_mapper.h"
-
-#ifdef USE_NEON_OPTIMISATIONS
-#include "colour/neon/colour_mapper_neon.h"
-#endif
-
-#ifdef USE_SSE_OPTIMISATIONS
-#include "colour/sse/colour_mapper_sse.h"
-#endif
+#include "colour/colour_core.h"
 
 namespace {
 
@@ -25,13 +17,10 @@ struct LabColour {
 };
 
 ImVec4 labToRGB(const LabColour& lab,
-			ColourMapper::ColourSpace colourSpace,
+			ColourCore::ColourSpace colourSpace,
 			const bool applyGamutMapping) {
-	float X, Y, Z;
-	ColourMapper::LabtoXYZ(lab.L, lab.a, lab.b, X, Y, Z);
-
 	float r, g, b;
-	ColourMapper::XYZtoRGB(X, Y, Z, r, g, b, colourSpace, true, applyGamutMapping);
+	ColourCore::LabtoRGB(lab.L, lab.a, lab.b, r, g, b, colourSpace, applyGamutMapping);
 	r = std::clamp(r, 0.0f, 1.0f);
 	g = std::clamp(g, 0.0f, 1.0f);
 	b = std::clamp(b, 0.0f, 1.0f);
@@ -40,7 +29,7 @@ ImVec4 labToRGB(const LabColour& lab,
 
 void labSpanToRGB(std::span<const LabColour> labs,
 				  std::span<ImVec4> colours,
-				  const ColourMapper::ColourSpace colourSpace,
+				  const ColourCore::ColourSpace colourSpace,
 				  const bool applyGamutMapping) {
 	const size_t size = std::min(labs.size(), colours.size());
 	if (size == 0) {
@@ -69,46 +58,16 @@ void labSpanToRGB(std::span<const LabColour> labs,
 		BValues[i] = labs[i].b;
 	}
 
-	bool usedSIMD = false;
-
-#ifdef USE_NEON_OPTIMISATIONS
-	if (ColourMapperNEON::isNEONAvailable() && size >= 4) {
-		ColourMapperNEON::labToRgb(
-			std::span<const float>(LValues.data(), size),
-			std::span<const float>(AValues.data(), size),
-			std::span<const float>(BValues.data(), size),
-			std::span<float>(RValues.data(), size),
-			std::span<float>(GValues.data(), size),
-			std::span<float>(BOutValues.data(), size),
-			size,
+	for (size_t i = 0; i < size; ++i) {
+		ColourCore::LabtoRGB(
+			LValues[i],
+			AValues[i],
+			BValues[i],
+			RValues[i],
+			GValues[i],
+			BOutValues[i],
 			colourSpace,
 			applyGamutMapping);
-		usedSIMD = true;
-	}
-#elif defined(USE_SSE_OPTIMISATIONS)
-	if (ColourMapperSSE::isSSEAvailable() && size >= 4) {
-		ColourMapperSSE::labToRgb(
-			std::span<const float>(LValues.data(), size),
-			std::span<const float>(AValues.data(), size),
-			std::span<const float>(BValues.data(), size),
-			std::span<float>(RValues.data(), size),
-			std::span<float>(GValues.data(), size),
-			std::span<float>(BOutValues.data(), size),
-			size,
-			colourSpace,
-			applyGamutMapping);
-		usedSIMD = true;
-	}
-#endif
-
-	if (!usedSIMD) {
-		for (size_t i = 0; i < size; ++i) {
-			float X;
-			float Y;
-			float Z;
-			ColourMapper::LabtoXYZ(LValues[i], AValues[i], BValues[i], X, Y, Z);
-			ColourMapper::XYZtoRGB(X, Y, Z, RValues[i], GValues[i], BOutValues[i], colourSpace, true, applyGamutMapping);
-		}
 	}
 
 	for (size_t i = 0; i < size; ++i) {
@@ -123,7 +82,7 @@ void labSpanToRGB(std::span<const LabColour> labs,
 ImVec4 interpolateLabSpace(const LabColour& labA,
 						   const LabColour& labB,
 						   float t,
-						   ColourMapper::ColourSpace colourSpace,
+						   ColourCore::ColourSpace colourSpace,
 						   const bool applyGamutMapping) {
 	t = std::clamp(t, 0.0f, 1.0f);
 
@@ -143,7 +102,7 @@ namespace ReSyne::Timeline::Gradient {
 ImVec4 interpolateColour(const TimelineSample& a,
                          const TimelineSample& b,
                          float t,
-                         ColourMapper::ColourSpace colourSpace,
+                         ColourCore::ColourSpace colourSpace,
                          const bool applyGamutMapping) {
 	LabColour labA{a.labL, a.labA, a.labB};
 	LabColour labB{b.labL, b.labA, b.labB};
@@ -156,7 +115,7 @@ void drawGradient(ImDrawList* drawList,
                   const std::vector<TimelineSample>& samples,
                   float visibleStart,
                   float visibleEnd,
-                  ColourMapper::ColourSpace colourSpace,
+                  ColourCore::ColourSpace colourSpace,
                   const bool applyGamutMapping) {
 	const float width = max.x - min.x;
 	const float height = max.y - min.y;

@@ -19,7 +19,7 @@
 #include <fcntl.h>
 #endif
 
-#include "colour/colour_mapper.h"
+#include "colour/colour_core.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "ui/smoothing/smoothing.h"
 #include "utilities/video/ffmpeg_locator.h"
@@ -41,13 +41,6 @@ struct RGB {
     float r;
     float g;
     float b;
-};
-
-struct VideoColourProfile {
-    const char* filter;
-    const char* space;
-    const char* primaries;
-    const char* trc;
 };
 
 struct TempFile {
@@ -84,37 +77,10 @@ inline uint8_t toByte(float value) {
     return static_cast<uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
 }
 
-VideoColourProfile getVideoColourProfile(const ColourMapper::ColourSpace colourSpace) {
-    switch (colourSpace) {
-        case ColourMapper::ColourSpace::DisplayP3:
-            return {
-                "colorspace=ispace=gbr:iprimaries=smpte432:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=smpte432:trc=iec61966-2-1:range=tv:format=yuv420p",
-                "bt709",
-                "smpte432",
-                "iec61966-2-1"
-            };
-        case ColourMapper::ColourSpace::Rec2020:
-            return {
-                "colorspace=ispace=gbr:iprimaries=bt2020:itrc=bt2020-10:irange=pc:space=bt2020ncl:primaries=bt2020:trc=bt2020-10:range=tv:format=yuv420p",
-                "bt2020nc",
-                "bt2020",
-                "bt2020-10"
-            };
-        case ColourMapper::ColourSpace::SRGB:
-        default:
-            return {
-                "colorspace=ispace=gbr:iprimaries=bt709:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=bt709:trc=iec61966-2-1:range=tv:format=yuv420p",
-                "bt709",
-                "bt709",
-                "iec61966-2-1"
-            };
-    }
-}
-
 class ColourTimelineSampler {
 public:
     ColourTimelineSampler(const std::vector<AudioColourSample>& source,
-                          ColourMapper::ColourSpace colourSpace,
+                          ColourCore::ColourSpace colourSpace,
                           bool gamut,
                           float smoothingAmount,
                           double frameInterval)
@@ -183,7 +149,7 @@ public:
 private:
     const std::vector<AudioColourSample>& samples_;
     std::vector<double> timestamps_;
-    ColourMapper::ColourSpace colourSpace_;
+    ColourCore::ColourSpace colourSpace_;
     bool gamut_;
     SpringSmoother smoother_;
     double frameInterval_;
@@ -268,12 +234,23 @@ double computeDuration(const std::vector<AudioColourSample>& samples,
     return std::max(0.1, static_cast<double>(samples.size()));
 }
 
-std::string determineVideoEncoder() {
+std::string determineVideoEncoder(const ColourCore::ColourSpace colourSpace) {
     if (const char* overrideCodec = std::getenv("RESYNE_FFMPEG_VIDEO_CODEC"); overrideCodec && *overrideCodec) {
         return overrideCodec;
     }
 
     const auto& locator = Utilities::Video::FFmpegLocator::instance();
+    if (colourSpace == ColourCore::ColourSpace::Rec2020) {
+        if (locator.supportsEncoder("libx265")) {
+            return "libx265";
+        }
+#if defined(__APPLE__)
+        if (locator.supportsEncoder("hevc_videotoolbox")) {
+            return "hevc_videotoolbox";
+        }
+#endif
+    }
+
     if (locator.supportsEncoder("libx264")) {
         return "libx264";
     }
@@ -291,13 +268,19 @@ std::string determineVideoEncoder() {
     return "mpeg4";
 }
 
-void appendEncoderParameters(std::ostringstream& stream, const std::string& encoder) {
+void appendEncoderParameters(std::ostringstream& stream,
+                             const std::string& encoder,
+                             const char* pixelFormat) {
     if (encoder == "libx264") {
-        stream << " -pix_fmt yuv420p -preset medium -crf 18";
+        stream << " -pix_fmt " << pixelFormat << " -preset medium -crf 18";
+    } else if (encoder == "libx265") {
+        stream << " -pix_fmt " << pixelFormat << " -preset medium -crf 18";
     } else if (encoder == "h264_videotoolbox") {
-        stream << " -pix_fmt yuv420p -b:v 12M -maxrate 12M -bufsize 24M -allow_sw 1";
+        stream << " -pix_fmt " << pixelFormat << " -b:v 12M -maxrate 12M -bufsize 24M -allow_sw 1";
+    } else if (encoder == "hevc_videotoolbox") {
+        stream << " -pix_fmt " << pixelFormat << " -b:v 20M -maxrate 20M -bufsize 40M -allow_sw 1";
     } else {
-        stream << " -pix_fmt yuv420p -q:v 3";
+        stream << " -pix_fmt " << pixelFormat << " -q:v 3";
     }
 }
 
@@ -308,9 +291,9 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
                                int width,
                                int height,
                                int fps,
-                               const ColourMapper::ColourSpace colourSpace) {
-    const std::string videoEncoder = determineVideoEncoder();
-    const VideoColourProfile colourProfile = getVideoColourProfile(colourSpace);
+                               const ColourCore::ColourSpace colourSpace) {
+    const std::string videoEncoder = determineVideoEncoder(colourSpace);
+    const auto& colourProfile = ColourCore::videoProfileFor(colourSpace);
 
     std::ostringstream oss;
     oss << '"' << ffmpegPath << '"'
@@ -324,11 +307,11 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
         << " -vf \"" << colourProfile.filter << '"'
         << " -c:v " << videoEncoder;
 
-    appendEncoderParameters(oss, videoEncoder);
+    appendEncoderParameters(oss, videoEncoder, colourProfile.pixelFormat);
 
     oss << " -color_primaries " << colourProfile.primaries
-        << " -color_trc " << colourProfile.trc
-        << " -colorspace " << colourProfile.space
+        << " -color_trc " << colourProfile.transfer
+        << " -colorspace " << colourProfile.colourSpace
         << " -color_range tv"
         << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts make_zero"
         << " \"" << outputPath << "\"";

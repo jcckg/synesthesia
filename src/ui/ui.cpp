@@ -12,7 +12,7 @@
 
 #include "audio_input.h"
 #include "controls.h"
-#include "colour_mapper.h"
+#include "colour/colour_core.h"
 #include "fft_processor.h"
 #include "smoothing.h"
 #include "styling.h"

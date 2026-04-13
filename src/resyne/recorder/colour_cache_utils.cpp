@@ -4,8 +4,11 @@
 #include <cmath>
 #include <vector>
 
+#include "audio/analysis/presentation/sample_sequence.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
+#include "colour/colour_core.h"
 #include "ui/smoothing/smoothing.h"
+#include "ui/smoothing/smoothing_features.h"
 
 namespace ReSyne::RecorderColourCache {
 
@@ -46,7 +49,7 @@ SampleColourEntry entryFromRGB(const float r,
     entry.rgb.z = std::clamp(b, 0.0f, 1.0f);
     entry.rgb.w = 1.0f;
 
-    ColourMapper::RGBtoLab(
+    ColourCore::RGBtoLab(
         entry.rgb.x,
         entry.rgb.y,
         entry.rgb.z,
@@ -64,21 +67,20 @@ SampleColourEntry entryFromRGB(const float r,
     return entry;
 }
 
-SampleColourEntry computeEntryInternal(const AudioColourSample& sample,
-                                       const CacheSettings& settings) {
-    const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
-        ? sample.loudnessLUFS
-        : ColourMapper::LOUDNESS_DB_UNSPECIFIED;
-    const SpectralPresentation::Frame frame = SpectralPresentation::mixChannels(
-        sample.magnitudes,
-        sample.phases,
-        sample.frequencies,
-        sample.channels,
-        sample.sampleRate);
-    const auto colour = SpectralPresentation::buildColourResult(
-        frame,
+struct AnalysedEntry {
+    SampleColourEntry entry;
+    std::vector<float> visualiserMagnitudes;
+    ColourCore::FrameResult colourResult;
+};
+
+AnalysedEntry computeEntryInternal(const AudioColourSample& sample,
+                                  const AudioColourSample* previousSample,
+                                  const CacheSettings& settings) {
+    const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+        sample,
         buildPresentationSettings(settings),
-        loudnessOverride);
+        previousSample);
+    const auto& colour = preparedFrame.colourResult;
 
     SampleColourEntry entry{};
     entry.rgb.x = std::clamp(colour.r, 0.0f, 1.0f);
@@ -88,20 +90,30 @@ SampleColourEntry computeEntryInternal(const AudioColourSample& sample,
     entry.labL = colour.L;
     entry.labA = colour.a;
     entry.labB = colour.b_comp;
-    return entry;
+    return {
+        .entry = entry,
+        .visualiserMagnitudes = preparedFrame.visualiserMagnitudes,
+        .colourResult = colour
+    };
 }
 
-void smoothEntriesInPlace(std::vector<SampleColourEntry>& entries,
+void smoothEntriesInPlace(std::vector<AnalysedEntry>& entries,
                           const std::vector<AudioColourSample>& samples,
                           const CacheSettings& settings) {
-    if (!settings.smoothingEnabled || !settings.manualSmoothing || entries.size() < 2) {
+    if (!settings.smoothingEnabled || entries.size() < 2) {
         return;
     }
 
     SpringSmoother smoother(8.0f, 1.0f, 0.3f);
     smoother.setSmoothingAmount(settings.smoothingAmount);
-    smoother.reset(entries.front().rgb.x, entries.front().rgb.y, entries.front().rgb.z);
-    entries.front() = entryFromRGB(entries.front().rgb.x, entries.front().rgb.y, entries.front().rgb.z, settings);
+    smoother.reset(entries.front().entry.rgb.x, entries.front().entry.rgb.y, entries.front().entry.rgb.z);
+    entries.front().entry = entryFromRGB(
+        entries.front().entry.rgb.x,
+        entries.front().entry.rgb.y,
+        entries.front().entry.rgb.z,
+        settings);
+    ::UI::Smoothing::MagnitudeHistory fluxHistory;
+    fluxHistory.previousMagnitudes = entries.front().visualiserMagnitudes;
 
     for (size_t index = 1; index < entries.size(); ++index) {
         const AudioColourSample* previousSample = index > 0 && index - 1 < samples.size()
@@ -115,14 +127,27 @@ void smoothEntriesInPlace(std::vector<SampleColourEntry>& entries,
             ? resolveDeltaTime(previousSample, *currentSample)
             : kFallbackDeltaTime;
 
-        smoother.setTargetColour(entries[index].rgb.x, entries[index].rgb.y, entries[index].rgb.z);
-        smoother.update(deltaTime * kSmoothingUpdateFactor);
+        smoother.setTargetColour(
+            entries[index].entry.rgb.x,
+            entries[index].entry.rgb.y,
+            entries[index].entry.rgb.z);
+
+        if (!settings.manualSmoothing) {
+            auto features = ::UI::Smoothing::buildSignalFeatures(entries[index].colourResult);
+            ::UI::Smoothing::updateFluxHistory(
+                entries[index].visualiserMagnitudes,
+                fluxHistory,
+                features);
+            smoother.update(deltaTime * kSmoothingUpdateFactor, features);
+        } else {
+            smoother.update(deltaTime * kSmoothingUpdateFactor);
+        }
 
         float smoothedR = 0.0f;
         float smoothedG = 0.0f;
         float smoothedB = 0.0f;
         smoother.getCurrentColour(smoothedR, smoothedG, smoothedB);
-        entries[index] = entryFromRGB(smoothedR, smoothedG, smoothedB, settings);
+        entries[index].entry = entryFromRGB(smoothedR, smoothedG, smoothedB, settings);
     }
 }
 
@@ -130,6 +155,12 @@ bool settingsMatch(const RecorderState& state,
                    const CacheSettings& settings) {
     return state.colourCacheColourSpace == settings.colourSpace &&
         state.colourCacheGamutMapping == settings.gamutMapping &&
+        state.colourCacheLowGain == settings.lowGain &&
+        state.colourCacheMidGain == settings.midGain &&
+        state.colourCacheHighGain == settings.highGain &&
+        state.colourCacheSmoothingEnabled == settings.smoothingEnabled &&
+        state.colourCacheManualSmoothing == settings.manualSmoothing &&
+        state.colourCacheSmoothingAmount == settings.smoothingAmount &&
         !state.colourCacheDirty;
 }
 
@@ -141,17 +172,32 @@ void assignEntry(RecorderState& state,
 SampleColourEntry smoothEntryAgainstPrevious(const SampleColourEntry& previousEntry,
                                              const AudioColourSample* previousSample,
                                              const AudioColourSample& currentSample,
-                                             const SampleColourEntry& currentEntry,
+                                             const AnalysedEntry& currentEntry,
                                              const CacheSettings& settings) {
-    if (!settings.smoothingEnabled || !settings.manualSmoothing) {
-        return currentEntry;
+    if (!settings.smoothingEnabled) {
+        return currentEntry.entry;
     }
 
     SpringSmoother smoother(8.0f, 1.0f, 0.3f);
     smoother.setSmoothingAmount(settings.smoothingAmount);
     smoother.reset(previousEntry.rgb.x, previousEntry.rgb.y, previousEntry.rgb.z);
-    smoother.setTargetColour(currentEntry.rgb.x, currentEntry.rgb.y, currentEntry.rgb.z);
-    smoother.update(resolveDeltaTime(previousSample, currentSample) * kSmoothingUpdateFactor);
+    smoother.setTargetColour(currentEntry.entry.rgb.x, currentEntry.entry.rgb.y, currentEntry.entry.rgb.z);
+
+    if (!settings.manualSmoothing) {
+        auto features = ::UI::Smoothing::buildSignalFeatures(currentEntry.colourResult);
+        ::UI::Smoothing::MagnitudeHistory fluxHistory;
+        if (previousSample != nullptr) {
+            fluxHistory.previousMagnitudes =
+                computeEntryInternal(*previousSample, nullptr, settings).visualiserMagnitudes;
+        }
+        ::UI::Smoothing::updateFluxHistory(
+            currentEntry.visualiserMagnitudes,
+            fluxHistory,
+            features);
+        smoother.update(resolveDeltaTime(previousSample, currentSample) * kSmoothingUpdateFactor, features);
+    } else {
+        smoother.update(resolveDeltaTime(previousSample, currentSample) * kSmoothingUpdateFactor);
+    }
 
     float smoothedR = 0.0f;
     float smoothedG = 0.0f;
@@ -178,17 +224,28 @@ CacheSettings currentSettings(const RecorderState& state) {
 SampleColourEntry computeSampleColour(const AudioColourSample& sample,
                                       const CacheSettings& settings,
                                       const AudioColourSample* previousSample) {
-    (void)previousSample;
-    return computeEntryInternal(sample, settings);
+    return computeEntryInternal(sample, previousSample, settings).entry;
 }
 
 void markSettingsIfChanged(RecorderState& state,
                            const CacheSettings& settings) {
     if (state.colourCacheColourSpace != settings.colourSpace ||
-        state.colourCacheGamutMapping != settings.gamutMapping) {
+        state.colourCacheGamutMapping != settings.gamutMapping ||
+        state.colourCacheLowGain != settings.lowGain ||
+        state.colourCacheMidGain != settings.midGain ||
+        state.colourCacheHighGain != settings.highGain ||
+        state.colourCacheSmoothingEnabled != settings.smoothingEnabled ||
+        state.colourCacheManualSmoothing != settings.manualSmoothing ||
+        state.colourCacheSmoothingAmount != settings.smoothingAmount) {
         state.colourCacheDirty = true;
         state.colourCacheColourSpace = settings.colourSpace;
         state.colourCacheGamutMapping = settings.gamutMapping;
+        state.colourCacheLowGain = settings.lowGain;
+        state.colourCacheMidGain = settings.midGain;
+        state.colourCacheHighGain = settings.highGain;
+        state.colourCacheSmoothingEnabled = settings.smoothingEnabled;
+        state.colourCacheManualSmoothing = settings.manualSmoothing;
+        state.colourCacheSmoothingAmount = settings.smoothingAmount;
     }
 }
 
@@ -199,14 +256,19 @@ void ensureCacheLocked(RecorderState& state) {
         return;
     }
 
-    std::vector<SampleColourEntry> entries;
+    std::vector<AnalysedEntry> entries;
     entries.reserve(state.samples.size());
-    for (const auto& sample : state.samples) {
-        entries.push_back(computeEntryInternal(sample, settings));
+    for (size_t index = 0; index < state.samples.size(); ++index) {
+        const AudioColourSample* previousSample = index > 0 ? &state.samples[index - 1] : nullptr;
+        entries.push_back(computeEntryInternal(state.samples[index], previousSample, settings));
     }
 
     smoothEntriesInPlace(entries, state.samples, settings);
-    state.sampleColourCache = std::move(entries);
+    state.sampleColourCache.clear();
+    state.sampleColourCache.reserve(entries.size());
+    for (auto& analysedEntry : entries) {
+        state.sampleColourCache.push_back(std::move(analysedEntry.entry));
+    }
     state.colourCacheDirty = false;
 }
 
@@ -218,14 +280,15 @@ void appendSampleLocked(RecorderState& state,
         return;
     }
 
-    SampleColourEntry entry = computeEntryInternal(sample, settings);
+    const AudioColourSample* previousSample = state.samples.size() >= 2 ? &state.samples[state.samples.size() - 2] : nullptr;
+    AnalysedEntry entryData = computeEntryInternal(sample, previousSample, settings);
+    SampleColourEntry entry = entryData.entry;
     if (!state.sampleColourCache.empty() && state.samples.size() >= 2) {
-        const auto& previousSample = state.samples[state.samples.size() - 2];
         entry = smoothEntryAgainstPrevious(
             state.sampleColourCache.back(),
-            &previousSample,
+            previousSample,
             sample,
-            entry,
+            entryData,
             settings);
     }
 
