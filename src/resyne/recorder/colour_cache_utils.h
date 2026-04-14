@@ -21,14 +21,4 @@ SampleColourEntry computeSampleColour(const AudioColourSample& sample,
     const CacheSettings& settings,
     const AudioColourSample* previousSample = nullptr);
 
-void markSettingsIfChanged(RecorderState& state,
-    const CacheSettings& settings);
-
-void ensureCacheLocked(RecorderState& state);
-
-void appendSampleLocked(RecorderState& state,
-	const AudioColourSample& sample);
-
-void rebuildCache(RecorderState& state);
-
 }

@@ -3,8 +3,6 @@
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/processing/audio_processor.h"
 #include "constants.h"
-#include "resyne/recorder/colour_cache_utils.h"
-
 namespace ReSyne {
 
 namespace {
@@ -74,8 +72,6 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     state.importedSamples.clear();
     state.importedMetadata = {};
     state.importErrorMessage.clear();
-    state.sampleColourCache.clear();
-    state.colourCacheDirty = true;
     state.timelinePreviewCache.clear();
     state.timelinePreviewCacheDirty = true;
     state.playbackAudio.clear();
@@ -165,7 +161,6 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
                            static_cast<double>(state.metadata.sampleRate);
 
         state.samples.push_back(sample);
-        state.colourCacheDirty = true;
         state.timelinePreviewCacheDirty = true;
     }
 }

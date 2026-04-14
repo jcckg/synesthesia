@@ -10,8 +10,6 @@
 #include <string>
 
 #include "resyne/encoding/formats/exporter.h"
-#include "resyne/recorder/colour_cache_utils.h"
-
 namespace ReSyne {
 
 namespace {
@@ -65,8 +63,6 @@ void applyImportedSequence(RecorderState& state,
     state.fallbackHopSize = state.metadata.hopSize;
     state.dropFlashAlpha = 1.0f;
     state.statusMessageTimer = STATUS_MESSAGE_DURATION;
-    state.sampleColourCache.clear();
-    state.colourCacheDirty = true;
     state.timelinePreviewCache.clear();
     state.timelinePreviewCacheDirty = true;
 }

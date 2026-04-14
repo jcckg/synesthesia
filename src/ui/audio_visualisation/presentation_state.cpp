@@ -254,13 +254,21 @@ void processPlaybackState(AudioInput& audioInput,
         const auto presentationSettings = buildPlaybackPresentationSettings(state, recorderState);
 
         std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
-        ReSyne::RecorderColourCache::ensureCacheLocked(recorderState);
         const float position = scrubberPos * (static_cast<float>(recorderState.samples.size()) - 1.0f);
         const size_t sampleIndex = static_cast<size_t>(position);
         const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
+        auto colourSettings = ReSyne::RecorderColourCache::currentSettings(recorderState);
+        colourSettings.smoothingEnabled = false;
+        colourSettings.manualSmoothing = false;
+        colourSettings.smoothingAmount = 0.0f;
 
         const auto makeSample = [&](const size_t index) {
-            const auto& entry = recorderState.sampleColourCache[index];
+            const AudioColourSample* previousSample =
+                index > 0 ? &recorderState.samples[index - 1] : nullptr;
+            const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
+                recorderState.samples[index],
+                colourSettings,
+                previousSample);
             ReSyne::Timeline::TimelineSample sample{};
             sample.timestamp = recorderState.samples[index].timestamp;
             sample.colour = entry.rgb;

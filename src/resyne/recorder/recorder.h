@@ -116,16 +116,6 @@ struct RecorderState {
     float videoSmoothingAmount = 0.6f;
     bool exportGradient = false;
 
-    std::vector<SampleColourEntry> sampleColourCache;
-    bool colourCacheDirty = true;
-    ColourCore::ColourSpace colourCacheColourSpace = ColourCore::ColourSpace::Rec2020;
-    bool colourCacheGamutMapping = true;
-    float colourCacheLowGain = 1.0f;
-    float colourCacheMidGain = 1.0f;
-    float colourCacheHighGain = 1.0f;
-    bool colourCacheSmoothingEnabled = true;
-    bool colourCacheManualSmoothing = false;
-    float colourCacheSmoothingAmount = 0.6f;
     bool presentationSmoothingEnabled = true;
     bool presentationManualSmoothing = false;
     float presentationSmoothingAmount = 0.6f;

@@ -99,6 +99,29 @@ Timeline::TimelineSample buildTimelineSampleFromXYZ(const double timestamp,
     return output;
 }
 
+Timeline::TimelineSample buildTimelineSampleFromRGB(const double timestamp,
+                                                    const float r,
+                                                    const float g,
+                                                    const float b,
+                                                    const RecorderColourCache::CacheSettings& settings) {
+    Timeline::TimelineSample output{};
+    output.timestamp = timestamp;
+    output.colour = ImVec4(
+        std::clamp(r, 0.0f, 1.0f),
+        std::clamp(g, 0.0f, 1.0f),
+        std::clamp(b, 0.0f, 1.0f),
+        1.0f);
+    ColourCore::RGBtoLab(
+        output.colour.x,
+        output.colour.y,
+        output.colour.z,
+        output.labL,
+        output.labA,
+        output.labB,
+        settings.colourSpace);
+    return output;
+}
+
 void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
                            const std::vector<AudioColourSample>& sourceSamples,
                            const std::vector<size_t>& sampledIndices,
@@ -109,6 +132,36 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
 
     SpringSmoother smoother(8.0f, 1.0f, 0.3f);
     smoother.setSmoothingAmount(settings.smoothingAmount);
+    if (settings.manualSmoothing) {
+        smoother.reset(previewData.front().colour.x, previewData.front().colour.y, previewData.front().colour.z);
+
+        for (size_t index = 1; index < previewData.size(); ++index) {
+            const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
+            const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
+                ? static_cast<float>(deltaSeconds)
+                : (1.0f / 60.0f);
+
+            smoother.setTargetColour(
+                previewData[index].colour.x,
+                previewData[index].colour.y,
+                previewData[index].colour.z);
+            smoother.update(deltaTime * 1.2f);
+
+            float smoothedR = 0.0f;
+            float smoothedG = 0.0f;
+            float smoothedB = 0.0f;
+            smoother.getCurrentColour(smoothedR, smoothedG, smoothedB);
+            previewData[index] = buildTimelineSampleFromRGB(
+                previewData[index].timestamp,
+                smoothedR,
+                smoothedG,
+                smoothedB,
+                settings);
+        }
+
+        return;
+    }
+
     if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
         const size_t initialIndex = sampledIndices.front();
         const auto& initialSample = sourceSamples[initialIndex];
@@ -133,83 +186,24 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
         smoother.reset(previewData.front().colour.x, previewData.front().colour.y, previewData.front().colour.z);
     }
 
-    if (!settings.manualSmoothing) {
-        const auto presentationSettings = buildPresentationSettings(settings);
-        ::UI::Smoothing::MagnitudeHistory fluxHistory;
-        if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
-            const size_t initialIndex = sampledIndices.front();
-            const auto& initialSample = sourceSamples[initialIndex];
-            const AudioColourSample* initialPreviousSample =
-                initialIndex > 0 ? &sourceSamples[initialIndex - 1] : nullptr;
-            fluxHistory.previousMagnitudes =
-                SpectralPresentation::SampleSequence::prepareSampleFrame(
-                    initialSample,
-                    presentationSettings,
-                    initialPreviousSample).visualiserMagnitudes;
-        }
-
-        for (size_t index = 1; index < previewData.size(); ++index) {
-            if (index >= sampledIndices.size() || sampledIndices[index] >= sourceSamples.size()) {
-                continue;
-            }
-
-            const size_t sampleIndex = sampledIndices[index];
-            const auto& currentSample = sourceSamples[sampleIndex];
-            const AudioColourSample* previousSample =
-                sampleIndex > 0 ? &sourceSamples[sampleIndex - 1] : nullptr;
-            const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
-                currentSample,
+    const auto presentationSettings = buildPresentationSettings(settings);
+    ::UI::Smoothing::MagnitudeHistory fluxHistory;
+    if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
+        const size_t initialIndex = sampledIndices.front();
+        const auto& initialSample = sourceSamples[initialIndex];
+        const AudioColourSample* initialPreviousSample =
+            initialIndex > 0 ? &sourceSamples[initialIndex - 1] : nullptr;
+        fluxHistory.previousMagnitudes =
+            SpectralPresentation::SampleSequence::prepareSampleFrame(
+                initialSample,
                 presentationSettings,
-                previousSample);
-
-            auto features = ::UI::Smoothing::buildSignalFeatures(preparedFrame.colourResult);
-            ::UI::Smoothing::updateFluxHistory(
-                preparedFrame.visualiserMagnitudes,
-                fluxHistory,
-                features);
-
-            const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
-            const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
-                ? static_cast<float>(deltaSeconds)
-                : (1.0f / 60.0f);
-
-            float targetL = 0.0f;
-            float targetA = 0.0f;
-            float targetB = 0.0f;
-            ColourCore::XYZtoOklab(
-                preparedFrame.colourResult.X,
-                preparedFrame.colourResult.Y,
-                preparedFrame.colourResult.Z,
-                targetL,
-                targetA,
-                targetB);
-            smoother.setTargetOklab(targetL, targetA, targetB);
-            smoother.update(deltaTime * 1.2f, features);
-
-            float smoothedL = 0.0f;
-            float smoothedA = 0.0f;
-            float smoothedB = 0.0f;
-            smoother.getCurrentOklab(smoothedL, smoothedA, smoothedB);
-            float smoothedX = 0.0f;
-            float smoothedY = 0.0f;
-            float smoothedZ = 0.0f;
-            ColourCore::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
-            previewData[index] = buildTimelineSampleFromXYZ(
-                previewData[index].timestamp,
-                smoothedX,
-                smoothedY,
-                smoothedZ,
-                settings);
-        }
-
-        return;
+                initialPreviousSample).visualiserMagnitudes;
     }
 
     for (size_t index = 1; index < previewData.size(); ++index) {
-        const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
-        const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
-            ? static_cast<float>(deltaSeconds)
-            : (1.0f / 60.0f);
+        if (index >= sampledIndices.size() || sampledIndices[index] >= sourceSamples.size()) {
+            continue;
+        }
 
         const size_t sampleIndex = sampledIndices[index];
         const auto& currentSample = sourceSamples[sampleIndex];
@@ -217,8 +211,20 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             sampleIndex > 0 ? &sourceSamples[sampleIndex - 1] : nullptr;
         const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
             currentSample,
-            buildPresentationSettings(settings),
+            presentationSettings,
             previousSample);
+
+        auto features = ::UI::Smoothing::buildSignalFeatures(preparedFrame.colourResult);
+        ::UI::Smoothing::updateFluxHistory(
+            preparedFrame.visualiserMagnitudes,
+            fluxHistory,
+            features);
+
+        const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
+        const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
+            ? static_cast<float>(deltaSeconds)
+            : (1.0f / 60.0f);
+
         float targetL = 0.0f;
         float targetA = 0.0f;
         float targetB = 0.0f;
@@ -230,7 +236,7 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
             targetA,
             targetB);
         smoother.setTargetOklab(targetL, targetA, targetB);
-        smoother.update(deltaTime * 1.2f);
+        smoother.update(deltaTime * 1.2f, features);
 
         float smoothedL = 0.0f;
         float smoothedA = 0.0f;
