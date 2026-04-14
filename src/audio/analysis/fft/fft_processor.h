@@ -64,6 +64,17 @@ public:
 		FFTFrame() : frameCounter(0), sampleRate(0.0f), loudnessLUFS(-200.0f) {}
 	};
 
+	struct AnalysisState {
+		uint64_t frameCounter = 0;
+		float momentaryLoudnessLUFS = -200.0f;
+		float currentLoudness = 0.0f;
+		float totalEnergy = 0.0f;
+		float maxMagnitude = 0.0f;
+		float spectralFlux = 0.0f;
+		int hopSize = HOP_SIZE;
+		bool onsetDetected = false;
+	};
+
 	FFTProcessor();
 	~FFTProcessor();
 
@@ -77,10 +88,12 @@ public:
 	std::vector<float> getRawMagnitudesBuffer() const;
 	std::vector<float> getSpectralEnvelope() const;
 	std::vector<float> getPhaseBuffer() const;
+	void copyProcessedFrame(std::vector<float>& magnitudes, std::vector<float>& phases, AnalysisState& state) const;
+	void copyRawFrame(std::vector<float>& rawMagnitudes, std::vector<float>& phases, AnalysisState& state) const;
 	void reset();
 	void setEQGains(float low, float mid, float high);
 	void setHopSize(int hopSize);
-	int getHopSize() const { return static_cast<int>(analysisHopSize); }
+	int getHopSize() const;
 	void setCriticalBandSmoothingEnabled(bool enabled);
 	void setMelWeightingEnabled(bool enabled);
 	bool getCriticalBandSmoothingEnabled() const { return criticalBandSmoothingEnabled; }
@@ -88,13 +101,13 @@ public:
 
 	std::vector<FFTFrame> getBufferedFrames();
 	uint64_t getDroppedFrameCount() const { return droppedFrameCount.load(std::memory_order_relaxed); }
-	float getCurrentLoudness() const { return currentLoudness; }
-	float getMomentaryLoudnessLUFS() const { return momentaryLoudnessLUFS; }
-	float getTotalEnergy() const { return totalEnergy; }
-	float getMaxMagnitude() const { return maxMagnitude; }
-	float getSpectralFlux() const { return spectralFlux; }
-	bool getOnsetDetected() const { return onsetDetected; }
-    uint64_t getFrameCounter() const;
+	float getCurrentLoudness() const;
+	float getMomentaryLoudnessLUFS() const;
+	float getTotalEnergy() const;
+	float getMaxMagnitude() const;
+	float getSpectralFlux() const;
+	bool getOnsetDetected() const;
+	uint64_t getFrameCounter() const;
 
 	static float calculateMelWeight(float frequency);
 	static float calculateERB(float frequency);

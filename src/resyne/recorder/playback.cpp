@@ -1,10 +1,9 @@
 #include "resyne/recorder/recorder.h"
+#include "resyne/recorder/reconstruction_utils.h"
 #include "imgui_internal.h"
 
 #include <algorithm>
 #include <mutex>
-
-#include "resyne/encoding/audio/wav_encoder.h"
 
 namespace ReSyne {
 
@@ -43,71 +42,25 @@ bool Recorder::refreshPlaybackOutput(RecorderState& state) {
 }
 
 void Recorder::reconstructAudio(RecorderState& state) {
-    std::lock_guard<std::mutex> lock(state.samplesMutex);
-    if (state.samples.empty()) {
+    std::vector<AudioColourSample> samples;
+    AudioMetadata metadata;
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        if (state.samples.empty()) {
+            return;
+        }
+        samples = state.samples;
+        metadata = state.metadata;
+    }
+
+    std::vector<float> rebuiltPlaybackAudio;
+    if (!RecorderReconstruction::buildPlaybackAudio(samples, metadata, rebuiltPlaybackAudio)) {
         return;
     }
 
-    const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
-
-    std::vector<std::vector<float>> channelAudioData(numChannels);
-    size_t maxLength = 0;
-
-    for (uint32_t ch = 0; ch < numChannels; ++ch) {
-        std::vector<SpectralSample> spectralSamples;
-        spectralSamples.reserve(state.samples.size());
-
-        for (const auto& sample : state.samples) {
-            SpectralSample spectral;
-            spectral.magnitudes.clear();
-            spectral.phases.clear();
-            spectral.frequencies.clear();
-            if (ch < sample.magnitudes.size()) {
-                spectral.magnitudes.push_back(sample.magnitudes[ch]);
-            } else {
-                spectral.magnitudes.push_back(std::vector<float>());
-            }
-            if (ch < sample.phases.size()) {
-                spectral.phases.push_back(sample.phases[ch]);
-            } else {
-                spectral.phases.push_back(std::vector<float>());
-            }
-            if (ch < sample.frequencies.size()) {
-                spectral.frequencies.push_back(sample.frequencies[ch]);
-            } else {
-                spectral.frequencies.push_back(std::vector<float>());
-            }
-            spectral.timestamp = sample.timestamp;
-            spectral.sampleRate = sample.sampleRate;
-            spectralSamples.push_back(spectral);
-        }
-
-        auto result = WAVEncoder::reconstructFromSpectralData(
-            spectralSamples,
-            state.metadata.sampleRate,
-            state.metadata.fftSize,
-            state.metadata.hopSize
-        );
-
-        if (!result.success || result.audioSamples.empty()) {
-            return;
-        }
-
-        channelAudioData[ch] = std::move(result.audioSamples);
-        maxLength = std::max(maxLength, channelAudioData[ch].size());
-    }
-
-    state.playbackAudio.clear();
-    state.playbackAudio.reserve(maxLength * numChannels);
-
-    for (size_t i = 0; i < maxLength; ++i) {
-        for (uint32_t ch = 0; ch < numChannels; ++ch) {
-            if (i < channelAudioData[ch].size()) {
-                state.playbackAudio.push_back(channelAudioData[ch][i]);
-            } else {
-                state.playbackAudio.push_back(0.0f);
-            }
-        }
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        state.playbackAudio = std::move(rebuiltPlaybackAudio);
     }
 
     refreshPlaybackOutput(state);

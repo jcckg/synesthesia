@@ -30,7 +30,6 @@ void updateFromFFT(State& state,
 
 void renderMainView(State& state,
                     AudioInput& audioInput,
-                    FFTProcessor& fftProcessor,
                     float windowX,
                     float windowY,
                     float windowWidth,
@@ -38,7 +37,6 @@ void renderMainView(State& state,
     Recorder::drawFullWindow(
         state.recorderState,
         audioInput,
-        fftProcessor,
         windowX,
         windowY,
         windowWidth,
@@ -49,14 +47,14 @@ void renderMainView(State& state,
 }
 
 void renderRecorderPanel(State& state,
-                         FFTProcessor& fftProcessor,
+                         AudioProcessor& audioProcessor,
                          float panelX,
                          float panelY,
                          float panelWidth,
                          float panelHeight) {
     Recorder::drawBottomPanel(
         state.recorderState,
-        fftProcessor,
+        audioProcessor,
         panelX,
         panelY,
         panelWidth,

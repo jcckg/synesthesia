@@ -19,7 +19,6 @@ namespace ReSyne {
 
 void Recorder::drawFullWindow(RecorderState& state,
                               AudioInput& audioInput,
-                              FFTProcessor& fftProcessor,
                               float windowX,
                               float windowY,
                               float windowWidth,
@@ -236,7 +235,7 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::TableSetColumnIndex(0);
         ImGui::BeginDisabled(state.isRecording);
         if (ImGui::Button("START", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
-            startRecording(state, fftProcessor, 2048, 1024);
+            startRecording(state, audioInput.getAudioProcessor(), 2048, 1024);
         }
         ImGui::EndDisabled();
 

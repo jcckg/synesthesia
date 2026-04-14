@@ -22,6 +22,8 @@
 
 namespace {
 
+AudioProcessor::SpectralData liveSpectralScratch;
+
 void renderWrappedStatusText(const char* text, const ImVec4* colour = nullptr) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
     if (colour != nullptr) {
@@ -115,14 +117,15 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const
             ImGui::Spacing();
             return;
         } else {
-            const auto spectralData = audioInput.getSpectralData();
+            audioInput.copySpectralData(liveSpectralScratch);
+            const auto& spectralData = liveSpectralScratch;
             frame = SpectralPresentation::mixChannels(
                 spectralData.magnitudes,
                 spectralData.phases,
                 {},
                 static_cast<std::uint32_t>(spectralData.magnitudes.size()),
                 spectralData.sampleRate > 0.0f ? spectralData.sampleRate : audioInput.getSampleRate());
-			loudnessOverride = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
+			loudnessOverride = spectralData.momentaryLoudnessLUFS;
         }
 
 		auto currentColourResult = SpectralPresentation::buildColourResult(

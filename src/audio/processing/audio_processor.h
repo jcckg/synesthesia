@@ -14,9 +14,16 @@ public:
 	struct SpectralData {
 		std::vector<std::vector<float>> magnitudes;
 		std::vector<std::vector<float>> phases;
-		float dominantFrequency;
-		float sampleRate;
+		float dominantFrequency = 0.0f;
+		float sampleRate = 0.0f;
+		float momentaryLoudnessLUFS = -200.0f;
+		float spectralFlux = 0.0f;
+		uint64_t frameCounter = 0;
+		int hopSize = FFTProcessor::HOP_SIZE;
+		bool onsetDetected = false;
 	};
+
+	using BufferedFrames = std::vector<std::vector<FFTProcessor::FFTFrame>>;
 
 	AudioProcessor();
 	~AudioProcessor();
@@ -24,6 +31,9 @@ public:
 	void queueAudioData(const float* buffer, size_t numSamples, float sampleRate, size_t numChannels);
 
 	SpectralData getSpectralData() const;
+	void copySpectralData(SpectralData& out) const;
+	BufferedFrames consumeBufferedFrames();
+	void discardBufferedFrames();
 	void setEQGains(float low, float mid, float high);
 	void reset();
 	void start();
@@ -32,7 +42,7 @@ public:
 
 	FFTProcessor& getFFTProcessor(size_t channel = 0);
 	const FFTProcessor& getFFTProcessor(size_t channel = 0) const;
-    size_t getChannelCount() const { return fftProcessors.size(); }
+	size_t getChannelCount() const;
 
 private:
 	static constexpr size_t QUEUE_SIZE = 16;
@@ -54,11 +64,21 @@ private:
 	std::mutex queueMutex;
 	std::atomic<uint64_t> droppedBufferCount{0};
 
+	mutable std::mutex processorMutex;
 	std::vector<std::unique_ptr<FFTProcessor>> fftProcessors;
+	size_t activeChannelCount = 0;
+	float eqLowGain = 1.0f;
+	float eqMidGain = 1.0f;
+	float eqHighGain = 1.0f;
+	std::vector<float> channelBufferScratch;
+	SpectralData stagingSpectralData;
 
 	mutable std::mutex resultsMutex;
 	SpectralData currentSpectralData;
 
 	void processingThreadFunc();
 	void processBuffer(const AudioBuffer& buffer);
+	void ensureProcessorCountLocked(size_t numChannels);
+	FFTProcessor* getProcessorForChannel(size_t channel);
+	const FFTProcessor* getProcessorForChannel(size_t channel) const;
 };

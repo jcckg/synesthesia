@@ -37,11 +37,12 @@ void Recorder::drawExportingDialog(RecorderState& state) {
         constexpr float PROGRESS_BAR_WIDTH = 400.0f;
         ImGui::ProgressBar(currentProgress, ImVec2(PROGRESS_BAR_WIDTH, 0.0f));
 
-        if (!state.exportOperationStatus.empty()) {
+        const std::string operationStatus = getExportOperationStatus(state);
+        if (!operationStatus.empty()) {
             ImGui::Spacing();
             const ImVec4 statusCol = isLightMode ? ImVec4(0.4f, 0.4f, 0.4f, 1.0f) : ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
             ImGui::PushStyleColor(ImGuiCol_Text, statusCol);
-            ImGui::TextWrapped("%s", state.exportOperationStatus.c_str());
+            ImGui::TextWrapped("%s", operationStatus.c_str());
             ImGui::PopStyleColor();
         }
 
@@ -63,10 +64,12 @@ void Recorder::drawExportingDialog(RecorderState& state) {
 
                 if (ImGui::Button("OK", ImVec2(120, 0))) {
                     state.showExportingDialog = false;
+                    setExportOperationStatus(state, {});
                     ImGui::CloseCurrentPopup();
                 }
             } else {
                 state.showExportingDialog = false;
+                setExportOperationStatus(state, {});
                 ImGui::CloseCurrentPopup();
             }
         }

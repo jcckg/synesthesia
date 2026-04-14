@@ -33,6 +33,26 @@ RecorderState::~RecorderState() {
     }
 }
 
+void setLoadingOperationStatus(RecorderState& state, std::string status) {
+    std::lock_guard<std::mutex> lock(state.operationStatusMutex);
+    state.loadingOperationStatus = std::move(status);
+}
+
+std::string getLoadingOperationStatus(RecorderState& state) {
+    std::lock_guard<std::mutex> lock(state.operationStatusMutex);
+    return state.loadingOperationStatus;
+}
+
+void setExportOperationStatus(RecorderState& state, std::string status) {
+    std::lock_guard<std::mutex> lock(state.operationStatusMutex);
+    state.exportOperationStatus = std::move(status);
+}
+
+std::string getExportOperationStatus(RecorderState& state) {
+    std::lock_guard<std::mutex> lock(state.operationStatusMutex);
+    return state.exportOperationStatus;
+}
+
 bool Recorder::hasLoadedAudio(RecorderState& state) {
     std::lock_guard<std::mutex> lock(state.samplesMutex);
     return !state.samples.empty() ||
@@ -68,7 +88,7 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     state.dropFlashAlpha = 0.0f;
     state.statusMessage.clear();
     state.statusMessageTimer = 0.0f;
-    state.loadingOperationStatus.clear();
+    setLoadingOperationStatus(state, {});
     state.previewReady.store(false, std::memory_order_release);
     resetTimelineState(state);
 }
@@ -86,19 +106,15 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
     (void)g;
     (void)b;
 
-    const size_t numChannels = audioProcessor.getChannelCount();
-    if (numChannels == 0) {
+    auto channelFrames = audioProcessor.consumeBufferedFrames();
+    if (channelFrames.empty() || channelFrames.front().empty()) {
         return;
     }
 
-    std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
-    size_t frameCount = 0;
-    for (size_t ch = 0; ch < numChannels; ++ch) {
-        channelFrames[ch] = audioProcessor.getFFTProcessor(ch).getBufferedFrames();
-        if (channelFrames[ch].empty()) {
-            return;
-        }
-        frameCount = ch == 0 ? channelFrames[ch].size() : std::min(frameCount, channelFrames[ch].size());
+    const size_t numChannels = channelFrames.size();
+    size_t frameCount = channelFrames.front().size();
+    for (size_t ch = 1; ch < numChannels; ++ch) {
+        frameCount = std::min(frameCount, channelFrames[ch].size());
     }
 
     if (frameCount == 0) {
@@ -155,10 +171,10 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
 }
 
 void Recorder::startRecording(RecorderState& state,
-                                         FFTProcessor& fftProcessor,
+                                         AudioProcessor& audioProcessor,
                                          int fftSize,
                                          int hopSize) {
-    fftProcessor.getBufferedFrames();
+    audioProcessor.discardBufferedFrames();
     clearLoadedAudio(state);
 
     std::lock_guard<std::mutex> lock(state.samplesMutex);

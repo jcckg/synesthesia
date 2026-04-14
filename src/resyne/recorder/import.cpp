@@ -1,5 +1,6 @@
 #include "resyne/recorder/recorder.h"
 #include "resyne/recorder/import_helpers.h"
+#include "resyne/recorder/reconstruction_utils.h"
 #include "audio/analysis/fft/fft_processor.h"
 
 #include <algorithm>
@@ -10,7 +11,6 @@
 
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/recorder/colour_cache_utils.h"
-#include "resyne/encoding/audio/wav_encoder.h"
 
 namespace ReSyne {
 
@@ -140,11 +140,10 @@ bool Recorder::importFromFile(RecorderState& state,
         errorMessage = "unsupported format";
     }
 
-    const auto filename = extractFilename(filepath);
     if (!success) {
         state.showLoadingDialog = false;
         state.dropFlashAlpha = 0.0f;
-        state.statusMessage = "Failed to load " + filename;
+        state.statusMessage = "Failed to load " + extractFilename(filepath);
         if (!errorMessage.empty()) {
             state.statusMessage += " (" + errorMessage + ")";
         }
@@ -182,8 +181,6 @@ void Recorder::importFromFileThreaded(RecorderState& state,
     std::string errorMessage;
     std::vector<float> playbackAudio;
     const auto extension = extractExtension(filepath);
-    const auto filename = extractFilename(filepath);
-
     bool success = false;
 
     auto updateProgress = [&state](float progress) {
@@ -206,7 +203,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
     };
 
     auto setStatus = [&state](const std::string& status) {
-        state.loadingOperationStatus = status;
+        setLoadingOperationStatus(state, status);
     };
 
     if (extension == ".wav" || extension == ".flac" || extension == ".mp3" ||
@@ -254,78 +251,20 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 
     std::vector<float> resolvedPlaybackAudio;
     bool reconstructionSuccess = false;
-    uint32_t numChannels = 1;
 
     const bool shouldReconstructDuringImport = playbackAudio.empty();
 
     if (success && !samples.empty() && shouldReconstructDuringImport) {
         setStatus("Reconstructing audio...");
         updateProgress(0.85f);
-
-        numChannels = !samples.empty() ? samples.front().channels : 1;
-
-        std::vector<std::vector<float>> channelAudioData(numChannels);
-        size_t maxLength = 0;
-        bool allChannelsSuccess = true;
-
-        for (uint32_t ch = 0; ch < numChannels; ++ch) {
-            std::vector<SpectralSample> spectralSamples;
-            spectralSamples.reserve(samples.size());
-
-            for (const auto& sample : samples) {
-                SpectralSample spectral;
-                spectral.magnitudes.clear();
-                spectral.phases.clear();
-                if (ch < sample.magnitudes.size()) {
-                    spectral.magnitudes.push_back(sample.magnitudes[ch]);
-                } else {
-                    spectral.magnitudes.push_back(std::vector<float>());
-                }
-                if (ch < sample.phases.size()) {
-                    spectral.phases.push_back(sample.phases[ch]);
-                } else {
-                    spectral.phases.push_back(std::vector<float>());
-                }
-                spectral.timestamp = sample.timestamp;
-                spectral.sampleRate = sample.sampleRate;
-                spectralSamples.push_back(spectral);
-            }
-
-            updateProgress(0.85f + 0.05f * (static_cast<float>(ch) / static_cast<float>(numChannels)));
-
-            auto result = WAVEncoder::reconstructFromSpectralData(
-                spectralSamples,
-                metadata.sampleRate,
-                metadata.fftSize,
-                metadata.hopSize
-            );
-
-            if (!result.success || result.audioSamples.empty()) {
-                allChannelsSuccess = false;
-                break;
-            }
-
-            channelAudioData[ch] = std::move(result.audioSamples);
-            maxLength = std::max(maxLength, channelAudioData[ch].size());
-        }
-
+        reconstructionSuccess = RecorderReconstruction::buildPlaybackAudio(
+            samples,
+            metadata,
+            resolvedPlaybackAudio,
+            [&updateProgress](float fraction) {
+                updateProgress(0.85f + std::clamp(fraction, 0.0f, 1.0f) * 0.10f);
+            });
         updateProgress(0.95f);
-
-        if (allChannelsSuccess) {
-            resolvedPlaybackAudio.clear();
-            resolvedPlaybackAudio.reserve(maxLength * numChannels);
-
-            for (size_t i = 0; i < maxLength; ++i) {
-                for (uint32_t ch = 0; ch < numChannels; ++ch) {
-                    if (i < channelAudioData[ch].size()) {
-                        resolvedPlaybackAudio.push_back(channelAudioData[ch][i]);
-                    } else {
-                        resolvedPlaybackAudio.push_back(0.0f);
-                    }
-                }
-            }
-            reconstructionSuccess = true;
-        }
     } else if (success && !samples.empty() && !shouldReconstructDuringImport) {
         resolvedPlaybackAudio = std::move(playbackAudio);
         reconstructionSuccess = !resolvedPlaybackAudio.empty();

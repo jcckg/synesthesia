@@ -1,6 +1,5 @@
 #pragma once
 
-#include "audio/analysis/fft/fft_processor.h"
 #include "audio/processing/audio_processor.h"
 #include "audio/input/audio_input.h"
 #include "resyne/controller/state.h"
@@ -16,14 +15,13 @@ void updateFromFFT(State& state,
 
 void renderMainView(State& state,
                     AudioInput& audioInput,
-                    FFTProcessor& fftProcessor,
                     float windowX,
                     float windowY,
                     float windowWidth,
                     float windowHeight);
 
 void renderRecorderPanel(State& state,
-                         FFTProcessor& fftProcessor,
+                         AudioProcessor& audioProcessor,
                          float panelX,
                          float panelY,
                          float panelWidth,

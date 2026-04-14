@@ -52,7 +52,9 @@ FFTProcessor::FFTProcessor()
 	// https://en.wikipedia.org/wiki/Hann_function
 	for (size_t i = 0; i < hannWindow.size(); ++i) {
 		hannWindow[i] =
-			0.5f * (1.0f - std::cos(2.0f * std::numbers::pi_v<float> * i / (FFT_SIZE - 1)));
+			0.5f * (1.0f - std::cos(
+				2.0f * std::numbers::pi_v<float> * static_cast<float>(i) /
+				static_cast<float>(FFT_SIZE - 1)));
 	}
 }
 
@@ -64,8 +66,8 @@ FFTProcessor::~FFTProcessor() {
 }
 
 uint64_t FFTProcessor::getFrameCounter() const {
-    std::lock_guard lock(dataMutex);
-    return frameCounter;
+	std::lock_guard lock(dataMutex);
+	return frameCounter;
 }
 
 void FFTProcessor::setEQGains(const float low, const float mid, const float high) {
@@ -84,10 +86,13 @@ void FFTProcessor::setHopSize(const int hopSize) {
 	inputAccumulator.assign(analysisHopSize, 0.0f);
 	windowBuffer.assign(FFT_SIZE, 0.0f);
 	accumulatedSamples = 0;
-	frameCounter = 0;
 	loudnessMeter.reset();
-	momentaryLoudnessLUFS = -200.0f;
-	currentLoudness = 0.0f;
+	{
+		std::lock_guard dataLock(dataMutex);
+		frameCounter = 0;
+		momentaryLoudnessLUFS = -200.0f;
+		currentLoudness = 0.0f;
+	}
 }
 
 float FFTProcessor::calculateMelWeight(const float frequency) {
@@ -183,7 +188,10 @@ void FFTProcessor::normalizeFFTOutput() {
 
 float FFTProcessor::updateLoudnessMetrics() {
 	const float lufs = loudnessMeter.getMomentaryLoudness();
-	momentaryLoudnessLUFS = lufs;
+	{
+		std::lock_guard lock(dataMutex);
+		momentaryLoudnessLUFS = lufs;
+	}
 	return std::clamp((lufs + LUFS_NORMALISATION_OFFSET) / LUFS_NORMALISATION_OFFSET, 0.0f, 1.0f);
 }
 
@@ -258,6 +266,40 @@ std::vector<float> FFTProcessor::getRawMagnitudesBuffer() const {
 std::vector<float> FFTProcessor::getPhaseBuffer() const {
 	std::lock_guard lock(dataMutex);
 	return phaseBuffer;
+}
+
+void FFTProcessor::copyProcessedFrame(std::vector<float>& magnitudes,
+									  std::vector<float>& phases,
+									  AnalysisState& state) const {
+	std::lock_guard processingLock(processingMutex);
+	std::lock_guard lock(dataMutex);
+	magnitudes = magnitudesBuffer;
+	phases = phaseBuffer;
+	state.frameCounter = frameCounter;
+	state.momentaryLoudnessLUFS = momentaryLoudnessLUFS;
+	state.currentLoudness = currentLoudness;
+	state.totalEnergy = totalEnergy;
+	state.maxMagnitude = maxMagnitude;
+	state.spectralFlux = spectralFlux;
+	state.hopSize = static_cast<int>(analysisHopSize);
+	state.onsetDetected = onsetDetected;
+}
+
+void FFTProcessor::copyRawFrame(std::vector<float>& rawMagnitudes,
+								std::vector<float>& phases,
+								AnalysisState& state) const {
+	std::lock_guard processingLock(processingMutex);
+	std::lock_guard lock(dataMutex);
+	rawMagnitudes = rawMagnitudesBuffer;
+	phases = phaseBuffer;
+	state.frameCounter = frameCounter;
+	state.momentaryLoudnessLUFS = momentaryLoudnessLUFS;
+	state.currentLoudness = currentLoudness;
+	state.totalEnergy = totalEnergy;
+	state.maxMagnitude = maxMagnitude;
+	state.spectralFlux = spectralFlux;
+	state.hopSize = static_cast<int>(analysisHopSize);
+	state.onsetDetected = onsetDetected;
 }
 
 void FFTProcessor::processMagnitudes(std::vector<float>& magnitudes, const float sampleRate,
@@ -369,6 +411,7 @@ void FFTProcessor::calculateMagnitudes(std::vector<float>& rawMagnitudes, const 
 }
 
 void FFTProcessor::calculatePhases() {
+	std::lock_guard lock(dataMutex);
 	for (size_t i = 0; i < fft_out.size(); ++i) {
 		phaseBuffer[i] = std::atan2(fft_out[i].i, fft_out[i].r);
 	}
@@ -471,10 +514,13 @@ void FFTProcessor::calculateSpectralFluxAndOnset(const std::vector<float>& curre
 	}
 
 	const float threshold = maxFlux * ONSET_THRESHOLD_MULTIPLIER;
-	onsetDetected = flux > threshold && flux > 0.01f;
-
-	spectralFlux = flux;
+	const bool onset = flux > threshold && flux > 0.01f;
 	previousMagnitudes = currentMagnitudes;
+	{
+		std::lock_guard lock(dataMutex);
+		onsetDetected = onset;
+		spectralFlux = flux;
+	}
 }
 
 // Glasberg & Moore (1990) - ERB: Equivalent Rectangular Bandwidth
@@ -501,6 +547,41 @@ void FFTProcessor::setCriticalBandSmoothingEnabled(const bool enabled) {
 void FFTProcessor::setMelWeightingEnabled(const bool enabled) {
 	std::lock_guard<std::mutex> lock(processingMutex);
 	melWeightingEnabled = enabled;
+}
+
+int FFTProcessor::getHopSize() const {
+	std::lock_guard lock(processingMutex);
+	return static_cast<int>(analysisHopSize);
+}
+
+float FFTProcessor::getCurrentLoudness() const {
+	std::lock_guard lock(dataMutex);
+	return currentLoudness;
+}
+
+float FFTProcessor::getMomentaryLoudnessLUFS() const {
+	std::lock_guard lock(dataMutex);
+	return momentaryLoudnessLUFS;
+}
+
+float FFTProcessor::getTotalEnergy() const {
+	std::lock_guard lock(dataMutex);
+	return totalEnergy;
+}
+
+float FFTProcessor::getMaxMagnitude() const {
+	std::lock_guard lock(dataMutex);
+	return maxMagnitude;
+}
+
+float FFTProcessor::getSpectralFlux() const {
+	std::lock_guard lock(dataMutex);
+	return spectralFlux;
+}
+
+bool FFTProcessor::getOnsetDetected() const {
+	std::lock_guard lock(dataMutex);
+	return onsetDetected;
 }
 
 void FFTProcessor::initialiseCriticalBands(const float sampleRate) {

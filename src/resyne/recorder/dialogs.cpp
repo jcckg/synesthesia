@@ -78,7 +78,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
         };
 
         auto updateStatus = [&](const std::string& status) {
-            state.exportOperationStatus = status;
+            setExportOperationStatus(state, status);
         };
 
         std::vector<AudioColourSample> samplesCopy;
@@ -294,6 +294,7 @@ void Recorder::handleFileDialog(RecorderState& state) {
         state.pendingExportPath = filepath;
         state.pendingExportFormat = state.exportFormat;
         state.showExportingDialog = true;
+        setExportOperationStatus(state, {});
         
         size_t lastSlash = filepath.find_last_of("/\\");
         state.exportingFilename = (lastSlash != std::string::npos)

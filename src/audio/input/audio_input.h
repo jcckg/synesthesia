@@ -28,12 +28,14 @@ public:
 	bool resumeStream();
 	bool isStreamActive() const;
 	AudioProcessor::SpectralData getSpectralData() const;
+	void copySpectralData(AudioProcessor::SpectralData& out) const { processor.copySpectralData(out); }
 	FFTProcessor& getFFTProcessor(size_t channel = 0) { return processor.getFFTProcessor(channel); }
 	const FFTProcessor& getFFTProcessor(size_t channel = 0) const { return processor.getFFTProcessor(channel); }
 	AudioProcessor& getAudioProcessor() { return processor; }
 	const AudioProcessor& getAudioProcessor() const { return processor; }
 
 	void setEQGains(float low, float mid, float high) { processor.setEQGains(low, mid, high); }
+	void discardBufferedFrames() { processor.discardBufferedFrames(); }
 
 	int getChannelCount() const { return channelCount; }
 	void setActiveChannel(int channel) {

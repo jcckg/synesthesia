@@ -421,7 +421,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			ReSyne::renderMainView(
 				state.resyneState,
 				audioInput,
-				audioInput.getFFTProcessor(),
 				windowX,
 				windowY,
 				windowWidth,
@@ -433,7 +432,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
 			ReSyne::renderRecorderPanel(
 				state.resyneState,
-				audioInput.getFFTProcessor(),
+				audioInput.getAudioProcessor(),
 				panelX,
 				panelY,
 				panelWidth,

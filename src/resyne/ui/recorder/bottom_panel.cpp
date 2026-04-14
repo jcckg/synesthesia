@@ -15,7 +15,7 @@
 namespace ReSyne {
 
 void Recorder::drawBottomPanel(RecorderState& state,
-                               FFTProcessor& fftProcessor,
+                               AudioProcessor& audioProcessor,
                                float panelX,
                                float panelY,
                                float panelWidth,
@@ -161,7 +161,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         ImGui::TableSetColumnIndex(0);
         ImGui::BeginDisabled(state.isRecording);
         if (ImGui::Button("Start", ImVec2(buttonWidth, buttonHeight))) {
-            startRecording(state, fftProcessor, 2048, 1024);
+            startRecording(state, audioProcessor, 2048, 1024);
         }
         ImGui::EndDisabled();
 

@@ -35,11 +35,12 @@ void Recorder::drawLoadingDialog(RecorderState& state) {
         constexpr float PROGRESS_BAR_WIDTH = 400.0f;
         ImGui::ProgressBar(state.loadingProgress, ImVec2(PROGRESS_BAR_WIDTH, 0.0f));
 
-        if (!state.loadingOperationStatus.empty()) {
+        const std::string operationStatus = getLoadingOperationStatus(state);
+        if (!operationStatus.empty()) {
             ImGui::Spacing();
             const ImVec4 statusCol = isLightMode ? ImVec4(0.4f, 0.4f, 0.4f, 1.0f) : ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
             ImGui::PushStyleColor(ImGuiCol_Text, statusCol);
-            ImGui::TextWrapped("%s", state.loadingOperationStatus.c_str());
+            ImGui::TextWrapped("%s", operationStatus.c_str());
             ImGui::PopStyleColor();
         }
 

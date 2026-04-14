@@ -20,6 +20,7 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 		recorderState.showLoadingDialog = true;
 		recorderState.loadingFilename = filename;
 		recorderState.loadingProgress = 0.0f;
+		ReSyne::setLoadingOperationStatus(recorderState, {});
 		recorderState.importPhase = 2;
 	} else if (recorderState.importPhase == 2 && !recorderState.pendingImportPath.empty()) {
 		const std::string pathToImport = recorderState.pendingImportPath;
@@ -94,7 +95,7 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 
 					recorderState.previewSamples.clear();
 					recorderState.previewReady.store(false, std::memory_order_release);
-					recorderState.loadingOperationStatus.clear();
+					ReSyne::setLoadingOperationStatus(recorderState, {});
 				}
 			}
 
@@ -114,6 +115,7 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 			}
 
 			recorderState.showLoadingDialog = false;
+			ReSyne::setLoadingOperationStatus(recorderState, {});
 			recorderState.pendingImportPath.clear();
 			recorderState.importPhase = 0;
 			ImGui::ClearActiveID();

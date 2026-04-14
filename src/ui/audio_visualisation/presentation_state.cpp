@@ -22,6 +22,7 @@ namespace UI::AudioVisualisation {
 
 namespace {
 ::UI::Smoothing::MagnitudeHistory playbackSmoothingState;
+AudioProcessor::SpectralData liveSpectralScratch;
 
 struct LivePhaseState {
     SpectralPresentation::Frame previousFrame;
@@ -30,6 +31,15 @@ struct LivePhaseState {
 };
 
 LivePhaseState livePhaseState;
+
+struct LiveEQState {
+    float lowGain = 1.0f;
+    float midGain = 1.0f;
+    float highGain = 1.0f;
+    bool initialised = false;
+};
+
+LiveEQState liveEQState;
 
 constexpr float kSilenceMagnitudeThreshold = 1e-5f;
 
@@ -157,6 +167,25 @@ float resolveSpectrumHistoryFactor(const UIState& state,
     return resolveAdaptiveSmoothingAmount(baseSmoothing, *features);
 }
 
+void applyLiveEQIfNeeded(AudioInput& audioInput, const UIState& state) {
+    const bool gainsChanged = !liveEQState.initialised ||
+        liveEQState.lowGain != state.audioSettings.lowGain ||
+        liveEQState.midGain != state.audioSettings.midGain ||
+        liveEQState.highGain != state.audioSettings.highGain;
+    if (!gainsChanged) {
+        return;
+    }
+
+    audioInput.setEQGains(
+        state.audioSettings.lowGain,
+        state.audioSettings.midGain,
+        state.audioSettings.highGain);
+    liveEQState.lowGain = state.audioSettings.lowGain;
+    liveEQState.midGain = state.audioSettings.midGain;
+    liveEQState.highGain = state.audioSettings.highGain;
+    liveEQState.initialised = true;
+}
+
 }
 
 void syncRecorderPresentationSettings(UIState& state) {
@@ -205,8 +234,10 @@ void processPlaybackState(AudioInput& audioInput,
             const size_t spectralFrame = static_cast<size_t>(
                 std::clamp(audioNormalised, 0.0f, 1.0f) * static_cast<float>(recorderState.samples.size()));
             const size_t clampedSpectralFrame = std::min(spectralFrame, recorderState.samples.size() - 1);
-            recorderState.timeline.scrubberNormalisedPosition =
-                static_cast<float>(clampedSpectralFrame) / static_cast<float>(recorderState.samples.size() - 1);
+            recorderState.timeline.scrubberNormalisedPosition = recorderState.samples.size() == 1
+                ? 0.0f
+                : static_cast<float>(clampedSpectralFrame) /
+                    static_cast<float>(recorderState.samples.size() - 1);
         }
     }
 
@@ -360,10 +391,11 @@ void processLiveAudioState(AudioInput& audioInput,
                            const ColourUpdateContext& ctx) {
     (void)recorderState;
     const auto presentationSettings = buildLivePresentationSettings(state);
-    const auto spectralData = audioInput.getSpectralData();
+    audioInput.copySpectralData(liveSpectralScratch);
+    const auto& spectralData = liveSpectralScratch;
     const size_t numChannels = spectralData.magnitudes.size();
 
-    audioInput.setEQGains(state.audioSettings.lowGain, state.audioSettings.midGain, state.audioSettings.highGain);
+    applyLiveEQIfNeeded(audioInput, state);
 
     const SpectralPresentation::Frame frame = SpectralPresentation::mixChannels(
         spectralData.magnitudes,
@@ -371,8 +403,8 @@ void processLiveAudioState(AudioInput& audioInput,
         {},
         static_cast<std::uint32_t>(numChannels),
         spectralData.sampleRate > 0.0f ? spectralData.sampleRate : audioInput.getSampleRate());
-    const float liveLoudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
-    const uint64_t frameCounter = audioInput.getFFTProcessor().getFrameCounter();
+    const float liveLoudnessDb = spectralData.momentaryLoudnessLUFS;
+    const uint64_t frameCounter = spectralData.frameCounter;
     const bool hasNewFrame = !livePhaseState.hasPreviousFrame || frameCounter != livePhaseState.previousFrameCounter;
     const auto preparedFrame = SpectralPresentation::prepareFrame(
         frame,
@@ -380,7 +412,7 @@ void processLiveAudioState(AudioInput& audioInput,
         liveLoudnessDb,
         hasNewFrame && livePhaseState.hasPreviousFrame ? &livePhaseState.previousFrame : nullptr,
         spectralData.sampleRate > 0.0f
-            ? static_cast<float>(audioInput.getFFTProcessor().getHopSize()) / spectralData.sampleRate
+            ? static_cast<float>(spectralData.hopSize) / spectralData.sampleRate
             : ctx.deltaTime);
     if (hasNewFrame) {
         livePhaseState.previousFrame = frame;
@@ -405,8 +437,8 @@ void processLiveAudioState(AudioInput& audioInput,
 
     if (std::isfinite(displayR) && std::isfinite(displayG) && std::isfinite(displayB)) {
         liveFeatures = ::UI::Smoothing::buildSignalFeatures(colourResult);
-        liveFeatures.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
-        liveFeatures.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
+        liveFeatures.onsetDetected = spectralData.onsetDetected;
+        liveFeatures.spectralFlux = spectralData.spectralFlux;
         liveFeaturesValid = true;
 
         applyColourSmoothing(

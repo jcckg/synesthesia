@@ -84,6 +84,7 @@ struct RecorderState {
 
     std::vector<AudioColourSample> previewSamples;  // Protected by samplesMutex
     std::atomic<bool> previewReady{false};
+    std::mutex operationStatusMutex;
     std::string loadingOperationStatus;
 
     std::thread exportThread;
@@ -153,7 +154,7 @@ public:
                                        float b);
 
     static void drawBottomPanel(RecorderState& state,
-                                FFTProcessor& fftProcessor,
+                                AudioProcessor& audioProcessor,
                                 float panelX,
                                 float panelY,
                                 float panelWidth,
@@ -161,7 +162,6 @@ public:
 
     static void drawFullWindow(RecorderState& state,
                                AudioInput& audioInput,
-                               FFTProcessor& fftProcessor,
                                float windowX,
                                float windowY,
                                float windowWidth,
@@ -183,7 +183,7 @@ public:
     static void clearLoadedAudio(RecorderState& state);
 
     static void startRecording(RecorderState& state,
-                               FFTProcessor& fftProcessor,
+                               AudioProcessor& audioProcessor,
                                int fftSize,
                                int hopSize);
 
@@ -216,5 +216,10 @@ private:
                                         bool windowFocused,
                                         bool hasPlaybackData);
 };
+
+void setLoadingOperationStatus(RecorderState& state, std::string status);
+std::string getLoadingOperationStatus(RecorderState& state);
+void setExportOperationStatus(RecorderState& state, std::string status);
+std::string getExportOperationStatus(RecorderState& state);
 
 }
