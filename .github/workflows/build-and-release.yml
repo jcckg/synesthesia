@@ -23,12 +23,19 @@ jobs:
     needs: check-release-flag
     if: needs.check-release-flag.outputs.should_release == 'true'
     runs-on: macos-14
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
     steps:
       - name: Checkout code with submodules
         uses: actions/checkout@v4
         with:
           submodules: recursive
           fetch-depth: 0
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Determine FFmpeg revision
         id: ffmpeg-rev
@@ -93,7 +100,7 @@ jobs:
 
       - name: Configure CMake
         working-directory: ./build
-        run: cmake .. -DBUILD_MACOS_BUNDLE=ON
+        run: cmake .. -DBUILD_MACOS_BUNDLE=ON -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
 
       - name: Build application
         working-directory: ./build
@@ -142,6 +149,10 @@ jobs:
     needs: check-release-flag
     if: needs.check-release-flag.outputs.should_release == 'true'
     runs-on: windows-latest
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      SCCACHE_BASEDIRS: ${{ github.workspace }}
+      SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
     steps:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
@@ -165,22 +176,48 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Locate MSVC build environment
+        shell: pwsh
+        run: |
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vcvars64 = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find **\vcvars64.bat
+          if (-not $vcvars64) {
+            throw 'Could not locate vcvars64.bat'
+          }
+          "VCVARS64=$vcvars64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
       - name: Create build directory
         shell: pwsh
         run: cmake -E make_directory build
 
       - name: Configure CMake
         working-directory: ./build
-        run: cmake .. -DCMAKE_BUILD_TYPE=Release
+        shell: cmd
+        run: >
+          call "%VCVARS64%" &&
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=cl
+          -DCMAKE_CXX_COMPILER=cl
+          -DCMAKE_C_COMPILER_LAUNCHER=sccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
+          -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+          "-DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=$<$<CONFIG:Debug,RelWithDebInfo>:Embedded>"
 
       - name: Build application
         working-directory: ./build
-        run: cmake --build . --config Release
+        shell: cmd
+        run: call "%VCVARS64%" && cmake --build .
 
       - name: Package for Windows (x64)
+        shell: pwsh
         run: |
-          cd build\Release
-          Compress-Archive -Path Synesthesia.exe, *.dll -DestinationPath ..\synesthesia-win-x64.zip
+          Set-Location build
+          $archiveInputs = @('Synesthesia.exe')
+          $archiveInputs += Get-ChildItem -Filter *.dll | ForEach-Object { $_.Name }
+          Compress-Archive -Path $archiveInputs -DestinationPath synesthesia-win-x64.zip
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
