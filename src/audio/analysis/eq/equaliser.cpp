@@ -36,6 +36,5 @@ void Equaliser::applyEQ(std::vector<float>& magnitudes, const float sampleRate,
 		fftSize,
 		currentLowGain,
 		currentMidGain,
-		currentHighGain,
-		true);
+		currentHighGain);
 }

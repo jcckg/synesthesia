@@ -624,69 +624,6 @@ void FFTProcessor::initialiseCriticalBands(const float sampleRate) {
 	}
 }
 
-void FFTProcessor::prepareMagnitudesForDisplay(std::vector<float>& magnitudes,
-												 float sampleRate,
-												 float lowGain,
-												 float midGain,
-												 float highGain) {
-	if (magnitudes.empty() || sampleRate <= 0.0f) {
-		return;
-	}
-
-	float maxMagnitude = 0.0f;
-	for (const float magnitude : magnitudes) {
-		if (std::isfinite(magnitude)) {
-			maxMagnitude = std::max(maxMagnitude, magnitude);
-		}
-	}
-
-	if (maxMagnitude <= MAGNITUDE_EPSILON) {
-		std::ranges::fill(magnitudes, 0.0f);
-		return;
-	}
-
-	const size_t minBinIndex =
-		std::max(static_cast<size_t>(1), static_cast<size_t>(MIN_FREQ * FFT_SIZE / sampleRate));
-	const size_t maxBinIndex = std::min(
-		static_cast<size_t>(MAX_FREQ * FFT_SIZE / sampleRate) + 1,
-		magnitudes.size() - 1);
-	const float normalisationFactor = 1.0f / maxMagnitude;
-
-	for (size_t i = 0; i < magnitudes.size(); ++i) {
-		if (i < minBinIndex || i > maxBinIndex || !std::isfinite(magnitudes[i])) {
-			magnitudes[i] = 0.0f;
-			continue;
-		}
-
-		magnitudes[i] *= normalisationFactor;
-		const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
-		magnitudes[i] *= calculateMelWeight(freq);
-	}
-
-	Equaliser equaliser;
-	equaliser.setGains(lowGain, midGain, highGain);
-	equaliser.applyEQ(magnitudes, sampleRate, FFT_SIZE);
-
-	float postEqMax = 0.0f;
-	for (const float magnitude : magnitudes) {
-		if (std::isfinite(magnitude)) {
-			postEqMax = std::max(postEqMax, magnitude);
-		}
-	}
-	if (postEqMax > MAGNITUDE_EPSILON) {
-		const float postEqNormalisation = 1.0f / postEqMax;
-		for (float& magnitude : magnitudes) {
-			magnitude *= postEqNormalisation;
-		}
-	}
-
-	for (float& magnitude : magnitudes) {
-		if (!std::isfinite(magnitude) || magnitude < 0.0f) {
-			magnitude = 0.0f;
-		}
-	}
-}
-
 // Fletcher (1940), Moore (2012) - frequency-dependent temporal integration
 // Frequency-dependent smoothing for psychoacoustic critical band averaging
 // Smoothing factors empirically tuned based on:

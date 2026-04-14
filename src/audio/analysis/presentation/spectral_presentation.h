@@ -38,11 +38,12 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
                   std::uint32_t channels,
                   float sampleRate);
 
-std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
-                                             const Settings& settings);
-
-std::vector<float> buildColourMagnitudes(const Frame& frame,
+std::vector<float> buildSharedMagnitudes(const Frame& frame,
                                          const Settings& settings);
+
+std::vector<float> buildVisualiserMagnitudes(const std::vector<float>& sharedMagnitudes,
+                                             float sampleRate,
+                                             const ColourCore::FrameResult& colourResult);
 
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,

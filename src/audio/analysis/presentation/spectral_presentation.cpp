@@ -11,12 +11,35 @@ namespace SpectralPresentation {
 
 namespace {
 
+constexpr float kMinimumMagnitude = 1e-6f;
+constexpr float kMinimumLoudnessDb = -70.0f;
+constexpr float kMaximumLoudnessDb = 0.0f;
+
 void sanitiseMagnitudes(std::vector<float>& magnitudes) {
     for (float& magnitude : magnitudes) {
         if (!std::isfinite(magnitude) || magnitude < 0.0f) {
             magnitude = 0.0f;
         }
     }
+}
+
+size_t resolveFftSize(const size_t binCount) {
+    if (binCount > 1) {
+        return (binCount - 1) * 2;
+    }
+
+    return FFTProcessor::FFT_SIZE;
+}
+
+float resolveSpectrumPresence(const ColourCore::FrameResult& colourResult) {
+    const float clampedLoudnessDb = std::clamp(
+        colourResult.brightnessLoudnessDb,
+        kMinimumLoudnessDb,
+        kMaximumLoudnessDb);
+    const float normalisedLoudness =
+        (clampedLoudnessDb - kMinimumLoudnessDb) /
+        (kMaximumLoudnessDb - kMinimumLoudnessDb);
+    return std::pow(normalisedLoudness, 1.25f);
 }
 
 }
@@ -84,16 +107,18 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
     return frame;
 }
 
-std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
-                                             const Settings& settings) {
+std::vector<float> buildSharedMagnitudes(const Frame& frame,
+                                         const Settings& settings) {
     std::vector<float> magnitudes = frame.magnitudes;
     if (magnitudes.empty() || frame.sampleRate <= 0.0f) {
         return magnitudes;
     }
 
-    FFTProcessor::prepareMagnitudesForDisplay(
+    sanitiseMagnitudes(magnitudes);
+    AudioEQ::applyMagnitudeResponse(
         magnitudes,
         frame.sampleRate,
+        resolveFftSize(magnitudes.size()),
         settings.lowGain,
         settings.midGain,
         settings.highGain);
@@ -102,17 +127,40 @@ std::vector<float> buildVisualiserMagnitudes(const Frame& frame,
     return magnitudes;
 }
 
-std::vector<float> buildColourMagnitudes(const Frame& frame,
-                                         const Settings& settings) {
-    std::vector<float> magnitudes = frame.magnitudes;
-    sanitiseMagnitudes(magnitudes);
-    AudioEQ::applyMagnitudeResponse(
-        magnitudes,
-        frame.sampleRate,
-        FFTProcessor::FFT_SIZE,
-        settings.lowGain,
-        settings.midGain,
-        settings.highGain);
+std::vector<float> buildVisualiserMagnitudes(const std::vector<float>& sharedMagnitudes,
+                                             const float sampleRate,
+                                             const ColourCore::FrameResult& colourResult) {
+    std::vector<float> magnitudes = sharedMagnitudes;
+    if (magnitudes.empty() || sampleRate <= 0.0f) {
+        return magnitudes;
+    }
+
+    const float presence = resolveSpectrumPresence(colourResult);
+    float maxMagnitude = 0.0f;
+
+    for (size_t index = 0; index < magnitudes.size(); ++index) {
+        const float frequency =
+            static_cast<float>(index) * sampleRate / static_cast<float>(resolveFftSize(magnitudes.size()));
+        if (frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
+            frequency > synesthesia::constants::MAX_AUDIO_FREQ ||
+            !std::isfinite(magnitudes[index])) {
+            magnitudes[index] = 0.0f;
+            continue;
+        }
+
+        maxMagnitude = std::max(maxMagnitude, magnitudes[index]);
+    }
+
+    if (maxMagnitude <= kMinimumMagnitude) {
+        std::fill(magnitudes.begin(), magnitudes.end(), 0.0f);
+        return magnitudes;
+    }
+
+    const float normalisation = presence / maxMagnitude;
+    for (float& magnitude : magnitudes) {
+        magnitude = std::clamp(magnitude * normalisation, 0.0f, 1.0f);
+    }
+
     return magnitudes;
 }
 
@@ -121,10 +169,9 @@ PreparedFrame prepareFrame(const Frame& frame,
                            const float loudnessDb,
                            const PhaseAnalysis::PhaseFeatureMetrics& phaseMetrics) {
     PreparedFrame prepared{};
-    prepared.visualiserMagnitudes = buildVisualiserMagnitudes(frame, settings);
-    const std::vector<float> colourMagnitudes = buildColourMagnitudes(frame, settings);
+    const std::vector<float> sharedMagnitudes = buildSharedMagnitudes(frame, settings);
     prepared.colourResult = ColourCore::analyseSpectrum(
-        colourMagnitudes,
+        sharedMagnitudes,
         frame.phases,
         frame.frequencies,
         frame.sampleRate,
@@ -134,6 +181,10 @@ PreparedFrame prepareFrame(const Frame& frame,
         },
         loudnessDb,
         &phaseMetrics);
+    prepared.visualiserMagnitudes = buildVisualiserMagnitudes(
+        sharedMagnitudes,
+        frame.sampleRate,
+        prepared.colourResult);
     return prepared;
 }
 

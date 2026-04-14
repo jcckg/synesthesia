@@ -5,6 +5,11 @@
 
 namespace AudioEQ {
 
+enum class PerceptualWeighting {
+    None,
+    AWeighted
+};
+
 struct BiquadCoefficients {
     float b0 = 1.0f;
     float b1 = 0.0f;
@@ -38,12 +43,15 @@ float cascadeMagnitudeResponse(const CascadeCoefficients& cascade,
                                float frequency,
                                float sampleRate);
 
+float perceptualWeightingGain(float frequency,
+                              PerceptualWeighting weighting = PerceptualWeighting::None);
+
 void applyMagnitudeResponse(std::vector<float>& magnitudes,
                             float sampleRate,
                             size_t fftSize,
                             float lowGain,
                             float midGain,
                             float highGain,
-                            bool includePerceptualWeighting = false);
+                            PerceptualWeighting weighting = PerceptualWeighting::None);
 
 }

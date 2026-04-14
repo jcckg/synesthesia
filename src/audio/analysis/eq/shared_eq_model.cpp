@@ -11,6 +11,10 @@ namespace {
 constexpr float kMinimumLinearGain = 0.001f;
 
 float calculateAWeighting(const float frequency) {
+    if (frequency <= 0.0f) {
+        return 0.0f;
+    }
+
     const float f2 = frequency * frequency;
     const float numerator = 12194.0f * 12194.0f * f2 * f2;
     const float denominator = (f2 + 20.6f * 20.6f) *
@@ -138,13 +142,24 @@ float cascadeMagnitudeResponse(const CascadeCoefficients& cascade,
         magnitudeResponse(cascade.high, frequency, sampleRate);
 }
 
+float perceptualWeightingGain(const float frequency,
+                              const PerceptualWeighting weighting) {
+    switch (weighting) {
+        case PerceptualWeighting::AWeighted:
+            return calculateAWeighting(frequency);
+        case PerceptualWeighting::None:
+        default:
+            return 1.0f;
+    }
+}
+
 void applyMagnitudeResponse(std::vector<float>& magnitudes,
                             const float sampleRate,
                             const size_t fftSize,
                             const float lowGain,
                             const float midGain,
                             const float highGain,
-                            const bool includePerceptualWeighting) {
+                            const PerceptualWeighting weighting) {
     if (magnitudes.empty() || sampleRate <= 0.0f || fftSize == 0) {
         return;
     }
@@ -153,7 +168,7 @@ void applyMagnitudeResponse(std::vector<float>& magnitudes,
         std::abs(lowGain - 1.0f) < 1e-6f &&
         std::abs(midGain - 1.0f) < 1e-6f &&
         std::abs(highGain - 1.0f) < 1e-6f;
-    if (neutral) {
+    if (neutral && weighting == PerceptualWeighting::None) {
         return;
     }
 
@@ -163,7 +178,7 @@ void applyMagnitudeResponse(std::vector<float>& magnitudes,
         float lowGain = 1.0f;
         float midGain = 1.0f;
         float highGain = 1.0f;
-        bool includePerceptualWeighting = false;
+        PerceptualWeighting weighting = PerceptualWeighting::None;
         std::vector<float> response;
     };
 
@@ -174,7 +189,7 @@ void applyMagnitudeResponse(std::vector<float>& magnitudes,
         cache.lowGain == lowGain &&
         cache.midGain == midGain &&
         cache.highGain == highGain &&
-        cache.includePerceptualWeighting == includePerceptualWeighting &&
+        cache.weighting == weighting &&
         cache.response.size() == magnitudes.size();
 
     if (!cacheValid) {
@@ -183,16 +198,14 @@ void applyMagnitudeResponse(std::vector<float>& magnitudes,
         cache.lowGain = lowGain;
         cache.midGain = midGain;
         cache.highGain = highGain;
-        cache.includePerceptualWeighting = includePerceptualWeighting;
+        cache.weighting = weighting;
         cache.response.resize(magnitudes.size());
 
         const auto cascade = makeCascade(sampleRate, lowGain, midGain, highGain);
         for (size_t index = 0; index < cache.response.size(); ++index) {
             const float frequency = static_cast<float>(index) * sampleRate / static_cast<float>(fftSize);
             float response = cascadeMagnitudeResponse(cascade, frequency, sampleRate);
-            if (includePerceptualWeighting) {
-                response *= calculateAWeighting(frequency);
-            }
+            response *= perceptualWeightingGain(frequency, weighting);
             cache.response[index] = std::clamp(response, 0.0f, 4.0f);
         }
     }

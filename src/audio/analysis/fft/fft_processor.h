@@ -113,11 +113,6 @@ public:
 	static float calculateERB(float frequency);
 	static float frequencyToERBScale(float frequency);
 	static float erbScaleToFrequency(float erbScale);
-	static void prepareMagnitudesForDisplay(std::vector<float>& magnitudes,
-										   float sampleRate,
-										   float lowGain,
-										   float midGain,
-										   float highGain);
 
 private:
 	kiss_fftr_cfg fft_cfg;
