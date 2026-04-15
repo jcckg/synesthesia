@@ -50,6 +50,12 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--export-gradients") == 0) {
             args.exportGradients = true;
         }
+        else if (strcmp(argv[i], "--misc") == 0) {
+            args.runMisc = true;
+            if (i + 1 < argc) {
+                args.miscCommand = argv[++i];
+            }
+        }
         else if (strcmp(argv[i], "--input") == 0 || strcmp(argv[i], "-i") == 0) {
             if (i + 1 < argc) {
                 args.inputDir = argv[++i];
@@ -106,6 +112,17 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
                                });
             }
         }
+        else if (strcmp(argv[i], "--misc-track") == 0) {
+            if (i + 1 < argc) {
+                args.miscTrack = argv[++i];
+                std::transform(args.miscTrack.begin(),
+                               args.miscTrack.end(),
+                               args.miscTrack.begin(),
+                               [](unsigned char c) {
+                                   return static_cast<char>(std::tolower(c));
+                               });
+            }
+        }
         else {
             std::cerr << "Unknown argument: " << argv[i] << std::endl;
             std::cerr << "Use --help for usage information." << std::endl;
@@ -142,12 +159,18 @@ void Arguments::printHelp() {
     std::cout << "  --width <px>            Force gradient width in pixels\n";
     std::cout << "                          (default: 20px per second of audio)\n";
     std::cout << "  --height <px>           Force gradient height in pixels (default: 800)\n\n";
+    std::cout << "Misc:\n";
+    std::cout << "  --misc <command>        Run an RSYN misc command\n";
+    std::cout << "  --misc-track <mode>     Presentation track for misc output: auto, smoothed, or analysis\n\n";
     std::cout << "Slice export writes float32 Lab arrays as .lab.npy.\n";
     std::cout << "PNG export writes a Lab sidecar only when --write-lab-sidecar is set.\n\n";
+    std::cout << "Misc commands:\n";
+    std::cout << "  vector-gradient         Export a lossless SVG strip from an .rsyn presentation track\n\n";
     std::cout << "Supported audio formats: .wav, .flac, .mp3, .ogg\n\n";
     std::cout << "Examples:\n";
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/GradientExport\n";
-    std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/Export --copy-audio\n\n";
+    std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/Export --copy-audio\n";
+    std::cout << "  Synesthesia --misc vector-gradient -i ~/track.rsyn -o ~/track.svg\n\n";
 }
 
 void Arguments::printVersion() {

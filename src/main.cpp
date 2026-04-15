@@ -2,6 +2,7 @@
 #include "cli.h"
 #include "headless.h"
 #include "batch_exporter.h"
+#include "misc/misc_commands.h"
 #endif
 
 #include <cstdint>
@@ -37,6 +38,10 @@ int main(int argc, char* argv[]) {
         return CLI::BatchExporter::run(args.inputDir, args.outputDir, args.copyAudio,
                                        args.gradientWidth, args.gradientHeight, args.gradientFormat, args.writeLabSidecar, args.trueSize,
                                        args.numWorkers, args.analysisHop);
+    }
+
+    if (args.runMisc) {
+        return CLI::MiscCommands::run(args);
     }
 
     if (args.headless) {

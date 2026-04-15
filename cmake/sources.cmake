@@ -92,6 +92,8 @@ set(SOURCES
     ${SRC_DIR}/renderer/imgui_window_context.cpp
     ${SRC_DIR}/renderer/detached_visualisation_window.cpp
     ${SRC_DIR}/utilities/cli/batch_exporter.cpp
+    ${SRC_DIR}/utilities/cli/misc/misc_commands.cpp
+    ${SRC_DIR}/utilities/cli/misc/vector_gradient_command.cpp
 )
 
 

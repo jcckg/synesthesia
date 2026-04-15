@@ -26,6 +26,10 @@ struct Arguments {
     int analysisHop = 1024;
     std::string gradientFormat = "png";
 
+    bool runMisc = false;
+    std::string miscCommand;
+    std::string miscTrack = "auto";
+
     static Arguments parseCommandLine(int argc, char* argv[]);
     static void printHelp();
     static void printVersion();
