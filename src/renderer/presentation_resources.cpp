@@ -314,6 +314,7 @@ void PresentationResources::shutdown() {
     backgroundTexture_.reset();
     backgroundPass_.reset();
     timelinePixels_.clear();
+    timelineTextureCacheKey_ = {};
     backgroundPresentationSupported_ = false;
     initialised_ = false;
 }
@@ -328,6 +329,7 @@ bool PresentationResources::supportsBackgroundPresentation() const {
 
 ImTextureID PresentationResources::updateTimelineTexture(
     const std::vector<ReSyne::Timeline::TimelineSample>& samples,
+    const uint64_t sampleRevision,
     const float visibleStart,
     const float visibleEnd,
     const int width,
@@ -338,6 +340,20 @@ ImTextureID PresentationResources::updateTimelineTexture(
     }
 
     const auto safeWidth = static_cast<std::uint16_t>(std::clamp(width, 1, static_cast<int>(std::numeric_limits<std::uint16_t>::max())));
+    const bool canReuseCachedTexture =
+        sampleRevision > 0 &&
+        timelineTexture_->textureId() != ImTextureID_Invalid &&
+        timelineTextureCacheKey_.valid &&
+        timelineTextureCacheKey_.sampleRevision == sampleRevision &&
+        timelineTextureCacheKey_.width == safeWidth &&
+        timelineTextureCacheKey_.visibleStart == visibleStart &&
+        timelineTextureCacheKey_.visibleEnd == visibleEnd &&
+        timelineTextureCacheKey_.colourSpace == colourSpace &&
+        timelineTextureCacheKey_.applyGamutMapping == applyGamutMapping;
+    if (canReuseCachedTexture) {
+        return timelineTexture_->textureId();
+    }
+
     timelinePixels_.resize(static_cast<std::size_t>(safeWidth) * 4);
     ReSyne::Timeline::rasteriseGradientStrip(
         samples,
@@ -351,6 +367,16 @@ ImTextureID PresentationResources::updateTimelineTexture(
     if (!timelineTexture_->update(timelinePixels_, safeWidth, 1, sampledTextureFormat_)) {
         return ImTextureID_Invalid;
     }
+
+    timelineTextureCacheKey_ = TimelineTextureCacheKey{
+        true,
+        sampleRevision,
+        safeWidth,
+        visibleStart,
+        visibleEnd,
+        colourSpace,
+        applyGamutMapping
+    };
 
     return timelineTexture_->textureId();
 }

@@ -53,6 +53,7 @@ void storePreviewSettings(RecorderState& state,
     state.timelinePreviewCacheManualSmoothing = settings.manualSmoothing;
     state.timelinePreviewCacheSmoothingAmount = settings.smoothingAmount;
     state.timelinePreviewCacheDirty = false;
+    ++state.timelinePreviewCacheRevision;
 }
 
 SpectralPresentation::Settings buildPresentationSettings(const RecorderColourCache::CacheSettings& settings) {

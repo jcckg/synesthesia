@@ -33,6 +33,7 @@ public:
     [[nodiscard]] bool supportsBackgroundPresentation() const;
 
     [[nodiscard]] ImTextureID updateTimelineTexture(const std::vector<ReSyne::Timeline::TimelineSample>& samples,
+                                                    uint64_t sampleRevision,
                                                     float visibleStart,
                                                     float visibleEnd,
                                                     int width,
@@ -60,8 +61,19 @@ private:
     bool backgroundPresentationSupported_ = false;
     bool initialised_ = false;
 
+    struct TimelineTextureCacheKey {
+        bool valid = false;
+        uint64_t sampleRevision = 0;
+        uint16_t width = 0;
+        float visibleStart = 0.0f;
+        float visibleEnd = 1.0f;
+        ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
+        bool applyGamutMapping = true;
+    };
+
     std::vector<float> timelinePixels_;
     std::array<float, 4> solidPixel_ = {0.0f, 0.0f, 0.0f, 1.0f};
+    TimelineTextureCacheKey timelineTextureCacheKey_;
 
     std::unique_ptr<SampledTexture> sidebarColourTexture_;
     std::unique_ptr<SampledTexture> recorderColourTexture_;

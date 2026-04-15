@@ -126,6 +126,7 @@ struct RecorderState {
 
     std::vector<Timeline::TimelineSample> timelinePreviewCache;
     bool timelinePreviewCacheDirty = true;
+    uint64_t timelinePreviewCacheRevision = 0;
     size_t timelinePreviewCacheMaxSamples = 0;
     size_t timelinePreviewCacheSourceCount = 0;
     bool timelinePreviewCacheUsesPreviewSamples = false;

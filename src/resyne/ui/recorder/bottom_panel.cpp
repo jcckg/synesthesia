@@ -76,6 +76,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
     if (hasData) {
         ReSyne::Timeline::RenderContext timelineContext{
             previewData,
+            state.timelinePreviewCacheRevision,
             duration,
             gradientSize,
             state.dropFlashAlpha,

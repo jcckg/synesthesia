@@ -292,6 +292,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         const int rasterWidth = std::max(1, static_cast<int>(std::ceil(size.x)));
         const ImTextureID textureId = context.presentationResources->updateTimelineTexture(
             context.samples,
+            context.sampleRevision,
             viewStart,
             viewEnd,
             rasterWidth,

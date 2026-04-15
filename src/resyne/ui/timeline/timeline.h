@@ -59,6 +59,7 @@ struct TrackpadGestureInput {
 
 struct RenderContext {
 	const std::vector<TimelineSample>& samples;
+    uint64_t sampleRevision = 0;
     double durationSeconds = 0.0;
     ImVec2 size = ImVec2(0.0f, 0.0f);
     float dropFlashAlpha = 0.0f;
