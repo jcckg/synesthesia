@@ -4,7 +4,7 @@ Synesthesia is an application designed to provide a real-time visualisation of a
 
 Synesthesia features two modes of visualisation, one being "ReSyne", allowing you to import audio files (WAV/FLAC/OGG/MP3), visualise the entire song as a gradient (constructed via our mapping process), and export as a .tiff for external editing in applications like Photoshop (allowing for intuitive effects: blacking out w/ shapes -> eq, blur -> reverb). We can also export (our gradient + colour) as a video file on macOS hosts.
 
-<img alt="Synesthesia's ReSyne Window, 'It's Very Sunny' by Casino Versus Japan loaded as a gradient." src="https://github.com/user-attachments/assets/986b24b3-9a53-4feb-b94c-704b7b71440c" />
+<img alt="Synesthesia's ReSyne Window, '4T Recordings' by Four Tet" src="https://github.com/user-attachments/assets/b5b71813-8f61-4ac6-b69f-5b3717b3d37f" />
 
 </div>
 
@@ -56,19 +56,6 @@ cmake --build . --config Release
 ```
 
 Your executable will then be placed in the Release folder (placed at the root of your build directory).
-
-### OSC Frame Messages
-
-When OSC transport is enabled, outbound frame bundles emit one value per address so OSC clients show descriptive labels rather than numbered arguments.
-
-- `/synesthesia/frame/meta/sample_rate`, `/fft_size`, `/frame_timestamp_micros`
-- `/synesthesia/frame/signal/dominant_frequency_hz`, `/dominant_wavelength_nm`, `/visualiser_magnitude`, `/interpolated_phase_radians`
-- `/synesthesia/frame/colour/display_r`, `/display_g`, `/display_b`, `/cie_x`, `/cie_y`, `/cie_z`, `/oklab_l`, `/oklab_a`, `/oklab_b`
-- `/synesthesia/frame/analysis/spectral_flatness`, `/spectral_centroid_hz`, `/spectral_spread_hz`, `/spectral_spread_normalised`, `/spectral_rolloff_hz`, `/spectral_crest_factor`, `/spectral_flux`
-- `/synesthesia/frame/analysis/loudness_db`, `/loudness_normalised`, `/frame_loudness_db`, `/momentary_loudness_lufs`, `/estimated_spl`, `/luminance_cd_m2`, `/brightness_normalised`
-- `/synesthesia/frame/analysis/transient_mix`, `/onset_detected`
-- `/synesthesia/frame/analysis/phase_instability_normalised`, `/phase_coherence_normalised`, `/phase_transient_normalised`
-- `/synesthesia/frame/smoothing/onset_detected`, `/spectral_flux`, `/spectral_flatness`, `/loudness_normalised`, `/brightness_normalised`, `/spectral_spread_normalised`, `/spectral_rolloff_normalised`, `/spectral_crest_normalised`, `/phase_instability_normalised`, `/phase_coherence_normalised`, `/phase_transient_normalised`
 
 ### Credits & Footnotes
 
