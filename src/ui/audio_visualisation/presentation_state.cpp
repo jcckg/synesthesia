@@ -86,6 +86,29 @@ bool spectrumIsSilent(const std::vector<float>& magnitudes) {
     return true;
 }
 
+#ifdef ENABLE_OSC
+void sendOSCFrame(const std::vector<float>& magnitudes,
+                  const SpectralPresentation::Frame& frame,
+                  const ColourCore::FrameResult& colourResult,
+                  const float displayR,
+                  const float displayG,
+                  const float displayB,
+                  const Synesthesia::OSC::OSCAnalysisSignals& analysisSignals,
+                  const Synesthesia::OSC::OSCSmoothingSignals& smoothingSignals) {
+    Synesthesia::OSC::OSCFrameUpdate update{};
+    update.magnitudes = std::span<const float>(magnitudes.data(), magnitudes.size());
+    update.phases = std::span<const float>(frame.phases.data(), frame.phases.size());
+    update.sampleRate = frame.sampleRate;
+    update.colourResult = colourResult;
+    update.displayColour = ColourCore::RGB{displayR, displayG, displayB};
+    update.analysisSignals = analysisSignals;
+    update.smoothingSignals = smoothingSignals;
+
+    auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+    osc.updateFrameData(update);
+}
+#endif
+
 void resetAnalyserState(UIState& state,
                         const size_t binCount,
                         const size_t numChannels = 1) {
@@ -375,15 +398,20 @@ void processPlaybackState(AudioInput& audioInput,
 
 #ifdef ENABLE_OSC
     if (hasPlaybackColourResult && !visualiserMagnitudes.empty()) {
-        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-        osc.updateColourData(
+        const auto analysisSignals = Synesthesia::OSC::buildAnalysisSignals(
+            playbackColourResult.loudnessDb,
+            playbackSignalFeatures.spectralFlux,
+            playbackSignalFeatures.onsetDetected);
+        const auto smoothingSignals = Synesthesia::OSC::buildSmoothingSignals(playbackSignalFeatures);
+        sendOSCFrame(
             visualiserMagnitudes,
-            frame.phases,
-            playbackColourResult.dominantFrequency,
-            frame.sampleRate,
+            frame,
+            playbackColourResult,
             currentDisplayR,
             currentDisplayG,
-            currentDisplayB);
+            currentDisplayB,
+            analysisSignals,
+            smoothingSignals);
     }
 #endif
 
@@ -474,15 +502,19 @@ void processLiveAudioState(AudioInput& audioInput,
     ctx.clearColour[2] = currentDisplayB;
 
 #ifdef ENABLE_OSC
-    auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-    osc.updateColourData(
+    const auto analysisSignals = Synesthesia::OSC::buildAnalysisSignals(spectralData);
+    const auto smoothingSignals = liveFeaturesValid
+        ? Synesthesia::OSC::buildSmoothingSignals(liveFeatures)
+        : Synesthesia::OSC::OSCSmoothingSignals{};
+    sendOSCFrame(
         visualiserMagnitudes,
-        frame.phases,
-        colourResult.dominantFrequency,
-        frame.sampleRate,
+        frame,
+        colourResult,
         currentDisplayR,
         currentDisplayG,
-        currentDisplayB);
+        currentDisplayB,
+        analysisSignals,
+        smoothingSignals);
 #endif
 
     ReSyne::updateFromFFT(

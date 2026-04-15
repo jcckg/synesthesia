@@ -1,5 +1,6 @@
 #pragma once
 
+#include "osc_frame_builder.h"
 #include "osc_config.h"
 #include "osc_messages.h"
 #include "osc_runtime.h"
@@ -21,15 +22,7 @@ public:
     OSCConfig getConfig() const;
     std::string getLastError() const;
 
-    void updateColourData(
-        const std::vector<float>& magnitudes,
-        const std::vector<float>& phases,
-        float spectralCentroid,
-        float sampleRate,
-        float r,
-        float g,
-        float b
-    );
+    void updateFrameData(const OSCFrameUpdate& update);
 
     PendingOSCSettings consumePendingSettings();
     OSCStats getStats() const;

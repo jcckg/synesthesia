@@ -57,6 +57,19 @@ cmake --build . --config Release
 
 Your executable will then be placed in the Release folder (placed at the root of your build directory).
 
+### OSC Frame Messages
+
+When OSC transport is enabled, outbound frame bundles emit one value per address so OSC clients show descriptive labels rather than numbered arguments.
+
+- `/synesthesia/frame/meta/sample_rate`, `/fft_size`, `/frame_timestamp_micros`
+- `/synesthesia/frame/signal/dominant_frequency_hz`, `/dominant_wavelength_nm`, `/visualiser_magnitude`, `/interpolated_phase_radians`
+- `/synesthesia/frame/colour/display_r`, `/display_g`, `/display_b`, `/cie_x`, `/cie_y`, `/cie_z`, `/oklab_l`, `/oklab_a`, `/oklab_b`
+- `/synesthesia/frame/analysis/spectral_flatness`, `/spectral_centroid_hz`, `/spectral_spread_hz`, `/spectral_spread_normalised`, `/spectral_rolloff_hz`, `/spectral_crest_factor`, `/spectral_flux`
+- `/synesthesia/frame/analysis/loudness_db`, `/loudness_normalised`, `/frame_loudness_db`, `/momentary_loudness_lufs`, `/estimated_spl`, `/luminance_cd_m2`, `/brightness_normalised`
+- `/synesthesia/frame/analysis/transient_mix`, `/onset_detected`
+- `/synesthesia/frame/analysis/phase_instability_normalised`, `/phase_coherence_normalised`, `/phase_transient_normalised`
+- `/synesthesia/frame/smoothing/onset_detected`, `/spectral_flux`, `/spectral_flatness`, `/loudness_normalised`, `/brightness_normalised`, `/spectral_spread_normalised`, `/spectral_rolloff_normalised`, `/spectral_crest_normalised`, `/phase_instability_normalised`, `/phase_coherence_normalised`, `/phase_transient_normalised`
+
 ### Credits & Footnotes
 
 - GUI built with [Dear ImGui](https://github.com/ocornut/imgui)

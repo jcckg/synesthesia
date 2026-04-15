@@ -95,6 +95,7 @@ function(add_osc_sources)
         list(APPEND SOURCES
             ${SRC_DIR}/osc/osc_config.cpp
             ${SRC_DIR}/osc/osc_command_queue.cpp
+            ${SRC_DIR}/osc/osc_frame_builder.cpp
             ${SRC_DIR}/osc/osc_packet_listener.cpp
             ${SRC_DIR}/osc/osc_receiver.cpp
             ${SRC_DIR}/osc/osc_runtime.cpp

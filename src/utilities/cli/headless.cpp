@@ -166,6 +166,7 @@ void HeadlessInterface::displayFrequencyInfo() {
 	const auto& magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
 	const auto& phases = audioInput.getFFTProcessor().getPhaseBuffer();
 	const float loudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
+    std::vector<float> visualiserMagnitudes;
 
     float currentDominantFreq = 0.0f;
     float currentR = 0.0f, currentG = 0.0f, currentB = 0.0f;
@@ -191,6 +192,7 @@ void HeadlessInterface::displayFrequencyInfo() {
             frame.sampleRate > 0.0f
                 ? static_cast<float>(audioInput.getFFTProcessor().getHopSize()) / frame.sampleRate
                 : (1.0f / 60.0f));
+        visualiserMagnitudes = preparedFrame.visualiserMagnitudes;
         if (hasNewFrame) {
             previousFrame = frame;
             previousFrameCounter = frameCounter;
@@ -203,6 +205,9 @@ void HeadlessInterface::displayFrequencyInfo() {
 		currentG = colourResult.g;
         currentB = colourResult.b;
 		currentLoudnessDb = colourResult.loudnessDb;
+        auto features = ::UI::Smoothing::buildSignalFeatures(colourResult);
+        features.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
+        features.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
 
 #ifdef ENABLE_OSC
         if (oscEnabled) {
@@ -234,9 +239,6 @@ void HeadlessInterface::displayFrequencyInfo() {
                 colourSmoother.setTargetColour(currentR, currentG, currentB);
 
                 if (!manualSmoothing) {
-                    auto features = ::UI::Smoothing::buildSignalFeatures(colourResult);
-                    features.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
-                    features.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
                     colourSmoother.update(deltaTime * 1.2f, features);
                 } else {
                     colourSmoother.update(deltaTime * 1.2f);
@@ -247,8 +249,18 @@ void HeadlessInterface::displayFrequencyInfo() {
 
             ColourPresentation::applyOutputPrecision(currentR, currentG, currentB);
 
-            osc.updateColourData(magnitudes, phases, currentDominantFreq, audioInput.getSampleRate(),
-                                 currentR, currentG, currentB);
+            Synesthesia::OSC::OSCFrameUpdate update{};
+            update.magnitudes = std::span<const float>(visualiserMagnitudes.data(), visualiserMagnitudes.size());
+            update.phases = std::span<const float>(frame.phases.data(), frame.phases.size());
+            update.sampleRate = frame.sampleRate;
+            update.colourResult = colourResult;
+            update.displayColour = ColourCore::RGB{currentR, currentG, currentB};
+            update.analysisSignals = Synesthesia::OSC::buildAnalysisSignals(
+                loudnessDb,
+                audioInput.getFFTProcessor().getSpectralFlux(),
+                audioInput.getFFTProcessor().getOnsetDetected());
+            update.smoothingSignals = Synesthesia::OSC::buildSmoothingSignals(features);
+            osc.updateFrameData(update);
         }
 #endif
 	}

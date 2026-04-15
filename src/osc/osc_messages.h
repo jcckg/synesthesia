@@ -8,25 +8,85 @@
 
 namespace Synesthesia::OSC {
 
-struct OSCSpectralData {
-    float flatness = 0.0f;
-    float centroid = 0.0f;
-    float spread = 0.0f;
-    float normalisedSpread = 0.0f;
-};
-
-struct OSCFrameData {
+struct OSCFrameMetaData {
     int32_t sampleRate = 0;
     int32_t fftSize = 0;
     int64_t frameTimestamp = 0;
-    float frequency = 0.0f;
-    float wavelength = 0.0f;
-    float r = 0.0f;
-    float g = 0.0f;
-    float b = 0.0f;
-    float magnitude = 0.0f;
-    float phase = 0.0f;
-    OSCSpectralData spectral;
+};
+
+struct OSCFrameSignalData {
+    float dominantFrequencyHz = 0.0f;
+    float dominantWavelengthNm = 0.0f;
+    float visualiserMagnitude = 0.0f;
+    float phaseRadians = 0.0f;
+};
+
+struct OSCFrameColourData {
+    float displayR = 0.0f;
+    float displayG = 0.0f;
+    float displayB = 0.0f;
+    float cieX = 0.0f;
+    float cieY = 0.0f;
+    float cieZ = 0.0f;
+    float oklabL = 0.0f;
+    float oklabA = 0.0f;
+    float oklabB = 0.0f;
+};
+
+struct OSCFrameSpectralData {
+    float flatness = 0.0f;
+    float centroidHz = 0.0f;
+    float spreadHz = 0.0f;
+    float normalisedSpread = 0.0f;
+    float rolloffHz = 0.0f;
+    float crestFactor = 0.0f;
+    float spectralFlux = 0.0f;
+};
+
+struct OSCFrameLoudnessData {
+    float loudnessDb = 0.0f;
+    float loudnessNormalised = 0.0f;
+    float frameLoudnessDb = 0.0f;
+    float momentaryLoudnessLUFS = 0.0f;
+    float estimatedSPL = 0.0f;
+    float luminanceCdM2 = 0.0f;
+    float brightnessNormalised = 0.0f;
+};
+
+struct OSCFrameTransientData {
+    float transientMix = 0.0f;
+    bool onsetDetected = false;
+};
+
+struct OSCFramePhaseData {
+    float instabilityNorm = 0.0f;
+    float coherenceNorm = 0.0f;
+    float transientNorm = 0.0f;
+};
+
+struct OSCSmoothingFeatureData {
+    bool onsetDetected = false;
+    float spectralFlux = 0.0f;
+    float spectralFlatness = 0.0f;
+    float loudnessNormalised = 0.0f;
+    float brightnessNormalised = 0.0f;
+    float spectralSpreadNorm = 0.0f;
+    float spectralRolloffNorm = 0.0f;
+    float spectralCrestNorm = 0.0f;
+    float phaseInstabilityNorm = 0.0f;
+    float phaseCoherenceNorm = 0.0f;
+    float phaseTransientNorm = 0.0f;
+};
+
+struct OSCFrameData {
+    OSCFrameMetaData meta;
+    OSCFrameSignalData signal;
+    OSCFrameColourData colour;
+    OSCFrameSpectralData spectral;
+    OSCFrameLoudnessData loudness;
+    OSCFrameTransientData transient;
+    OSCFramePhaseData phase;
+    OSCSmoothingFeatureData smoothing;
 };
 
 struct OSCStats {
