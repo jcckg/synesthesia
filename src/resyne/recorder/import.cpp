@@ -45,10 +45,12 @@ void applyImportedSequence(RecorderState& state,
                            std::vector<AudioColourSample>&& samples,
                            AudioMetadata metadata) {
     clampSamplesToLimit(samples);
-    if (metadata.numFrames == 0) {
+    if (metadata.numFrames == 0 && !samples.empty()) {
         metadata.numFrames = samples.size();
     }
-    metadata.numBins = metadata.numBins == 0 ? static_cast<size_t>(metadata.fftSize / 2 + 1) : metadata.numBins;
+    if (metadata.numBins == 0 && metadata.fftSize > 0) {
+        metadata.numBins = static_cast<size_t>(metadata.fftSize / 2 + 1);
+    }
 
     Recorder::clearLoadedAudio(state);
     {
@@ -80,8 +82,7 @@ bool Recorder::isSupportedImportFile(const std::string& filepath) {
            ext == ".oga" ||
            ext == ".tiff" ||
            ext == ".tif" ||
-           ext == ".resyne" ||
-           ext == ".synesthesia";
+           ext == ".rsyn";
 }
 
 bool Recorder::importFromFile(RecorderState& state,
@@ -124,13 +125,14 @@ bool Recorder::importFromFile(RecorderState& state,
 			errorMessage = "parse failure";
 		}
 		state.loadingProgress = 0.9f;
-	} else if (extension == ".resyne" || extension == ".synesthesia") {
-		success = ImportHelpers::importResyneFile(
+	} else if (extension == ".rsyn") {
+		success = ImportHelpers::importRsynFile(
 			filepath, colourSpace, applyGamutMapping, state.fallbackSampleRate,
 			NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
 			importedSamples, metadata, errorMessage,
 			[&state](float progress) { state.loadingProgress = progress; },
-			nullptr
+			nullptr,
+            nullptr
         );
     } else {
         errorMessage = "unsupported format";
@@ -154,7 +156,7 @@ bool Recorder::importFromFile(RecorderState& state,
     if (!playbackAudio.empty()) {
         state.playbackAudio = std::move(playbackAudio);
         refreshPlaybackOutput(state);
-    } else {
+    } else if (!importedSamples.empty()) {
         reconstructAudio(state);
     }
 
@@ -227,19 +229,20 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 				updateProgress(0.05f + p * 0.75f);
 			},
 			forwardDecodedFrame);
-		if (!success || samples.empty()) {
+		if (!success || (samples.empty() && metadata.presentationData == nullptr)) {
 			errorMessage = "parse failure";
 		} else {
 			updatePreview(samples);
 		}
-	} else if (extension == ".resyne" || extension == ".synesthesia") {
-		setStatus("Loading .resyne file...");
-		success = ImportHelpers::importResyneFile(
+	} else if (extension == ".rsyn") {
+		setStatus("Loading .rsyn file...");
+		success = ImportHelpers::importRsynFile(
             filepath, colourSpace, applyGamutMapping, state.fallbackSampleRate,
             NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             samples, metadata, errorMessage,
             updateProgress,
-            updatePreview
+            updatePreview,
+            nullptr
         );
     } else {
         errorMessage = "unsupported format";
@@ -265,16 +268,20 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         resolvedPlaybackAudio = std::move(playbackAudio);
         reconstructionSuccess = !resolvedPlaybackAudio.empty();
         updateProgress(0.95f);
+    } else if (success) {
+        updateProgress(0.95f);
     }
 
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         if (success) {
             clampSamplesToLimit(samples);
-            if (metadata.numFrames == 0) {
+            if (metadata.numFrames == 0 && !samples.empty()) {
                 metadata.numFrames = samples.size();
             }
-            metadata.numBins = metadata.numBins == 0 ? static_cast<size_t>(metadata.fftSize / 2 + 1) : metadata.numBins;
+            if (metadata.numBins == 0 && metadata.fftSize > 0) {
+                metadata.numBins = static_cast<size_t>(metadata.fftSize / 2 + 1);
+            }
 
             state.importedSamples = std::move(samples);
             state.importedMetadata = std::move(metadata);

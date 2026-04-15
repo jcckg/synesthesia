@@ -1,4 +1,5 @@
 #include "import_handler.h"
+#include "ui.h"
 #include "imgui_internal.h"
 
 #include <filesystem>
@@ -9,7 +10,8 @@
 
 namespace UIHandlers {
 
-void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
+void ImportHandler::processFileImport(UIState& state) {
+    auto& recorderState = state.resyneState.recorderState;
 	if (recorderState.importPhase == 1 && !recorderState.pendingImportPath.empty()) {
 		std::filesystem::path fsPath(recorderState.pendingImportPath);
 		std::string filename = fsPath.filename().string();
@@ -52,7 +54,8 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 
 			{
 				std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
-				success = !recorderState.importedSamples.empty();
+				success = !recorderState.importedSamples.empty() ||
+                    recorderState.importedMetadata.presentationData != nullptr;
 				errorMessage = recorderState.importErrorMessage;
 
 				if (success) {
@@ -98,6 +101,15 @@ void ImportHandler::processFileImport(ReSyne::RecorderState& recorderState) {
 			}
 
 			if (success) {
+                if (recorderState.metadata.presentationData != nullptr) {
+                    const auto& storedSettings = recorderState.metadata.presentationData->settings;
+                    state.visualSettings.colourSpace = storedSettings.colourSpace;
+                    state.visualSettings.gamutMappingEnabled = storedSettings.applyGamutMapping;
+                    state.visualSettings.smoothingEnabled = storedSettings.smoothingEnabled;
+                    state.visualSettings.manualSmoothing = storedSettings.manualSmoothing;
+                    state.visualSettings.colourSmoothingSpeed = storedSettings.smoothingAmount;
+                }
+
 				if (hasReconstructedAudio) {
 					ReSyne::Recorder::refreshPlaybackOutput(recorderState);
 				}

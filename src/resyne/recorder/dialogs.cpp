@@ -22,13 +22,25 @@ namespace ReSyne {
 bool Recorder::exportRecording(RecorderState& state,
                                const std::string& filepath,
                                RecorderExportFormat format) {
+    ensureRsynSamplesLoaded(state);
+
     std::lock_guard<std::mutex> lock(state.samplesMutex);
 
     switch (format) {
         case RecorderExportFormat::WAV:
             return SequenceExporter::exportToWAV(filepath, state.samples, state.metadata);
-        case RecorderExportFormat::RESYNE:
-            return SequenceExporter::exportToResyne(filepath, state.samples, state.metadata);
+        case RecorderExportFormat::RSYN: {
+            RSYNExportOptions options{};
+            options.presentationSettings.colourSpace = state.importColourSpace;
+            options.presentationSettings.applyGamutMapping = state.importGamutMapping;
+            options.presentationSettings.lowGain = state.importLowGain;
+            options.presentationSettings.midGain = state.importMidGain;
+            options.presentationSettings.highGain = state.importHighGain;
+            options.presentationSettings.smoothingEnabled = state.presentationSmoothingEnabled;
+            options.presentationSettings.manualSmoothing = state.presentationManualSmoothing;
+            options.presentationSettings.smoothingAmount = state.presentationSmoothingAmount;
+            return SequenceExporter::exportToRsyn(filepath, state.samples, state.metadata, options);
+        }
         case RecorderExportFormat::TIFF:
             return SequenceExporter::exportToTIFF(filepath, state.samples, state.metadata);
         case RecorderExportFormat::MP4: {
@@ -83,6 +95,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 
         std::vector<AudioColourSample> samplesCopy;
         AudioMetadata metadataCopy;
+        ensureRsynSamplesLoaded(state);
         {
             std::lock_guard<std::mutex> lock(state.samplesMutex);
             samplesCopy = state.samples;
@@ -105,18 +118,29 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 							updateProgress(0.1f + clamped * 0.8f);
 						});
 					break;
-				case RecorderExportFormat::RESYNE:
-					updateStatus("Encoding spectral data to ReSyne format...");
+				case RecorderExportFormat::RSYN: {
+                    RSYNExportOptions options{};
+                    options.presentationSettings.colourSpace = state.importColourSpace;
+                    options.presentationSettings.applyGamutMapping = state.importGamutMapping;
+                    options.presentationSettings.lowGain = state.importLowGain;
+                    options.presentationSettings.midGain = state.importMidGain;
+                    options.presentationSettings.highGain = state.importHighGain;
+                    options.presentationSettings.smoothingEnabled = state.presentationSmoothingEnabled;
+                    options.presentationSettings.manualSmoothing = state.presentationManualSmoothing;
+                    options.presentationSettings.smoothingAmount = state.presentationSmoothingAmount;
+					updateStatus("Encoding spectral data to RSYN format...");
 					updateProgress(0.1f);
-					success = SequenceExporter::exportToResyne(
+					success = SequenceExporter::exportToRsyn(
 						filepath,
 						samplesCopy,
 						metadataCopy,
+                        options,
 						[&](float fraction) {
 							const float clamped = std::clamp(fraction, 0.0f, 1.0f);
 							updateProgress(0.1f + clamped * 0.8f);
 						});
 					break;
+                }
 				case RecorderExportFormat::TIFF:
 					updateStatus("Encoding spectral data to TIFF format...");
 					updateProgress(0.1f);
@@ -214,9 +238,11 @@ void Recorder::handleLoadDialog(RecorderState& state) {
     auto result = pfd::open_file(
         "Load Audio/Colour File",
         "",
-        {"ReSyne Files", "*.resyne *.synesthesia *.tiff *.tif",
+        {"Audio and RSYN Files", "*.rsyn *.wav *.flac *.mp3 *.mpeg3 *.mpga *.ogg *.oga *.tiff *.tif",
+         "Audio Files", "*.wav *.flac *.mp3 *.mpeg3 *.mpga *.ogg *.oga",
+         "RSYN Files", "*.rsyn *.tiff *.tif",
          "TIFF Files", "*.tiff *.tif",
-         "ReSyne Files", "*.resyne *.synesthesia",
+         "RSYN Files", "*.rsyn",
          "All Files", "*"}
     ).result();
 
@@ -250,11 +276,11 @@ void Recorder::handleFileDialog(RecorderState& state) {
             fileFilter = "*.wav";
             fileTypeName = "WAV Files";
             break;
-        case RecorderExportFormat::RESYNE:
-            extension = ".resyne";
-            dialogTitle = "Save as ReSyne File";
-            fileFilter = "*.resyne";
-            fileTypeName = "ReSyne Files";
+        case RecorderExportFormat::RSYN:
+            extension = ".rsyn";
+            dialogTitle = "Save as RSYN File";
+            fileFilter = "*.rsyn";
+            fileTypeName = "RSYN Files";
             break;
         case RecorderExportFormat::TIFF:
             extension = ".tiff";

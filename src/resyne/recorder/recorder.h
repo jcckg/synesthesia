@@ -33,7 +33,7 @@ struct SampleColourEntry {
 
 enum class RecorderExportFormat {
     WAV,
-    RESYNE,
+    RSYN,
     TIFF,
     MP4
 };
@@ -204,6 +204,8 @@ public:
                                        bool applyGamutMapping);
 
 private:
+    static bool ensureRsynSamplesLoaded(RecorderState& state);
+    static bool ensurePlaybackAudioLoaded(RecorderState& state);
     static void drawExportDialog(RecorderState& state);
     static void drawLoadingDialog(RecorderState& state);
     static void drawExportingDialog(RecorderState& state);

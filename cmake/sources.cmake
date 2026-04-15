@@ -28,8 +28,11 @@ set(SOURCES
     ${SRC_DIR}/resyne/encoding/reconstruction/spectral_resampling.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/varispeed.cpp
     ${SRC_DIR}/resyne/encoding/formats/exporter.cpp
+    ${SRC_DIR}/resyne/encoding/formats/rsyn_container.cpp
+    ${SRC_DIR}/resyne/encoding/formats/rsyn_presentation.cpp
+    ${SRC_DIR}/resyne/encoding/formats/rsyn_serialisation.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_tiff.cpp
-    ${SRC_DIR}/resyne/encoding/formats/format_resyne.cpp
+    ${SRC_DIR}/resyne/encoding/formats/format_rsyn.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_wav.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_mp4.cpp
     ${SRC_DIR}/resyne/conversions/colour_space.cpp
@@ -54,6 +57,7 @@ set(SOURCES
     ${SRC_DIR}/utilities/midi/analysis/midi_analyser.cpp
     ${SRC_DIR}/utilities/midi/device_manager/midi_device_manager.cpp
     ${SRC_DIR}/utilities/video/ffmpeg_locator.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/miniz.c
     ${SRC_DIR}/resyne/decoding/audio_decoder.cpp
     ${SRC_DIR}/resyne/decoding/decoder_wav.cpp
     ${SRC_DIR}/resyne/decoding/decoder_flac.cpp
@@ -64,6 +68,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/recorder/dialogs.cpp
     ${SRC_DIR}/resyne/recorder/import.cpp
     ${SRC_DIR}/resyne/recorder/import_helpers.cpp
+    ${SRC_DIR}/resyne/recorder/embedded_source_utils.cpp
     ${SRC_DIR}/resyne/recorder/loudness_utils.cpp
     ${SRC_DIR}/resyne/recorder/reconstruction_utils.cpp
     ${SRC_DIR}/resyne/recorder/colour_cache_utils.cpp
@@ -124,6 +129,7 @@ function(configure_include_directories)
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lodepng
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/dr_libs
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/json/include
     )
 
     target_include_directories(${EXECUTABLE_NAME} PRIVATE

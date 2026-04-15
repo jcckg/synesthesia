@@ -217,7 +217,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		}
 	}
 
-	UIHandlers::ImportHandler::processFileImport(recorderState);
+    UIHandlers::ImportHandler::processFileImport(state);
 
 	if (ImGui::IsKeyPressed(ImGuiKey_H) && state.visualSettings.activeView != UIState::View::ReSyne) {
 		state.visibility.showUI = !state.visibility.showUI;

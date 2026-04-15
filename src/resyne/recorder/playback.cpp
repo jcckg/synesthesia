@@ -1,4 +1,5 @@
 #include "resyne/recorder/recorder.h"
+#include "resyne/recorder/embedded_source_utils.h"
 #include "resyne/recorder/reconstruction_utils.h"
 #include "imgui_internal.h"
 
@@ -6,6 +7,87 @@
 #include <mutex>
 
 namespace ReSyne {
+
+bool Recorder::ensureRsynSamplesLoaded(RecorderState& state) {
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        if (!state.samples.empty()) {
+            return true;
+        }
+        if (state.metadata.lazyAsset == nullptr) {
+            return false;
+        }
+    }
+
+    AudioMetadata metadata;
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        metadata = state.metadata;
+    }
+
+    std::vector<AudioColourSample> loadedSamples;
+    if (!SequenceExporter::hydrateRsynSamples(metadata, loadedSamples) || loadedSamples.empty()) {
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        state.metadata = std::move(metadata);
+        state.samples = std::move(loadedSamples);
+        state.timelinePreviewCache.clear();
+        state.timelinePreviewCacheDirty = true;
+    }
+
+    return true;
+}
+
+bool Recorder::ensurePlaybackAudioLoaded(RecorderState& state) {
+    bool hasPlaybackAudio = false;
+    bool hasLazyAsset = false;
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        hasPlaybackAudio = !state.playbackAudio.empty();
+        hasLazyAsset = state.metadata.lazyAsset != nullptr;
+        if (hasPlaybackAudio) {
+            state.isPlaybackInitialised = false;
+        }
+    }
+
+    if (hasPlaybackAudio) {
+        return refreshPlaybackOutput(state);
+    }
+
+    if (!hasLazyAsset) {
+        reconstructAudio(state);
+        return state.isPlaybackInitialised && !state.playbackAudio.empty();
+    }
+
+    AudioMetadata metadata;
+    {
+        std::lock_guard<std::mutex> lock(state.samplesMutex);
+        metadata = state.metadata;
+    }
+
+    if (SequenceExporter::hydrateRsynSource(metadata)) {
+        std::vector<float> playbackAudio;
+        std::string errorMessage;
+        if (EmbeddedSourceUtils::decodeEmbeddedSourceAudio(metadata, playbackAudio, errorMessage) &&
+            !playbackAudio.empty()) {
+            {
+                std::lock_guard<std::mutex> lock(state.samplesMutex);
+                state.metadata = std::move(metadata);
+                state.playbackAudio = std::move(playbackAudio);
+                state.timelinePreviewCacheDirty = true;
+            }
+
+            ensureRsynSamplesLoaded(state);
+            return refreshPlaybackOutput(state);
+        }
+    }
+
+    reconstructAudio(state);
+    return state.isPlaybackInitialised && !state.playbackAudio.empty();
+}
 
 bool Recorder::refreshPlaybackOutput(RecorderState& state) {
     if (state.playbackAudio.empty()) {
@@ -42,6 +124,8 @@ bool Recorder::refreshPlaybackOutput(RecorderState& state) {
 }
 
 void Recorder::reconstructAudio(RecorderState& state) {
+    ensureRsynSamplesLoaded(state);
+
     std::vector<AudioColourSample> samples;
     AudioMetadata metadata;
     {
@@ -67,9 +151,10 @@ void Recorder::reconstructAudio(RecorderState& state) {
 }
 
 void Recorder::startPlayback(RecorderState& state) {
+    ensureRsynSamplesLoaded(state);
+
     if (!state.isPlaybackInitialised || state.playbackAudio.empty()) {
-        reconstructAudio(state);
-        if (!state.isPlaybackInitialised || state.playbackAudio.empty()) {
+        if (!ensurePlaybackAudioLoaded(state)) {
             return;
         }
     }

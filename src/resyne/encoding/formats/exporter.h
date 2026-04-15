@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
+
+#include "resyne/encoding/formats/rsyn_asset.h"
 
 struct AudioColourSample {
 	std::vector<std::vector<float>> magnitudes;
@@ -27,35 +30,42 @@ struct AudioMetadata {
     size_t numBins = 0;
     std::uint32_t channels = 1;
     std::string version = "3.0.0";
+    std::shared_ptr<RSYNSourceData> sourceData;
+    std::shared_ptr<RSYNPresentationData> presentationData;
+    std::shared_ptr<RSYNLazyAsset> lazyAsset;
+};
+
+struct RSYNExportOptions {
+    RSYNPresentationSettings presentationSettings{};
 };
 
 using SequenceFrameCallback = std::function<void(const std::vector<AudioColourSample>&, size_t)>;
 
 class SequenceExporter {
 public:
-	static bool exportToResyne(const std::string& filepath,
-                                const std::vector<AudioColourSample>& samples,
-                                const AudioMetadata& metadata,
-                                const std::function<void(float)>& progress = {});
+    static bool exportToRsyn(const std::string& filepath,
+                             const std::vector<AudioColourSample>& samples,
+                             const AudioMetadata& metadata,
+                             const RSYNExportOptions& options,
+                             const std::function<void(float)>& progress = {});
 
-	static bool loadFromResyne(const std::string& filepath,
-							   std::vector<AudioColourSample>& samples,
-							   AudioMetadata& metadata,
-							   const std::function<void(float)>& progress = {},
-							   const SequenceFrameCallback& onFrameDecoded = {});
+    static bool loadFromRsyn(const std::string& filepath,
+                             std::vector<AudioColourSample>& samples,
+                             AudioMetadata& metadata,
+                             const std::function<void(float)>& progress = {},
+                             const SequenceFrameCallback& onFrameDecoded = {});
 
-	static bool exportToSynesthesia(const std::string& filepath,
-							   const std::vector<AudioColourSample>& samples,
-							   const AudioMetadata& metadata,
-							   const std::function<void(float)>& progress = {}) {
-		return exportToResyne(filepath, samples, metadata, progress);
-	}
+    static bool loadFromRsynShell(const std::string& filepath,
+                                  AudioMetadata& metadata,
+                                  const std::function<void(float)>& progress = {});
 
-	static bool loadFromSynesthesia(const std::string& filepath,
-							   std::vector<AudioColourSample>& samples,
-							   AudioMetadata& metadata) {
-		return loadFromResyne(filepath, samples, metadata);
-	}
+    static bool hydrateRsynSamples(AudioMetadata& metadata,
+                                   std::vector<AudioColourSample>& samples,
+                                   const std::function<void(float)>& progress = {},
+                                   const SequenceFrameCallback& onFrameDecoded = {});
+
+    static bool hydrateRsynSource(AudioMetadata& metadata,
+                                  const std::function<void(float)>& progress = {});
 
 	static bool exportToWAV(const std::string& filepath,
 						   const std::vector<AudioColourSample>& samples,

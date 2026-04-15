@@ -36,6 +36,10 @@ bool previewSettingsMatch(const RecorderState& state,
         state.timelinePreviewCacheSmoothingAmount == settings.smoothingAmount;
 }
 
+bool nearlyEqual(const float a, const float b) {
+    return std::abs(a - b) <= 1e-6f;
+}
+
 void storePreviewSettings(RecorderState& state,
                           const RecorderColourCache::CacheSettings& settings,
                           const size_t maxSamples,
@@ -77,6 +81,80 @@ Timeline::TimelineSample buildTimelineSample(const AudioColourSample& sample,
     output.labA = entry.labA;
     output.labB = entry.labB;
     return output;
+}
+
+Timeline::TimelineSample buildTimelineSampleFromStoredFrame(
+    const RSYNPresentationFrame& frame,
+    const bool useSmoothedTrack) {
+    Timeline::TimelineSample output{};
+    output.timestamp = frame.timestamp;
+    if (useSmoothedTrack) {
+        output.colour = ImVec4(
+            std::clamp(frame.smoothedDisplayRgb[0], 0.0f, 1.0f),
+            std::clamp(frame.smoothedDisplayRgb[1], 0.0f, 1.0f),
+            std::clamp(frame.smoothedDisplayRgb[2], 0.0f, 1.0f),
+            1.0f);
+        output.labL = frame.smoothedLab[0];
+        output.labA = frame.smoothedLab[1];
+        output.labB = frame.smoothedLab[2];
+    } else {
+        output.colour = ImVec4(
+            std::clamp(frame.analysis.r, 0.0f, 1.0f),
+            std::clamp(frame.analysis.g, 0.0f, 1.0f),
+            std::clamp(frame.analysis.b, 0.0f, 1.0f),
+            1.0f);
+        output.labL = frame.analysis.L;
+        output.labA = frame.analysis.a;
+        output.labB = frame.analysis.b_comp;
+    }
+    return output;
+}
+
+bool canUseStoredPresentation(const RecorderState& state,
+                              const RecorderColourCache::CacheSettings& settings,
+                              const bool usePreview,
+                              bool& useSmoothedTrack) {
+    useSmoothedTrack = false;
+
+    if (usePreview || state.metadata.presentationData == nullptr) {
+        return false;
+    }
+
+    const auto& presentation = *state.metadata.presentationData;
+    if (presentation.frames.empty()) {
+        return false;
+    }
+
+    if (!state.samples.empty() && presentation.frames.size() != state.samples.size()) {
+        return false;
+    }
+
+    const auto& storedSettings = presentation.settings;
+    const bool baseSettingsMatch =
+        storedSettings.colourSpace == settings.colourSpace &&
+        storedSettings.applyGamutMapping == settings.gamutMapping &&
+        nearlyEqual(storedSettings.lowGain, settings.lowGain) &&
+        nearlyEqual(storedSettings.midGain, settings.midGain) &&
+        nearlyEqual(storedSettings.highGain, settings.highGain);
+    if (!baseSettingsMatch) {
+        return false;
+    }
+
+    if (!settings.smoothingEnabled) {
+        useSmoothedTrack = false;
+        return true;
+    }
+
+    const bool smoothingMatches =
+        storedSettings.smoothingEnabled &&
+        storedSettings.manualSmoothing == settings.manualSmoothing &&
+        nearlyEqual(storedSettings.smoothingAmount, settings.smoothingAmount);
+    if (!smoothingMatches) {
+        return false;
+    }
+
+    useSmoothedTrack = true;
+    return true;
 }
 
 Timeline::TimelineSample buildTimelineSampleFromXYZ(const double timestamp,
@@ -268,14 +346,41 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
 
     const bool usePreview = state.importPhase == 3 && state.previewReady.load(std::memory_order_acquire);
     const auto& sourceSamples = usePreview ? state.previewSamples : state.samples;
-
     const size_t samplesSize = sourceSamples.size();
-    if (samplesSize == 0) {
+
+    const auto settings = RecorderColourCache::currentSettings(state);
+    const size_t sourceCount = samplesSize > 0
+        ? samplesSize
+        : (usePreview || state.metadata.presentationData == nullptr ? 0 : state.metadata.presentationData->frames.size());
+    if (sourceCount == 0) {
         return previewData;
     }
 
-    const auto settings = RecorderColourCache::currentSettings(state);
-    if (previewSettingsMatch(state, settings, maxSamples, samplesSize, usePreview)) {
+    if (previewSettingsMatch(state, settings, maxSamples, sourceCount, usePreview)) {
+        return state.timelinePreviewCache;
+    }
+
+    bool useSmoothedStoredTrack = false;
+    if (canUseStoredPresentation(state, settings, usePreview, useSmoothedStoredTrack)) {
+        const auto& storedFrames = state.metadata.presentationData->frames;
+        if (storedFrames.size() <= maxSamples) {
+            previewData.reserve(storedFrames.size());
+            for (const auto& frame : storedFrames) {
+                previewData.push_back(buildTimelineSampleFromStoredFrame(frame, useSmoothedStoredTrack));
+            }
+        } else {
+            previewData.reserve(maxSamples);
+            const double step = static_cast<double>(storedFrames.size()) / static_cast<double>(maxSamples);
+            for (size_t i = 0; i < maxSamples; ++i) {
+                const size_t frameIndex = static_cast<size_t>(static_cast<double>(i) * step);
+                previewData.push_back(buildTimelineSampleFromStoredFrame(
+                    storedFrames[std::min(frameIndex, storedFrames.size() - 1)],
+                    useSmoothedStoredTrack));
+            }
+        }
+
+        state.timelinePreviewCache = previewData;
+        storePreviewSettings(state, settings, maxSamples, sourceCount, usePreview);
         return state.timelinePreviewCache;
     }
 
@@ -309,7 +414,7 @@ std::vector<Timeline::TimelineSample> samplePreviewData(
 
     applyPreviewSmoothing(previewData, sourceSamples, sampledIndices, settings);
     state.timelinePreviewCache = previewData;
-    storePreviewSettings(state, settings, maxSamples, samplesSize, usePreview);
+    storePreviewSettings(state, settings, maxSamples, sourceCount, usePreview);
     return state.timelinePreviewCache;
 }
 

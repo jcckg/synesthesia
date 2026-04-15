@@ -48,14 +48,14 @@ void Recorder::drawExportDialog(RecorderState& state) {
 
         ImGui::SameLine();
 
-        if (ImGui::Button(".resyne", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
-            state.exportFormat = RecorderExportFormat::RESYNE;
+        if (ImGui::Button(".rsyn", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
+            state.exportFormat = RecorderExportFormat::RSYN;
             state.shouldOpenSaveDialog = true;
             state.showExportDialog = false;
             ImGui::CloseCurrentPopup();
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Export as native format");
+            ImGui::SetTooltip("Export as RSYN");
         }
 
         auto& ffmpegLocator = Utilities::Video::FFmpegLocator::instance();

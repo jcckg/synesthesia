@@ -58,6 +58,7 @@ bool Recorder::hasLoadedAudio(RecorderState& state) {
     return !state.samples.empty() ||
            !state.previewSamples.empty() ||
            !state.playbackAudio.empty() ||
+           state.metadata.presentationData != nullptr ||
            (state.audioOutput && state.audioOutput->getTotalSamples() > 0);
 }
 

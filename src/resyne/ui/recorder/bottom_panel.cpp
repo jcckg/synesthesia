@@ -59,15 +59,22 @@ void Recorder::drawBottomPanel(RecorderState& state,
         const auto& sourceSamples = usePreview ? state.previewSamples : state.samples;
 
         sampleCount = sourceSamples.size();
-        hasData = !sourceSamples.empty() || (!state.previewSamples.empty() && state.importPhase == 3);
+        if (sampleCount == 0 && !usePreview && state.metadata.presentationData != nullptr) {
+            sampleCount = state.metadata.presentationData->frames.size();
+        }
+        hasData = sampleCount > 0;
 
         if (hasData) {
             if (!state.playbackAudio.empty() && state.metadata.sampleRate > 0.0f) {
                 const uint32_t numChannels = state.metadata.channels > 0 ? state.metadata.channels : 1;
                 const size_t totalFrames = state.playbackAudio.size() / numChannels;
                 duration = static_cast<double>(totalFrames) / static_cast<double>(state.metadata.sampleRate);
-            } else {
+            } else if (!sourceSamples.empty()) {
                 duration = sourceSamples.back().timestamp;
+            } else if (state.metadata.presentationData != nullptr && !state.metadata.presentationData->frames.empty()) {
+                duration = state.metadata.presentationData->frames.back().timestamp;
+            } else {
+                duration = state.metadata.durationSeconds;
             }
             previewData = ReSyne::UI::samplePreviewData(state, ReSyne::UI::MAX_PREVIEW_SAMPLES_BOTTOM_PANEL, lock);
         }
@@ -182,7 +189,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
             state.shouldOpenLoadDialog = true;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Load audio, .resyne/.synesthesia, or TIFF files");
+            ImGui::SetTooltip("Load audio, .rsyn, or TIFF files");
         }
         ImGui::EndDisabled();
 

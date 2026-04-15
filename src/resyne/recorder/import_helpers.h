@@ -35,7 +35,7 @@ bool importAudioFile(
     std::vector<float>* playbackAudio = nullptr
 );
 
-bool importResyneFile(
+bool importRsynFile(
     const std::string& filepath,
     ColourCore::ColourSpace colourSpace,
     bool applyGamutMapping,
@@ -47,7 +47,8 @@ bool importResyneFile(
     AudioMetadata& metadata,
     std::string& errorMessage,
     const ProgressCallback& onProgress = nullptr,
-    const PreviewCallback& onPreview = nullptr
+    const PreviewCallback& onPreview = nullptr,
+    std::vector<float>* playbackAudio = nullptr
 );
 
 }

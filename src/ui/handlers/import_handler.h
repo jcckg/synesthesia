@@ -1,12 +1,12 @@
 #pragma once
 
-#include "resyne/recorder/recorder.h"
+struct UIState;
 
 namespace UIHandlers {
 
 class ImportHandler {
 public:
-	static void processFileImport(ReSyne::RecorderState& recorderState);
+    static void processFileImport(UIState& state);
 };
 
 }

@@ -60,14 +60,21 @@ void Recorder::drawFullWindow(RecorderState& state,
         const auto& sourceSamples = hasPreview ? state.previewSamples : state.samples;
 
         sampleCount = sourceSamples.size();
-        hasData = !sourceSamples.empty();
+        if (sampleCount == 0 && !hasPreview && state.metadata.presentationData != nullptr) {
+            sampleCount = state.metadata.presentationData->frames.size();
+        }
+        hasData = sampleCount > 0;
         if (hasData) {
             if (!state.playbackAudio.empty() && sampleRate > 0.0f) {
                 const uint32_t numChannels = state.metadata.channels > 0 ? state.metadata.channels : 1;
                 const size_t totalFrames = state.playbackAudio.size() / numChannels;
                 duration = static_cast<double>(totalFrames) / static_cast<double>(sampleRate);
-            } else {
+            } else if (!sourceSamples.empty()) {
                 duration = sourceSamples.back().timestamp;
+            } else if (state.metadata.presentationData != nullptr && !state.metadata.presentationData->frames.empty()) {
+                duration = state.metadata.presentationData->frames.back().timestamp;
+            } else {
+                duration = state.metadata.durationSeconds;
             }
         }
     }

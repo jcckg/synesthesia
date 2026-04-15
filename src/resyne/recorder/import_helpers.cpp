@@ -2,13 +2,18 @@
 #include "resyne/recorder/recorder.h"
 #include "resyne/decoding/audio_decoder.h"
 #include "resyne/encoding/formats/exporter.h"
+#include "resyne/recorder/embedded_source_utils.h"
 #include "resyne/recorder/loudness_utils.h"
 #include "audio/analysis/fft/fft_processor.h"
 #include "colour/colour_core.h"
 #include "constants.h"
+#include "miniz.h"
+#undef crc32
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <span>
@@ -55,6 +60,49 @@ std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& deco
     }
 
     return interleaved;
+}
+
+bool readFileBytes(const std::string& filepath, std::vector<std::uint8_t>& bytes) {
+    bytes.clear();
+
+    std::ifstream file(filepath, std::ios::binary | std::ios::ate);
+    if (!file.is_open()) {
+        return false;
+    }
+
+    const std::streamsize size = file.tellg();
+    if (size < 0) {
+        return false;
+    }
+
+    file.seekg(0, std::ios::beg);
+    bytes.resize(static_cast<std::size_t>(size));
+    if (!bytes.empty()) {
+        file.read(reinterpret_cast<char*>(bytes.data()), size);
+        if (!file.good()) {
+            bytes.clear();
+            return false;
+        }
+    }
+
+    return true;
+}
+
+std::shared_ptr<RSYNSourceData> buildSourceDataFromFile(const std::string& filepath) {
+    std::vector<std::uint8_t> bytes;
+    if (!readFileBytes(filepath, bytes)) {
+        return nullptr;
+    }
+
+    auto sourceData = std::make_shared<RSYNSourceData>();
+    const std::filesystem::path fsPath(filepath);
+    sourceData->filename = fsPath.filename().string();
+    sourceData->extension = fsPath.extension().string();
+    sourceData->crc32 = bytes.empty()
+        ? 0U
+        : static_cast<std::uint32_t>(mz_crc32(MZ_CRC32_INIT, bytes.data(), bytes.size()));
+    sourceData->bytes = std::move(bytes);
+    return sourceData;
 }
 
 }
@@ -226,6 +274,9 @@ bool importAudioFile(
     metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
     metadata.channels = numChannels;
     metadata.version = "3.0.0";
+    metadata.sourceData = buildSourceDataFromFile(filepath);
+    metadata.presentationData.reset();
+    metadata.lazyAsset.reset();
 
     const bool needsLoudnessBackfill = std::any_of(
         samples.begin(),
@@ -241,7 +292,7 @@ bool importAudioFile(
     return true;
 }
 
-bool importResyneFile(
+bool importRsynFile(
     const std::string& filepath,
     ColourCore::ColourSpace colourSpace,
     bool applyGamutMapping,
@@ -253,7 +304,8 @@ bool importResyneFile(
     AudioMetadata& metadata,
     std::string& errorMessage,
     const ProgressCallback& onProgress,
-    const PreviewCallback& onPreview
+    const PreviewCallback& onPreview,
+    std::vector<float>* playbackAudio
 ) {
     (void)colourSpace;
     (void)applyGamutMapping;
@@ -281,7 +333,7 @@ bool importResyneFile(
         };
     }
 
-    if (!SequenceExporter::loadFromResyne(filepath, samples, metadata, fileProgress, frameCallback) || samples.empty()) {
+    if (!SequenceExporter::loadFromRsynShell(filepath, metadata, fileProgress)) {
         errorMessage = "parse failure";
         return false;
     }
@@ -294,34 +346,23 @@ bool importResyneFile(
 
     metadata.sampleRate = resolvedSampleRate;
     metadata.hopSize = resolvedHopSize;
-    metadata.numFrames = samples.size();
     if (metadata.fftSize == 0) {
         metadata.fftSize = FFTProcessor::FFT_SIZE;
-    }
-    if (metadata.numBins == 0 && !samples.empty() && !samples.front().magnitudes.empty()) {
-        metadata.numBins = samples.front().magnitudes[0].size();
     }
     if (metadata.windowType.empty()) {
         metadata.windowType = "hann";
     }
 
-    const double hopSizeAsDouble = static_cast<double>(resolvedHopSize);
-    const size_t totalFrames = samples.size();
-    for (size_t frame = 0; frame < samples.size(); ++frame) {
-        auto& sample = samples[frame];
-        const float frameSampleRate = sample.sampleRate > 0.0f ? sample.sampleRate : resolvedSampleRate;
-        sample.sampleRate = frameSampleRate;
-        sample.timestamp = (hopSizeAsDouble * static_cast<double>(frame)) /
-                           static_cast<double>(std::max(resolvedSampleRate, 1e-6f));
-
-        if (frame % 100 == 0 || frame == totalFrames - 1) {
-            const float processProgress = static_cast<float>(frame) / static_cast<float>(totalFrames);
-            if (onProgress) onProgress(0.6f + (processProgress * 0.25f));
+    if (playbackAudio != nullptr) {
+        if (SequenceExporter::hydrateRsynSource(metadata)) {
+            EmbeddedSourceUtils::decodeEmbeddedSourceAudio(metadata, *playbackAudio, errorMessage);
         }
+    }
 
-        if (onPreview && (frame % 500 == 0 || frame == totalFrames - 1)) {
-            onPreview(samples);
-        }
+    samples.clear();
+
+    if (metadata.presentationData != nullptr && !metadata.presentationData->frames.empty()) {
+        metadata.numFrames = metadata.presentationData->frames.size();
     }
 
     if (onProgress) onProgress(0.9f);
