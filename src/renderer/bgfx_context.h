@@ -9,7 +9,8 @@ class Window;
 class BgfxContext {
 public:
     static constexpr bgfx::ViewId kClearViewId = 0;
-    static constexpr bgfx::ViewId kImGuiViewId = 1;
+    static constexpr bgfx::ViewId kBackgroundViewId = 1;
+    static constexpr bgfx::ViewId kImGuiViewId = 2;
 
     BgfxContext();
 
@@ -22,10 +23,13 @@ public:
     [[nodiscard]] uint32_t resetFlags() const;
     [[nodiscard]] bgfx::RendererType::Enum rendererType() const;
     [[nodiscard]] bool supportsMultipleWindows() const;
+    [[nodiscard]] bgfx::TextureFormat::Enum colourFormat() const;
+    [[nodiscard]] bool usesLinearPresentation() const;
 
 private:
     uint32_t reset_flags_ = BGFX_RESET_VSYNC;
     bool initialised_ = false;
+    bgfx::TextureFormat::Enum colour_format_ = bgfx::TextureFormat::BGRA8;
 };
 
 } // namespace Renderer

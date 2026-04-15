@@ -89,7 +89,8 @@ void Recorder::drawBottomPanel(RecorderState& state,
             !state.timeline.trackScrubber,
             !state.timeline.trackScrubber,
             &state.toolState,
-            &state.trackpadInput
+            &state.trackpadInput,
+            state.presentationResources
         };
 
         if (!state.timeline.isScrubberDragging && timelineContext.playbackNormalisedPosition.has_value()) {

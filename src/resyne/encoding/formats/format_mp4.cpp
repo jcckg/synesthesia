@@ -20,6 +20,7 @@
 #endif
 
 #include "colour/colour_core.h"
+#include "colour/colour_presentation.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "ui/smoothing/smoothing.h"
 #include "utilities/video/ffmpeg_locator.h"
@@ -73,8 +74,8 @@ int closePipe(FILE* handle) {
 }
 #endif
 
-inline uint8_t toByte(float value) {
-    return static_cast<uint8_t>(std::clamp(value, 0.0f, 1.0f) * 255.0f + 0.5f);
+inline uint16_t toWord(float value) {
+    return static_cast<uint16_t>(std::clamp(value, 0.0f, 1.0f) * 65535.0f + 0.5f);
 }
 
 class ColourTimelineSampler {
@@ -157,16 +158,20 @@ private:
     double startTime_ = 0.0;
 };
 
-void paintColourFrame(std::vector<uint8_t>& buffer, int width, int height, const RGB& colour) {
-    const uint8_t r = toByte(colour.r);
-    const uint8_t g = toByte(colour.g);
-    const uint8_t b = toByte(colour.b);
+void paintColourFrame(std::vector<uint16_t>& buffer,
+                      int width,
+                      int height,
+                      RGB colour) {
+    ColourPresentation::applyOutputPrecision(colour.r, colour.g, colour.b);
+    const uint16_t r = toWord(colour.r);
+    const uint16_t g = toWord(colour.g);
+    const uint16_t b = toWord(colour.b);
     const int lineStride = width * 3;
 
     for (int y = 0; y < height; ++y) {
-        uint8_t* row = buffer.data() + static_cast<size_t>(y) * static_cast<size_t>(lineStride);
+        uint16_t* row = buffer.data() + static_cast<size_t>(y) * static_cast<size_t>(lineStride);
         for (int x = 0; x < width; ++x) {
-            uint8_t* pixel = row + static_cast<size_t>(x) * 3;
+            uint16_t* pixel = row + static_cast<size_t>(x) * 3;
             pixel[0] = r;
             pixel[1] = g;
             pixel[2] = b;
@@ -174,8 +179,11 @@ void paintColourFrame(std::vector<uint8_t>& buffer, int width, int height, const
     }
 }
 
-void paintGradientFrame(std::vector<uint8_t>& buffer, int width, int height,
-                       const std::vector<RGB>& history, const RGB& backgroundColour) {
+void paintGradientFrame(std::vector<uint16_t>& buffer,
+                        int width,
+                        int height,
+                        const std::vector<RGB>& history,
+                        const RGB& backgroundColour) {
     const int lineStride = width * 3;
     const bool hasHistory = !history.empty();
     const size_t historySize = history.size();
@@ -204,13 +212,14 @@ void paintGradientFrame(std::vector<uint8_t>& buffer, int width, int height,
             }
         }
 
-        const uint8_t r = toByte(colour.r);
-        const uint8_t g = toByte(colour.g);
-        const uint8_t b = toByte(colour.b);
+        ColourPresentation::applyOutputPrecision(colour.r, colour.g, colour.b);
+        const uint16_t r = toWord(colour.r);
+        const uint16_t g = toWord(colour.g);
+        const uint16_t b = toWord(colour.b);
 
         for (int y = 0; y < height; ++y) {
-            uint8_t* row = buffer.data() + static_cast<size_t>(y) * static_cast<size_t>(lineStride);
-            uint8_t* pixel = row + static_cast<size_t>(x) * 3;
+            uint16_t* row = buffer.data() + static_cast<size_t>(y) * static_cast<size_t>(lineStride);
+            uint16_t* pixel = row + static_cast<size_t>(x) * 3;
             pixel[0] = r;
             pixel[1] = g;
             pixel[2] = b;
@@ -298,7 +307,7 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
     std::ostringstream oss;
     oss << '"' << ffmpegPath << '"'
         << " -y -loglevel error"
-        << " -f rawvideo -pixel_format rgb24"
+        << " -f rawvideo -pixel_format rgb48le"
         << " -video_size " << width << 'x' << height
         << " -framerate " << fps
         << " -i -"
@@ -338,8 +347,7 @@ bool renderVideo(const std::string& ffmpegCommand,
                  std::vector<RGB>* gradientHistory = nullptr) {
     const int totalFrames = std::max(1, static_cast<int>(std::ceil(duration * static_cast<double>(fps))));
     const int lineStride = width * 3;
-    const size_t frameBytes = static_cast<size_t>(lineStride) * static_cast<size_t>(height);
-    std::vector<uint8_t> frame(frameBytes, 0);
+    std::vector<uint16_t> frame(static_cast<size_t>(lineStride) * static_cast<size_t>(height), 0);
 
     ColourTimelineSampler sampler(samples,
                                   options.colourSpace,
@@ -374,8 +382,9 @@ bool renderVideo(const std::string& ffmpegCommand,
 
         paintColourFrame(frame, width, height, colour);
 
-        size_t bytesWritten = fwrite(frame.data(), 1, frame.size(), pipe);
-        if (bytesWritten != frame.size()) {
+        const size_t frameBytes = frame.size() * sizeof(uint16_t);
+        const size_t bytesWritten = fwrite(frame.data(), 1, frameBytes, pipe);
+        if (bytesWritten != frameBytes) {
             errorMessage = "Failed to stream video frame to FFmpeg";
             closePipe(pipe);
             return false;
@@ -537,8 +546,7 @@ bool exportToMP4(const std::string& outputPath,
 
         const int totalFrames = static_cast<int>(gradientHistory.size());
         const int lineStride = width * 3;
-        const size_t frameBytes = static_cast<size_t>(lineStride) * static_cast<size_t>(height);
-        std::vector<uint8_t> frame(frameBytes, 0);
+        std::vector<uint16_t> frame(static_cast<size_t>(lineStride) * static_cast<size_t>(height), 0);
 
         FILE* pipe = openPipe(gradientCommand);
         if (!pipe) {
@@ -558,7 +566,8 @@ bool exportToMP4(const std::string& outputPath,
 
             paintGradientFrame(frame, width, height, currentHistory, backgroundColour);
 
-            if (fwrite(frame.data(), 1, frame.size(), pipe) != frame.size()) {
+            const size_t frameBytes = frame.size() * sizeof(uint16_t);
+            if (fwrite(frame.data(), 1, frameBytes, pipe) != frameBytes) {
                 errorMessage = "Failed to stream gradient frame to FFmpeg";
                 closePipe(pipe);
                 return false;

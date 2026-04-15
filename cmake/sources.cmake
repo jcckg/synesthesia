@@ -5,6 +5,7 @@ set(SOURCES
     ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
     ${SRC_DIR}/audio/analysis/presentation/sample_sequence.cpp
     ${SRC_DIR}/colour/colour_core.cpp
+    ${SRC_DIR}/colour/colour_presentation.cpp
     ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
     ${SRC_DIR}/audio/analysis/eq/shared_eq_model.cpp
     ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp
@@ -78,6 +79,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/ui/timeline/timeline.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline_labels.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline_gradient.cpp
+    ${SRC_DIR}/resyne/ui/timeline/timeline_rasteriser.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline_viewport.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline_render.cpp
     ${SRC_DIR}/resyne/controller/controller.cpp

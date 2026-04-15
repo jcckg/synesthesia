@@ -1,6 +1,7 @@
 #include "renderer/bgfx_context.h"
 #include "renderer/detached_visualisation_window.h"
 #include "renderer/imgui_window_context.h"
+#include "renderer/presentation_resources.h"
 #include "renderer/render_utils.h"
 #include "renderer/styling/platform_styling.h"
 #include "renderer/window.h"
@@ -30,6 +31,18 @@ constexpr int kDefaultWindowWidth = 1480;
 constexpr int kDefaultWindowHeight = 750;
 constexpr int kTargetFramesPerSecond = 120;
 constexpr int kTargetFrameDurationMicroseconds = 1'000'000 / kTargetFramesPerSecond;
+
+PresentationDiagnostics::DisplaySurfacePrecision displaySurfacePrecisionFromFormat(
+    const bgfx::TextureFormat::Enum colourFormat) {
+    switch (colourFormat) {
+        case bgfx::TextureFormat::RGB10A2:
+            return PresentationDiagnostics::DisplaySurfacePrecision::TenBit;
+        case bgfx::TextureFormat::BGRA8:
+            return PresentationDiagnostics::DisplaySurfacePrecision::EightBit;
+        default:
+            return PresentationDiagnostics::DisplaySurfacePrecision::Unknown;
+    }
+}
 
 void getThemeBackgroundColour(float* colour) {
     const SystemTheme theme = SystemThemeDetector::detectSystemTheme();
@@ -98,7 +111,7 @@ int app_main(int, char**) {
     }
 
     Renderer::ImGuiWindowContext mainWindowContext;
-    if (!mainWindowContext.initialise(window, Renderer::BgfxContext::kImGuiViewId)) {
+    if (!mainWindowContext.initialise(window, Renderer::BgfxContext::kImGuiViewId, bgfxContext.usesLinearPresentation())) {
         std::fprintf(stderr, "Failed to initialise ImGui window context\n");
         bgfxContext.shutdown();
         window.destroy();
@@ -125,7 +138,24 @@ int app_main(int, char**) {
     getThemeBackgroundColour(clearColour);
 
     UIState uiState;
+    uiState.presentationDiagnostics.displaySurfacePrecision =
+        displaySurfacePrecisionFromFormat(bgfxContext.colourFormat());
+    Renderer::PresentationResources presentationResources;
+    if (!presentationResources.initialise()) {
+        std::fprintf(stderr, "[renderer] Failed to initialise presentation resources, falling back to legacy colour widgets\n");
+    } else {
+        uiState.presentationResources = &presentationResources;
+        uiState.presentationDiagnostics.presentationResourcesAvailable = true;
+        uiState.presentationDiagnostics.highPrecisionTexturesAvailable =
+            presentationResources.supportsHighPrecisionTextures();
+        uiState.presentationDiagnostics.backgroundPresentationAvailable =
+            presentationResources.supportsBackgroundPresentation();
+        if (!presentationResources.supportsBackgroundPresentation()) {
+            std::fprintf(stderr, "[renderer] Presentation background pass unavailable, using clear-colour fallback for fullscreen backgrounds\n");
+        }
+    }
     auto& recorderState = uiState.resyneState.recorderState;
+    recorderState.presentationResources = uiState.presentationResources;
     recorderState.detachedVisualisation.available = bgfxContext.supportsMultipleWindows();
     Renderer::DetachedVisualisationWindow detachedVisualisationWindow;
 
@@ -175,7 +205,7 @@ int app_main(int, char**) {
                 recorderState.detachedVisualisation.openRequested = false;
                 recorderState.statusMessage = "Detached visualisation is not supported by the current renderer";
                 recorderState.statusMessageTimer = 4.0f;
-            } else if (!detachedVisualisationWindow.open(recorderState)) {
+            } else if (!detachedVisualisationWindow.open(recorderState, bgfxContext.colourFormat())) {
                 recorderState.statusMessage = "Unable to open detached visualisation window";
                 recorderState.statusMessageTimer = 4.0f;
             }
@@ -184,7 +214,18 @@ int app_main(int, char**) {
         }
 
         if (mainWindowVisible) {
-            const uint32_t packedClear = Renderer::packRgba8(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
+            const bool usedPresentationBackground =
+                uiState.presentationResources != nullptr &&
+                uiState.presentationResources->submitBackground(
+                    Renderer::BgfxContext::kBackgroundViewId,
+                    static_cast<uint16_t>(framebufferWidth),
+                    static_cast<uint16_t>(framebufferHeight),
+                    clearColour[0],
+                    clearColour[1],
+                    clearColour[2]);
+            const uint32_t packedClear = usedPresentationBackground
+                ? Renderer::packRgba8(0.0f, 0.0f, 0.0f, clearColour[3])
+                : Renderer::packRgba8(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
             bgfx::setViewClear(Renderer::BgfxContext::kClearViewId, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, packedClear, 1.0f, 0);
             bgfx::touch(Renderer::BgfxContext::kClearViewId);
             mainWindowContext.renderDrawData();
@@ -209,6 +250,7 @@ int app_main(int, char**) {
         mainWindowContext.makeCurrent();
     }
 
+    presentationResources.shutdown();
     TrackpadGestures::shutdown();
     mainWindowContext.shutdown();
     bgfxContext.shutdown();

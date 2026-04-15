@@ -13,6 +13,7 @@
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
 #include "resyne/ui/toolbar/toolbar.h"
+#include "renderer/presentation_resources.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace ReSyne {
@@ -135,7 +136,8 @@ void Recorder::drawFullWindow(RecorderState& state,
             !state.timeline.trackScrubber,
             !state.timeline.trackScrubber,
             &state.toolState,
-            &state.trackpadInput
+            &state.trackpadInput,
+            state.presentationResources
         };
 
         if (!state.timeline.isScrubberDragging && timelineContext.playbackNormalisedPosition.has_value()) {
@@ -152,9 +154,23 @@ void Recorder::drawFullWindow(RecorderState& state,
         state.timeline.gradientRegionValid = gradientSize.x > 1.0f && gradientSize.y > 1.0f;
 
         const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
+        bool usedHighPrecisionPreview = false;
+        if (state.presentationResources != nullptr) {
+            const ImTextureID textureId = state.presentationResources->updateActiveColourTexture(
+                Renderer::PresentationResources::PreviewSurface::Recorder,
+                isLightMode ? 0.9607843f : currentR,
+                isLightMode ? 0.9607843f : currentG,
+                isLightMode ? 0.9607843f : currentB);
+            if (textureId != ImTextureID_Invalid) {
+                drawList->AddImage(textureId, cursorPos, regionMax);
+                usedHighPrecisionPreview = true;
+            }
+        }
         const ImU32 liveCol = isLightMode ? IM_COL32(245, 245, 245, 255) : ImGui::ColorConvertFloat4ToU32(ImVec4(currentR, currentG, currentB, 1.0f));
         const ImU32 borderCol = isLightMode ? IM_COL32(180, 180, 180, 255) : IM_COL32(60, 60, 60, 255);
-        drawList->AddRectFilled(cursorPos, regionMax, liveCol);
+        if (!usedHighPrecisionPreview) {
+            drawList->AddRectFilled(cursorPos, regionMax, liveCol);
+        }
         drawList->AddRect(cursorPos, regionMax, borderCol, 0.0f, 0, 1.0f);
         ImGui::Dummy(gradientSize);
 

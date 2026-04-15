@@ -18,6 +18,10 @@
 #include "midi_device_manager.h"
 #endif
 
+namespace Renderer {
+class PresentationResources;
+}
+
 namespace UIConstants {
     static constexpr float DEFAULT_SAMPLE_RATE = 44100.0f;
     static constexpr float DEFAULT_SMOOTHING_SPEED = 0.6f;
@@ -62,6 +66,19 @@ struct OSCSettings {
     int receivePort = 7001;
 };
 
+struct PresentationDiagnostics {
+    enum class DisplaySurfacePrecision {
+        Unknown,
+        TenBit,
+        EightBit
+    };
+
+    bool presentationResourcesAvailable = false;
+    bool highPrecisionTexturesAvailable = false;
+    bool backgroundPresentationAvailable = false;
+    DisplaySurfacePrecision displaySurfacePrecision = DisplaySurfacePrecision::Unknown;
+};
+
 struct UIState {
     AudioSettings audioSettings;
     VisualSettings visualSettings;
@@ -81,9 +98,11 @@ struct UIState {
     UpdateState updateState;
     UpdateChecker updateChecker;
     OSCSettings oscSettings;
+    PresentationDiagnostics presentationDiagnostics;
 
     bool oscEnabled = false;
     ReSyne::State resyneState;
+    Renderer::PresentationResources* presentationResources = nullptr;
 
     using View = VisualSettings::View;
 };

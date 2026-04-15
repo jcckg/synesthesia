@@ -18,6 +18,9 @@
 class FFTProcessor;
 class AudioInput;
 class AudioProcessor;
+namespace Renderer {
+class PresentationResources;
+}
 
 namespace ReSyne {
 
@@ -119,6 +122,7 @@ struct RecorderState {
     bool presentationSmoothingEnabled = true;
     bool presentationManualSmoothing = false;
     float presentationSmoothingAmount = 0.6f;
+    Renderer::PresentationResources* presentationResources = nullptr;
 
     std::vector<Timeline::TimelineSample> timelinePreviewCache;
     bool timelinePreviewCacheDirty = true;

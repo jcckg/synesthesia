@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "renderer/presentation_resources.h"
 #include "timeline_labels.h"
 #include "timeline_gradient.h"
 #include "timeline_viewport.h"
@@ -286,14 +287,32 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     drawList->AddRectFilled(gradientMin, gradientMax, gradientBgColour);
     drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f);
 
-    Gradient::drawGradient(drawList,
-                           gradientMin,
-                           gradientMax,
-                           context.samples,
-                           viewStart,
-                           viewEnd,
-                           context.colourSpace,
-                           context.applyGamutMapping);
+    bool usedHighPrecisionGradient = false;
+    if (context.presentationResources != nullptr) {
+        const int rasterWidth = std::max(1, static_cast<int>(std::ceil(size.x)));
+        const ImTextureID textureId = context.presentationResources->updateTimelineTexture(
+            context.samples,
+            viewStart,
+            viewEnd,
+            rasterWidth,
+            context.colourSpace,
+            context.applyGamutMapping);
+        if (textureId != ImTextureID_Invalid) {
+            drawList->AddImage(textureId, gradientMin, gradientMax);
+            usedHighPrecisionGradient = true;
+        }
+    }
+
+    if (!usedHighPrecisionGradient) {
+        Gradient::drawGradient(drawList,
+                               gradientMin,
+                               gradientMax,
+                               context.samples,
+                               viewStart,
+                               viewEnd,
+                               context.colourSpace,
+                               context.applyGamutMapping);
+    }
 
     drawList->AddLine(ImVec2(gradientMin.x, gradientMin.y),
                       ImVec2(gradientMax.x, gradientMin.y),

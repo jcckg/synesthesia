@@ -8,6 +8,7 @@
 
 #include "controls.h"
 #include "device_manager.h"
+#include "renderer/presentation_resources.h"
 #include "resyne/recorder/recorder.h"
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
@@ -187,7 +188,21 @@ void renderReSyneSections(const RenderArgs& args) {
 
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         const ImVec2 squareMax(squarePos.x + squareSize, squarePos.y + squareSize);
-        drawList->AddRectFilled(squarePos, squareMax, ImGui::ColorConvertFloat4ToU32(colourVec));
+        bool usedHighPrecisionPreview = false;
+        if (args.uiState.presentationResources != nullptr) {
+            const ImTextureID textureId = args.uiState.presentationResources->updateActiveColourTexture(
+                Renderer::PresentationResources::PreviewSurface::Sidebar,
+                colourVec.x,
+                colourVec.y,
+                colourVec.z);
+            if (textureId != ImTextureID_Invalid) {
+                drawList->AddImage(textureId, squarePos, squareMax);
+                usedHighPrecisionPreview = true;
+            }
+        }
+        if (!usedHighPrecisionPreview) {
+            drawList->AddRectFilled(squarePos, squareMax, ImGui::ColorConvertFloat4ToU32(colourVec));
+        }
         drawList->AddRect(squarePos, squareMax, borderCol, 0.0f, 0, 1.0f);
         ImGui::Spacing();
     }

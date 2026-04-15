@@ -21,6 +21,7 @@ struct BackendData {
     bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sampler = BGFX_INVALID_HANDLE;
     bgfx::ViewId viewId = 255;
+    bool linearOutput = false;
 };
 
 const bgfx::EmbeddedShader kEmbeddedShaders[] = {
@@ -258,6 +259,23 @@ void destroyManagedTextures() {
     }
 }
 
+float srgbToLinear(const float value) {
+    if (value <= 0.04045f) {
+        return value / 12.92f;
+    }
+
+    return std::pow((value + 0.055f) / 1.055f, 2.4f);
+}
+
+ImU32 linearisePackedColour(const ImU32 packedColour) {
+    const ImVec4 colour = ImGui::ColorConvertU32ToFloat4(packedColour);
+    return ImGui::ColorConvertFloat4ToU32(ImVec4(
+        srgbToLinear(colour.x),
+        srgbToLinear(colour.y),
+        srgbToLinear(colour.z),
+        colour.w));
+}
+
 void invalidateDeviceObjects() {
     BackendData* bd = getBackendData();
     if (bd == nullptr) {
@@ -317,12 +335,13 @@ bool createDeviceObjects() {
 
 } // namespace
 
-bool ImGui_Implbgfx_Init(bgfx::ViewId viewId) {
+bool ImGui_Implbgfx_Init(bgfx::ViewId viewId, const bool linearOutput) {
     ImGuiIO& io = ImGui::GetIO();
     IM_ASSERT(io.BackendRendererUserData == nullptr && "Already initialised an ImGui renderer backend!");
 
     BackendData* backend = IM_NEW(BackendData)();
     backend->viewId = viewId;
+    backend->linearOutput = linearOutput;
     io.BackendRendererUserData = backend;
     io.BackendRendererName = "imgui_impl_bgfx";
     io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_RendererHasTextures;
@@ -419,6 +438,12 @@ void ImGui_Implbgfx_RenderDrawData(ImDrawData* drawData) {
         bgfx::allocTransientIndexBuffer(&indexBuffer, indexCount, sizeof(ImDrawIdx) == 4);
 
         bx::memCopy(vertexBuffer.data, drawList->VtxBuffer.Data, vertexCount * sizeof(ImDrawVert));
+        if (backend->linearOutput) {
+            auto* vertices = reinterpret_cast<ImDrawVert*>(vertexBuffer.data);
+            for (uint32_t vertexIndex = 0; vertexIndex < vertexCount; ++vertexIndex) {
+                vertices[vertexIndex].col = linearisePackedColour(vertices[vertexIndex].col);
+            }
+        }
         bx::memCopy(indexBuffer.data, drawList->IdxBuffer.Data, indexCount * sizeof(ImDrawIdx));
 
         bgfx::Encoder* encoder = bgfx::begin();
@@ -492,5 +517,12 @@ void ImGui_Implbgfx_SetViewId(bgfx::ViewId viewId) {
     BackendData* backend = getBackendData();
     if (backend != nullptr) {
         backend->viewId = viewId;
+    }
+}
+
+void ImGui_Implbgfx_SetLinearOutput(const bool enabled) {
+    BackendData* backend = getBackendData();
+    if (backend != nullptr) {
+        backend->linearOutput = enabled;
     }
 }

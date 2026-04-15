@@ -17,6 +17,7 @@
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "colour/colour_core.h"
+#include "colour/colour_presentation.h"
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "resyne/recorder/import_helpers.h"
@@ -182,9 +183,7 @@ bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
         // Convert Lab → RGB
         float r = 0.0f, g = 0.0f, b = 0.0f;
         ColourCore::LabtoRGB(L, labA, labB, r, g, b, colourSpace, true);
-        r = std::clamp(r, 0.0f, 1.0f);
-        g = std::clamp(g, 0.0f, 1.0f);
-        b = std::clamp(b, 0.0f, 1.0f);
+        ColourPresentation::applyOutputPrecision(r, g, b);
 
         const auto ru = static_cast<uint16_t>(std::clamp(r, 0.0f, 1.0f) * 65535.0f + 0.5f);
         const auto gu = static_cast<uint16_t>(std::clamp(g, 0.0f, 1.0f) * 65535.0f + 0.5f);

@@ -36,6 +36,7 @@ list(APPEND SOURCES
     ${SRC_DIR}/renderer/window.cpp
     ${SRC_DIR}/renderer/font_loader.cpp
     ${SRC_DIR}/renderer/imgui_impl_bgfx.cpp
+    ${SRC_DIR}/renderer/presentation_resources.cpp
 )
 
 if(WIN32)
@@ -121,6 +122,8 @@ elseif(APPLE)
 
     set_property(SOURCE ${SRC_DIR}/renderer/imgui_impl_bgfx.cpp APPEND PROPERTY COMPILE_OPTIONS
         "-Wno-sign-conversion" "-Wno-implicit-float-conversion" "-Wno-double-promotion")
+    set_property(SOURCE ${SRC_DIR}/renderer/presentation_resources.cpp APPEND PROPERTY COMPILE_OPTIONS
+        "-Wno-sign-conversion" "-Wno-implicit-float-conversion" "-Wno-double-promotion" "-Wno-implicit-int-conversion")
     set_property(SOURCE ${SRC_DIR}/renderer/window.cpp APPEND PROPERTY COMPILE_OPTIONS
         "-Wno-nullability-extension" "-Wno-deprecated-declarations" "-Wno-invalid-utf8" "-Wno-undef" "-Wno-double-promotion")
 

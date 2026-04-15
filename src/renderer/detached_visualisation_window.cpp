@@ -2,6 +2,7 @@
 
 #include "audio/input/audio_input.h"
 #include "imgui.h"
+#include "renderer/presentation_resources.h"
 #include "renderer/render_utils.h"
 #include "renderer/styling/platform_styling.h"
 #include "resyne/recorder/recorder.h"
@@ -25,8 +26,10 @@ DetachedVisualisationWindow::~DetachedVisualisationWindow() {
     }
 }
 
-bool DetachedVisualisationWindow::open(ReSyne::RecorderState& recorderState) {
+bool DetachedVisualisationWindow::open(ReSyne::RecorderState& recorderState,
+                                       const bgfx::TextureFormat::Enum colourFormat) {
     recorderState.detachedVisualisation.openRequested = false;
+    colourFormat_ = colourFormat;
 
     if (isOpen()) {
         recorderState.detachedVisualisation.isOpen = true;
@@ -46,7 +49,7 @@ bool DetachedVisualisationWindow::open(ReSyne::RecorderState& recorderState) {
     window_.show();
     window_.realiseForRenderer();
 
-    if (!uiContext_.initialise(window_, kImGuiViewId)) {
+    if (!uiContext_.initialise(window_, kImGuiViewId, colourFormat_ == bgfx::TextureFormat::RGBA16F)) {
         window_.destroy();
         return false;
     }
@@ -124,10 +127,24 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
         static_cast<uint16_t>(size.width),
         static_cast<uint16_t>(size.height)
     );
+    bool usedPresentationBackground = false;
+    if (state.presentationResources != nullptr) {
+        bgfx::setViewFrameBuffer(kBackgroundViewId, frameBuffer_);
+        usedPresentationBackground = state.presentationResources->submitBackground(
+            kBackgroundViewId,
+            static_cast<uint16_t>(size.width),
+            static_cast<uint16_t>(size.height),
+            clearColour[0],
+            clearColour[1],
+            clearColour[2]);
+    }
+    const uint32_t packedClear = usedPresentationBackground
+        ? packRgba8(0.0f, 0.0f, 0.0f, clearColour[3])
+        : packRgba8(clearColour[0], clearColour[1], clearColour[2], clearColour[3]);
     bgfx::setViewClear(
         kClearViewId,
         BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH,
-        packRgba8(clearColour[0], clearColour[1], clearColour[2], clearColour[3]),
+        packedClear,
         1.0f,
         0
     );
@@ -167,7 +184,9 @@ bool DetachedVisualisationWindow::recreateFrameBufferIfNeeded() {
     frameBuffer_ = bgfx::createFrameBuffer(
         nativeWindowHandle_,
         static_cast<uint16_t>(framebufferWidth_),
-        static_cast<uint16_t>(framebufferHeight_)
+        static_cast<uint16_t>(framebufferHeight_),
+        colourFormat_,
+        bgfx::TextureFormat::D24S8
     );
     return bgfx::isValid(frameBuffer_);
 }

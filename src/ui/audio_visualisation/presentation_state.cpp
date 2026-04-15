@@ -9,6 +9,7 @@
 #include "audio/analysis/presentation/sample_sequence.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
 #include "colour/colour_core.h"
+#include "colour/colour_presentation.h"
 #include "resyne/controller/controller.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "resyne/ui/timeline/timeline_gradient.h"
@@ -209,6 +210,7 @@ void syncRecorderPresentationSettings(UIState& state) {
     recorderState.presentationSmoothingEnabled = state.visualSettings.smoothingEnabled;
     recorderState.presentationManualSmoothing = state.visualSettings.manualSmoothing;
     recorderState.presentationSmoothingAmount = state.visualSettings.colourSmoothingSpeed;
+    recorderState.presentationResources = state.presentationResources;
     (void)changed;
 }
 
@@ -360,6 +362,10 @@ void processPlaybackState(AudioInput& audioInput,
         currentDisplayG = playbackColour.y;
         currentDisplayB = playbackColour.z;
     }
+    ColourPresentation::applyOutputPrecision(
+        currentDisplayR,
+        currentDisplayG,
+        currentDisplayB);
     ctx.clearColour[0] = currentDisplayR;
     ctx.clearColour[1] = currentDisplayG;
     ctx.clearColour[2] = currentDisplayB;
@@ -458,6 +464,14 @@ void processLiveAudioState(AudioInput& audioInput,
             ctx,
             &liveFeatures);
     }
+
+    ColourPresentation::applyOutputPrecision(
+        currentDisplayR,
+        currentDisplayG,
+        currentDisplayB);
+    ctx.clearColour[0] = currentDisplayR;
+    ctx.clearColour[1] = currentDisplayG;
+    ctx.clearColour[2] = currentDisplayB;
 
 #ifdef ENABLE_OSC
     auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();

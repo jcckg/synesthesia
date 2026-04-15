@@ -17,7 +17,7 @@ public:
     ImGuiWindowContext(const ImGuiWindowContext&) = delete;
     ImGuiWindowContext& operator=(const ImGuiWindowContext&) = delete;
 
-    bool initialise(const Window& window, bgfx::ViewId viewId);
+    bool initialise(const Window& window, bgfx::ViewId viewId, bool linearOutput = false);
     void shutdown();
 
     void makeCurrent() const;

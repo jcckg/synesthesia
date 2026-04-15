@@ -15,7 +15,7 @@ ImGuiWindowContext::~ImGuiWindowContext() {
     shutdown();
 }
 
-bool ImGuiWindowContext::initialise(const Window& window, const bgfx::ViewId viewId) {
+bool ImGuiWindowContext::initialise(const Window& window, const bgfx::ViewId viewId, const bool linearOutput) {
     shutdown();
 
     IMGUI_CHECKVERSION();
@@ -47,7 +47,7 @@ bool ImGuiWindowContext::initialise(const Window& window, const bgfx::ViewId vie
         return false;
     }
 
-    if (!ImGui_Implbgfx_Init(viewId)) {
+    if (!ImGui_Implbgfx_Init(viewId, linearOutput)) {
         ImGui_ImplGlfw_Shutdown();
         destroyContexts();
         return false;

@@ -11,6 +11,7 @@
 
 #include "audio/analysis/presentation/spectral_presentation.h"
 #include "colour/colour_core.h"
+#include "colour/colour_presentation.h"
 #include "ui/smoothing/smoothing_features.h"
 
 #ifdef ENABLE_OSC
@@ -200,7 +201,7 @@ void HeadlessInterface::displayFrequencyInfo() {
 		currentDominantFreq = colourResult.dominantFrequency;
 		currentR = colourResult.r;
 		currentG = colourResult.g;
-		currentB = colourResult.b;
+        currentB = colourResult.b;
 		currentLoudnessDb = colourResult.loudnessDb;
 
 #ifdef ENABLE_OSC
@@ -244,11 +245,15 @@ void HeadlessInterface::displayFrequencyInfo() {
                 colourSmoother.getCurrentColour(currentR, currentG, currentB);
             }
 
+            ColourPresentation::applyOutputPrecision(currentR, currentG, currentB);
+
             osc.updateColourData(magnitudes, phases, currentDominantFreq, audioInput.getSampleRate(),
                                  currentR, currentG, currentB);
         }
 #endif
 	}
+
+    ColourPresentation::applyOutputPrecision(currentR, currentG, currentB);
 
 	bool needsRedraw = (abs(currentDominantFreq - lastDominantFreq) > 0.1f) ||
 					   (abs(currentR - lastR) > 0.001f) ||

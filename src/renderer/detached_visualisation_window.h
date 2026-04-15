@@ -16,8 +16,9 @@ namespace Renderer {
 
 class DetachedVisualisationWindow {
 public:
-    static constexpr bgfx::ViewId kClearViewId = 2;
-    static constexpr bgfx::ViewId kImGuiViewId = 3;
+    static constexpr bgfx::ViewId kClearViewId = 3;
+    static constexpr bgfx::ViewId kBackgroundViewId = 4;
+    static constexpr bgfx::ViewId kImGuiViewId = 5;
 
     DetachedVisualisationWindow() = default;
     ~DetachedVisualisationWindow();
@@ -25,7 +26,7 @@ public:
     DetachedVisualisationWindow(const DetachedVisualisationWindow&) = delete;
     DetachedVisualisationWindow& operator=(const DetachedVisualisationWindow&) = delete;
 
-    bool open(ReSyne::RecorderState& recorderState);
+    bool open(ReSyne::RecorderState& recorderState, bgfx::TextureFormat::Enum colourFormat);
     void close(ReSyne::RecorderState& recorderState);
     void renderFrame(UIState& state, const AudioInput& audioInput);
 
@@ -41,6 +42,7 @@ private:
     void* nativeWindowHandle_ = nullptr;
     int framebufferWidth_ = 0;
     int framebufferHeight_ = 0;
+    bgfx::TextureFormat::Enum colourFormat_ = bgfx::TextureFormat::BGRA8;
 };
 
 } // namespace Renderer

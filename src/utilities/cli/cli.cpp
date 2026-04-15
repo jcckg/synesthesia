@@ -1,6 +1,7 @@
 #include "cli.h"
 
 #include <algorithm>
+#include <cctype>
 #include <iostream>
 #include <cstring>
 #include <cstdlib>

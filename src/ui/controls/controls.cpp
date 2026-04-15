@@ -66,6 +66,38 @@ SpectralPresentation::Settings buildPlaybackPresentationSettings(const UIState& 
         recorderState.importHighGain);
 }
 
+const char* displaySurfacePrecisionLabel(const PresentationDiagnostics::DisplaySurfacePrecision precision) {
+    switch (precision) {
+        case PresentationDiagnostics::DisplaySurfacePrecision::TenBit:
+            return "10-bit";
+        case PresentationDiagnostics::DisplaySurfacePrecision::EightBit:
+            return "8-bit fallback";
+        case PresentationDiagnostics::DisplaySurfacePrecision::Unknown:
+        default:
+            return "unknown";
+    }
+}
+
+const char* texturePrecisionLabel(const PresentationDiagnostics& diagnostics) {
+    if (!diagnostics.presentationResourcesAvailable) {
+        return "legacy widgets";
+    }
+
+    return diagnostics.highPrecisionTexturesAvailable
+        ? "high precision"
+        : "8-bit fallback";
+}
+
+const char* backgroundPresentationLabel(const PresentationDiagnostics& diagnostics) {
+    if (!diagnostics.presentationResourcesAvailable) {
+        return "legacy";
+    }
+
+    return diagnostics.backgroundPresentationAvailable
+        ? "texture-backed"
+        : "clear-colour fallback";
+}
+
 }
 
 namespace Controls {
@@ -356,6 +388,20 @@ void renderAdvancedSettingsPanel(UIState& state
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("When enabled, colours are compressed into the display gamut.\nDisable to preserve raw values for wide-gamut workflows.");
             }
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Presentation Debug");
+            std::array<char, 192> debugText{};
+            std::snprintf(
+                debugText.data(),
+                debugText.size(),
+                "Textures: %s\nDisplay: %s\nBackground: %s",
+                texturePrecisionLabel(state.presentationDiagnostics),
+                displaySurfacePrecisionLabel(state.presentationDiagnostics.displaySurfacePrecision),
+                backgroundPresentationLabel(state.presentationDiagnostics));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            renderWrappedStatusText(debugText.data());
+            ImGui::PopStyleColor();
 
 			ImGui::Unindent(10);
         }

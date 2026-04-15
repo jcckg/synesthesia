@@ -1,6 +1,7 @@
 #include "renderer/bgfx_context.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,10 @@ namespace {
 
 constexpr uint32_t kTransientVertexBufferLimit = 16u * 1024u * 1024u;
 constexpr uint32_t kTransientIndexBufferLimit = 8u * 1024u * 1024u;
+constexpr std::array kPreferredColourFormats{
+    bgfx::TextureFormat::RGB10A2,
+    bgfx::TextureFormat::BGRA8
+};
 
 bgfx::RendererType::Enum rendererTypeFromString(const std::string& value) {
     std::string lower = value;
@@ -78,28 +83,34 @@ bool BgfxContext::initialise(const Window& window, uint32_t width, uint32_t heig
     bgfx::renderFrame(0);
 #endif
 
-    bgfx::Init init;
-    init.type = rendererTypeFromEnvironment();
-    init.fallback = true;
-    init.resolution.width = std::max(width, 1u);
-    init.resolution.height = std::max(height, 1u);
-    init.resolution.reset = reset_flags_;
-    init.platformData = window.platformData();
-    init.limits.maxTransientVbSize = kTransientVertexBufferLimit;
-    init.limits.maxTransientIbSize = kTransientIndexBufferLimit;
+    for (const auto colourFormat : kPreferredColourFormats) {
+        bgfx::Init init;
+        init.type = rendererTypeFromEnvironment();
+        init.fallback = true;
+        init.resolution.width = std::max(width, 1u);
+        init.resolution.height = std::max(height, 1u);
+        init.resolution.reset = reset_flags_;
+        init.resolution.formatColor = colourFormat;
+        init.platformData = window.platformData();
+        init.limits.maxTransientVbSize = kTransientVertexBufferLimit;
+        init.limits.maxTransientIbSize = kTransientIndexBufferLimit;
 
-    if (!bgfx::init(init)) {
-        return false;
+        if (!bgfx::init(init)) {
+            continue;
+        }
+
+        if (bgfx::getRendererType() == bgfx::RendererType::Noop) {
+            bgfx::shutdown();
+            continue;
+        }
+
+        colour_format_ = colourFormat;
+        initialised_ = true;
+        setViewRects(static_cast<uint16_t>(std::max(width, 1u)), static_cast<uint16_t>(std::max(height, 1u)));
+        return true;
     }
 
-    if (bgfx::getRendererType() == bgfx::RendererType::Noop) {
-        bgfx::shutdown();
-        return false;
-    }
-
-    initialised_ = true;
-    setViewRects(static_cast<uint16_t>(std::max(width, 1u)), static_cast<uint16_t>(std::max(height, 1u)));
-    return true;
+    return false;
 }
 
 void BgfxContext::shutdown() {
@@ -116,7 +127,7 @@ void BgfxContext::reset(uint32_t width, uint32_t height) {
         return;
     }
 
-    bgfx::reset(std::max(width, 1u), std::max(height, 1u), reset_flags_);
+    bgfx::reset(std::max(width, 1u), std::max(height, 1u), reset_flags_, colour_format_);
 }
 
 void BgfxContext::setViewRects(uint16_t width, uint16_t height) const {
@@ -125,6 +136,7 @@ void BgfxContext::setViewRects(uint16_t width, uint16_t height) const {
     }
 
     bgfx::setViewRect(kClearViewId, 0, 0, width, height);
+    bgfx::setViewRect(kBackgroundViewId, 0, 0, width, height);
     bgfx::setViewRect(kImGuiViewId, 0, 0, width, height);
 }
 
@@ -147,6 +159,14 @@ bool BgfxContext::supportsMultipleWindows() const {
 
     const bgfx::Caps* caps = bgfx::getCaps();
     return caps != nullptr && (caps->supported & BGFX_CAPS_SWAP_CHAIN) != 0;
+}
+
+bgfx::TextureFormat::Enum BgfxContext::colourFormat() const {
+    return colour_format_;
+}
+
+bool BgfxContext::usesLinearPresentation() const {
+    return colour_format_ == bgfx::TextureFormat::RGBA16F;
 }
 
 } // namespace Renderer

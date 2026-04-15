@@ -8,6 +8,10 @@
 #include "resyne/ui/toolbar/tool_state.h"
 #include "colour/colour_core.h"
 
+namespace Renderer {
+class PresentationResources;
+}
+
 enum class TimelineScrubBehaviour {
     None,
     Click,
@@ -69,6 +73,7 @@ struct RenderContext {
     bool allowTrackpadPan = false;
     const UI::Utilities::ToolState* toolState = nullptr;
     const TrackpadGestureInput* trackpadInput = nullptr;
+    Renderer::PresentationResources* presentationResources = nullptr;
 };
 
 struct RenderResult {

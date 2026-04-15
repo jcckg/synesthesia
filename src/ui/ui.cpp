@@ -12,6 +12,7 @@
 
 #include "audio_input.h"
 #include "controls.h"
+#include "colour/colour_presentation.h"
 #include "colour/colour_core.h"
 #include "fft_processor.h"
 #include "smoothing.h"
@@ -348,7 +349,18 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		currentDisplayR = clear_colour[0];
 		currentDisplayG = clear_colour[1];
 		currentDisplayB = clear_colour[2];
+        ColourPresentation::applyOutputPrecision(
+            currentDisplayR,
+            currentDisplayG,
+            currentDisplayB);
+        clear_colour[0] = currentDisplayR;
+        clear_colour[1] = currentDisplayG;
+        clear_colour[2] = currentDisplayB;
 	}
+
+    state.resyneState.displayColour[0] = currentDisplayR;
+    state.resyneState.displayColour[1] = currentDisplayG;
+    state.resyneState.displayColour[2] = currentDisplayB;
 
 	if (state.visibility.showUI) {
 		ImGuiStyle& style = ImGui::GetStyle();
