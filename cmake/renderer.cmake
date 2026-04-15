@@ -191,6 +191,7 @@ elseif(WIN32)
         vendor_lodepng
         vendor_oscpack
         vendor_imgui_backends
+        dwmapi
         windowsapp
     )
 

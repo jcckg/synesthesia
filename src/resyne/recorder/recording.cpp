@@ -1,5 +1,7 @@
 #include "resyne/recorder/recorder.h"
 
+#include <algorithm>
+
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/processing/audio_processor.h"
 #include "constants.h"

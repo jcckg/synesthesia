@@ -7,6 +7,66 @@ endif()
 
 include(cmake/vendor.cmake)
 
+function(resolve_synesthesia_bgfx_config definitions_var)
+    set(bgfx_renderer_definitions "")
+
+    # bgfx enables several backends per platform by default. Synesthesia pins
+    # a single renderer per platform so local and CI builds use the same code path.
+    if(APPLE)
+        list(APPEND bgfx_renderer_definitions
+            BGFX_CONFIG_RENDERER_DIRECT3D11=0
+            BGFX_CONFIG_RENDERER_DIRECT3D12=0
+            BGFX_CONFIG_RENDERER_METAL=1
+            BGFX_CONFIG_RENDERER_OPENGL=0
+            BGFX_CONFIG_RENDERER_OPENGLES=0
+            BGFX_CONFIG_RENDERER_VULKAN=0
+            BGFX_CONFIG_RENDERER_WEBGPU=0
+        )
+    elseif(WIN32)
+        list(APPEND bgfx_renderer_definitions
+            BGFX_CONFIG_RENDERER_DIRECT3D11=0
+            BGFX_CONFIG_RENDERER_DIRECT3D12=1
+            BGFX_CONFIG_RENDERER_METAL=0
+            BGFX_CONFIG_RENDERER_OPENGL=0
+            BGFX_CONFIG_RENDERER_OPENGLES=0
+            BGFX_CONFIG_RENDERER_VULKAN=0
+            BGFX_CONFIG_RENDERER_WEBGPU=0
+        )
+    elseif(UNIX)
+        list(APPEND bgfx_renderer_definitions
+            BGFX_CONFIG_RENDERER_DIRECT3D11=0
+            BGFX_CONFIG_RENDERER_DIRECT3D12=0
+            BGFX_CONFIG_RENDERER_METAL=0
+            BGFX_CONFIG_RENDERER_OPENGL=0
+            BGFX_CONFIG_RENDERER_OPENGLES=0
+            BGFX_CONFIG_RENDERER_VULKAN=1
+            BGFX_CONFIG_RENDERER_WEBGPU=0
+        )
+    endif()
+
+    set(${definitions_var} "${bgfx_renderer_definitions}" PARENT_SCOPE)
+endfunction()
+
+function(configure_synesthesia_bgfx_target)
+    if(NOT TARGET bgfx)
+        return()
+    endif()
+
+    resolve_synesthesia_bgfx_config(bgfx_renderer_definitions)
+
+    if(APPLE)
+        message(STATUS "Configuring bgfx backends for macOS: Metal")
+    elseif(WIN32)
+        message(STATUS "Configuring bgfx backends for Windows: Direct3D 12")
+    elseif(UNIX)
+        message(STATUS "Configuring bgfx backends for Linux: Vulkan")
+    endif()
+
+    if(bgfx_renderer_definitions)
+        target_compile_definitions(bgfx PRIVATE ${bgfx_renderer_definitions})
+    endif()
+endfunction()
+
 if(EXISTS "${GLFW_DIR}/CMakeLists.txt")
     message(STATUS "Using vendor GLFW from ${GLFW_DIR}")
     add_vendor_subdirectory(${GLFW_DIR} glfw)
@@ -60,6 +120,7 @@ if(EXISTS "${BGFX_CMAKE_DIR}/CMakeLists.txt")
     set(BGFX_INSTALL OFF CACHE BOOL "Install bgfx targets." FORCE)
     set(BGFX_CUSTOM_TARGETS OFF CACHE BOOL "Include bgfx convenience targets." FORCE)
     add_vendor_subdirectory(${BGFX_CMAKE_DIR} bgfx)
+    configure_synesthesia_bgfx_target()
     include(${BGFX_CMAKE_DIR}/cmake/bgfxToolUtils.cmake)
 else()
     message(FATAL_ERROR "bgfx.cmake not found at ${BGFX_CMAKE_DIR}. Initialise submodules before configuring.")

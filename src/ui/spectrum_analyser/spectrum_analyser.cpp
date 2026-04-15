@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numeric>
+#include <string>
 
 namespace {
 constexpr float SPECTRUM_INTENSITY_CLAMP = 0.7f;

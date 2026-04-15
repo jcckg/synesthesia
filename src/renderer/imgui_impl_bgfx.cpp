@@ -1,6 +1,7 @@
 #include "renderer/imgui_impl_bgfx.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <limits>
