@@ -93,6 +93,8 @@ set(SOURCES
     ${SRC_DIR}/renderer/detached_visualisation_window.cpp
     ${SRC_DIR}/utilities/cli/batch_exporter.cpp
     ${SRC_DIR}/utilities/cli/misc/misc_commands.cpp
+    ${SRC_DIR}/utilities/cli/misc/presentation_export_utils.cpp
+    ${SRC_DIR}/utilities/cli/misc/gltf_gradient_command.cpp
     ${SRC_DIR}/utilities/cli/misc/vector_gradient_command.cpp
 )
 
@@ -129,6 +131,7 @@ function(configure_include_directories)
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/stb
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/portable-file-dialogs
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lodepng
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinygltf
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/dr_libs
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/json/include

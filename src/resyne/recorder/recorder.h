@@ -55,7 +55,7 @@ struct RecorderState {
     bool shouldOpenLoadDialog = false;
     RecorderExportFormat exportFormat = RecorderExportFormat::WAV;
     AudioMetadata metadata;
-    static constexpr size_t MAX_SAMPLES = 100000;
+    static constexpr size_t MAX_RECORDING_SAMPLES = 100000;
     float fallbackSampleRate = 0.0f;
     int fallbackFftSize = 0;
     int fallbackHopSize = 0;

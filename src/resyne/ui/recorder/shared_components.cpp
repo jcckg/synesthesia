@@ -178,27 +178,15 @@ Timeline::TimelineSample buildTimelineSampleFromXYZ(const double timestamp,
     return output;
 }
 
-Timeline::TimelineSample buildTimelineSampleFromRGB(const double timestamp,
-                                                    const float r,
-                                                    const float g,
-                                                    const float b,
-                                                    const RecorderColourCache::CacheSettings& settings) {
-    Timeline::TimelineSample output{};
-    output.timestamp = timestamp;
-    output.colour = ImVec4(
-        std::clamp(r, 0.0f, 1.0f),
-        std::clamp(g, 0.0f, 1.0f),
-        std::clamp(b, 0.0f, 1.0f),
-        1.0f);
-    ColourCore::RGBtoLab(
-        output.colour.x,
-        output.colour.y,
-        output.colour.z,
-        output.labL,
-        output.labA,
-        output.labB,
-        settings.colourSpace);
-    return output;
+void timelineSampleToOklab(const Timeline::TimelineSample& sample,
+                           float& outL,
+                           float& outA,
+                           float& outB) {
+    float X = 0.0f;
+    float Y = 0.0f;
+    float Z = 0.0f;
+    ColourCore::LabtoXYZ(sample.labL, sample.labA, sample.labB, X, Y, Z);
+    ColourCore::XYZtoOklab(X, Y, Z, outL, outA, outB);
 }
 
 void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
@@ -211,8 +199,35 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
 
     SpringSmoother smoother(8.0f, 1.0f, 0.3f);
     smoother.setSmoothingAmount(settings.smoothingAmount);
+    const auto presentationSettings = buildPresentationSettings(settings);
     if (settings.manualSmoothing) {
-        smoother.reset(previewData.front().colour.x, previewData.front().colour.y, previewData.front().colour.z);
+        if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
+            const size_t initialIndex = sampledIndices.front();
+            const auto& initialSample = sourceSamples[initialIndex];
+            const AudioColourSample* initialPreviousSample =
+                initialIndex > 0 ? &sourceSamples[initialIndex - 1] : nullptr;
+            const auto initialPreparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+                initialSample,
+                presentationSettings,
+                initialPreviousSample);
+            float initialL = 0.0f;
+            float initialA = 0.0f;
+            float initialB = 0.0f;
+            ColourCore::XYZtoOklab(
+                initialPreparedFrame.colourResult.X,
+                initialPreparedFrame.colourResult.Y,
+                initialPreparedFrame.colourResult.Z,
+                initialL,
+                initialA,
+                initialB);
+            smoother.resetOklab(initialL, initialA, initialB);
+        } else {
+            float initialL = 0.0f;
+            float initialA = 0.0f;
+            float initialB = 0.0f;
+            timelineSampleToOklab(previewData.front(), initialL, initialA, initialB);
+            smoother.resetOklab(initialL, initialA, initialB);
+        }
 
         for (size_t index = 1; index < previewData.size(); ++index) {
             const double deltaSeconds = previewData[index].timestamp - previewData[index - 1].timestamp;
@@ -220,21 +235,48 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
                 ? static_cast<float>(deltaSeconds)
                 : (1.0f / 60.0f);
 
-            smoother.setTargetColour(
-                previewData[index].colour.x,
-                previewData[index].colour.y,
-                previewData[index].colour.z);
+            if (index < sampledIndices.size() && sampledIndices[index] < sourceSamples.size()) {
+                const size_t sampleIndex = sampledIndices[index];
+                const auto& currentSample = sourceSamples[sampleIndex];
+                const AudioColourSample* previousSample =
+                    sampleIndex > 0 ? &sourceSamples[sampleIndex - 1] : nullptr;
+                const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
+                    currentSample,
+                    presentationSettings,
+                    previousSample);
+                float targetL = 0.0f;
+                float targetA = 0.0f;
+                float targetB = 0.0f;
+                ColourCore::XYZtoOklab(
+                    preparedFrame.colourResult.X,
+                    preparedFrame.colourResult.Y,
+                    preparedFrame.colourResult.Z,
+                    targetL,
+                    targetA,
+                    targetB);
+                smoother.setTargetOklab(targetL, targetA, targetB);
+            } else {
+                float targetL = 0.0f;
+                float targetA = 0.0f;
+                float targetB = 0.0f;
+                timelineSampleToOklab(previewData[index], targetL, targetA, targetB);
+                smoother.setTargetOklab(targetL, targetA, targetB);
+            }
             smoother.update(deltaTime * 1.2f);
 
-            float smoothedR = 0.0f;
-            float smoothedG = 0.0f;
+            float smoothedL = 0.0f;
+            float smoothedA = 0.0f;
             float smoothedB = 0.0f;
-            smoother.getCurrentColour(smoothedR, smoothedG, smoothedB);
-            previewData[index] = buildTimelineSampleFromRGB(
+            smoother.getCurrentOklab(smoothedL, smoothedA, smoothedB);
+            float smoothedX = 0.0f;
+            float smoothedY = 0.0f;
+            float smoothedZ = 0.0f;
+            ColourCore::OklabtoXYZ(smoothedL, smoothedA, smoothedB, smoothedX, smoothedY, smoothedZ);
+            previewData[index] = buildTimelineSampleFromXYZ(
                 previewData[index].timestamp,
-                smoothedR,
-                smoothedG,
-                smoothedB,
+                smoothedX,
+                smoothedY,
+                smoothedZ,
                 settings);
         }
 
@@ -265,7 +307,6 @@ void applyPreviewSmoothing(std::vector<Timeline::TimelineSample>& previewData,
         smoother.reset(previewData.front().colour.x, previewData.front().colour.y, previewData.front().colour.z);
     }
 
-    const auto presentationSettings = buildPresentationSettings(settings);
     ::UI::Smoothing::MagnitudeHistory fluxHistory;
     if (!sampledIndices.empty() && sampledIndices.front() < sourceSamples.size()) {
         const size_t initialIndex = sampledIndices.front();

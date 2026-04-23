@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <span>
 
@@ -122,11 +123,17 @@ bool importAudioFile(
     const PreviewCallback& onPreview,
     const bool enableSmoothing,
     const bool enableMelWeighting,
-    std::vector<float>* playbackAudio
+    std::vector<float>* playbackAudio,
+    const std::size_t maxAnalysisFrames
 ) {
     (void)colourSpace;
     (void)applyGamutMapping;
     if (onProgress) onProgress(0.1f);
+
+    if (maxAnalysisFrames == 0) {
+        errorMessage = "analysis frame limit must be greater than zero";
+        return false;
+    }
 
     AudioDecoding::DecodedAudio decoded;
     if (!AudioDecoding::decodeFile(filepath, decoded, errorMessage)) {
@@ -170,12 +177,14 @@ bool importAudioFile(
     }
 
     samples.clear();
-    samples.reserve(decoded.channelSamples[0].size() / static_cast<size_t>(resolvedHopSize) + 1);
+    const size_t estimatedFrames = decoded.channelSamples[0].size() / static_cast<size_t>(resolvedHopSize) + 1;
+    samples.reserve(std::min(estimatedFrames, maxAnalysisFrames));
 
     const float sampleRate = static_cast<float>(decoded.sampleRate);
     const size_t chunkSize = static_cast<size_t>(resolvedHopSize) * 8;
     size_t offset = 0;
     uint64_t frameIndex = 0;
+    bool hitFrameLimit = false;
 
     auto consumeFrames = [&](std::vector<std::vector<FFTProcessor::FFTFrame>>&& channelFrames) {
         if (channelFrames.empty() || channelFrames[0].empty()) {
@@ -191,22 +200,26 @@ bool importAudioFile(
             return;
         }
 
-	        for (size_t f = 0; f < frameCount; ++f) {
-	            AudioColourSample sample;
-	            sample.magnitudes.resize(numChannels);
-	            sample.phases.resize(numChannels);
-	            sample.channels = numChannels;
+        for (size_t f = 0; f < frameCount; ++f) {
+            if (samples.size() >= maxAnalysisFrames) {
+                hitFrameLimit = true;
+                return;
+            }
+            AudioColourSample sample;
+            sample.magnitudes.resize(numChannels);
+            sample.phases.resize(numChannels);
+            sample.channels = numChannels;
 
             bool channelsAligned = true;
-	            for (uint32_t ch = 0; ch < numChannels; ++ch) {
-                    if (channelFrames[ch][f].frameCounter != channelFrames[0][f].frameCounter) {
-                        channelsAligned = false;
-                        break;
-                    }
-	                sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
-	                sample.phases[ch] = std::move(channelFrames[ch][f].phases);
-	                if (ch == 0) {
-	                    sample.sampleRate = channelFrames[ch][f].sampleRate;
+            for (uint32_t ch = 0; ch < numChannels; ++ch) {
+                if (channelFrames[ch][f].frameCounter != channelFrames[0][f].frameCounter) {
+                    channelsAligned = false;
+                    break;
+                }
+                sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
+                sample.phases[ch] = std::move(channelFrames[ch][f].phases);
+                if (ch == 0) {
+                    sample.sampleRate = channelFrames[ch][f].sampleRate;
                     sample.loudnessLUFS = channelFrames[ch][f].loudnessLUFS;
                     sample.splDb = channelFrames[ch][f].loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
                 }
@@ -220,14 +233,10 @@ bool importAudioFile(
                                static_cast<double>(decoded.sampleRate);
             samples.push_back(std::move(sample));
             ++frameIndex;
-            if (samples.size() >= RecorderState::MAX_SAMPLES) {
-                break;
-            }
         }
     };
 
-    while (offset < decoded.channelSamples[0].size() &&
-           samples.size() < RecorderState::MAX_SAMPLES) {
+    while (offset < decoded.channelSamples[0].size()) {
         size_t chunk = std::min(chunkSize, decoded.channelSamples[0].size() - offset);
 
         std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
@@ -240,6 +249,9 @@ bool importAudioFile(
 
         offset += chunk;
         consumeFrames(std::move(channelFrames));
+        if (hitFrameLimit) {
+            break;
+        }
 
         const float processProgress = static_cast<float>(offset) / static_cast<float>(decoded.channelSamples[0].size());
         if (onProgress) onProgress(0.2f + (processProgress * 0.6f));
@@ -250,12 +262,18 @@ bool importAudioFile(
         }
     }
 
-    if (samples.size() < RecorderState::MAX_SAMPLES) {
-        std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
-        for (uint32_t ch = 0; ch < numChannels; ++ch) {
-            channelFrames[ch] = processors[ch]->getBufferedFrames();
-        }
-        consumeFrames(std::move(channelFrames));
+    std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
+    for (uint32_t ch = 0; ch < numChannels; ++ch) {
+        channelFrames[ch] = processors[ch]->getBufferedFrames();
+    }
+    consumeFrames(std::move(channelFrames));
+    if (hitFrameLimit) {
+        samples.clear();
+        metadata = AudioMetadata{};
+        errorMessage =
+            "analysis frame limit exceeded (" + std::to_string(maxAnalysisFrames) + "); "
+            "split the audio file or raise the limit";
+        return false;
     }
 
     if (samples.empty()) {

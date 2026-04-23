@@ -5,11 +5,22 @@
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
+#include <optional>
 #include <string>
 
 #include <bgfx/platform.h>
 
 #include "renderer/window.h"
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 namespace Renderer {
 
@@ -20,6 +31,63 @@ constexpr uint32_t kTransientIndexBufferLimit = 8u * 1024u * 1024u;
 constexpr std::array kPreferredColourFormats{
     bgfx::TextureFormat::RGB10A2,
     bgfx::TextureFormat::BGRA8
+};
+
+class BgfxStartupCallback final : public bgfx::CallbackI {
+public:
+    void fatal(const char* filePath, uint16_t line, bgfx::Fatal::Enum code, const char* message) override {
+        std::fprintf(stderr,
+                     "[bgfx] FATAL 0x%08x at %s:%u: %s\n",
+                     static_cast<unsigned int>(code),
+                     filePath != nullptr ? filePath : "<unknown>",
+                     static_cast<unsigned int>(line),
+                     message != nullptr ? message : "<no message>");
+        std::fflush(stderr);
+#if defined(_WIN32)
+        MessageBoxA(nullptr,
+                    message != nullptr ? message : "Unknown bgfx fatal error",
+                    "Synesthesia renderer failed to start",
+                    MB_OK | MB_ICONERROR);
+#endif
+        std::abort();
+    }
+
+    void traceVargs(const char* filePath, uint16_t line, const char* format, va_list argList) override {
+        std::fprintf(stderr, "[bgfx] %s:%u: ", filePath != nullptr ? filePath : "<unknown>", static_cast<unsigned int>(line));
+        std::vfprintf(stderr, format, argList);
+    }
+
+    void profilerBegin(const char*, uint32_t, const char*, uint16_t) override {
+    }
+
+    void profilerBeginLiteral(const char*, uint32_t, const char*, uint16_t) override {
+    }
+
+    void profilerEnd() override {
+    }
+
+    uint32_t cacheReadSize(uint64_t) override {
+        return 0;
+    }
+
+    bool cacheRead(uint64_t, void*, uint32_t) override {
+        return false;
+    }
+
+    void cacheWrite(uint64_t, const void*, uint32_t) override {
+    }
+
+    void screenShot(const char*, uint32_t, uint32_t, uint32_t, const void*, uint32_t, bool) override {
+    }
+
+    void captureBegin(uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum, bool) override {
+    }
+
+    void captureEnd() override {
+    }
+
+    void captureFrame(const void*, uint32_t) override {
+    }
 };
 
 bgfx::RendererType::Enum rendererTypeFromString(const std::string& value) {
@@ -50,19 +118,33 @@ bgfx::RendererType::Enum rendererTypeFromString(const std::string& value) {
     return bgfx::RendererType::Noop;
 }
 
-bgfx::RendererType::Enum rendererTypeFromEnvironment() {
+std::optional<bgfx::RendererType::Enum> rendererTypeFromEnvironment() {
     const char* env = std::getenv("SYN_BGFX_RENDERER");
     if (env == nullptr || env[0] == '\0') {
-        return bgfx::RendererType::Count;
+        return std::nullopt;
     }
 
     const bgfx::RendererType::Enum type = rendererTypeFromString(env);
     if (type == bgfx::RendererType::Noop) {
         std::fprintf(stderr, "[bgfx] Ignoring unknown SYN_BGFX_RENDERER='%s'\n", env);
-        return bgfx::RendererType::Count;
+        return std::nullopt;
     }
 
     return type;
+}
+
+bgfx::RendererType::Enum preferredRendererType() {
+    if (const auto rendererType = rendererTypeFromEnvironment()) {
+        return *rendererType;
+    }
+
+#if defined(_WIN32)
+    // bgfx's generic Windows auto-selection ranks D3D11 ahead of D3D12.
+    // Prefer D3D12 for this app and let bgfx fall back to D3D11 if needed.
+    return bgfx::RendererType::Direct3D12;
+#else
+    return bgfx::RendererType::Count;
+#endif
 }
 
 } // namespace
@@ -85,8 +167,10 @@ bool BgfxContext::initialise(const Window& window, uint32_t width, uint32_t heig
 
     for (const auto colourFormat : kPreferredColourFormats) {
         bgfx::Init init;
-        init.type = rendererTypeFromEnvironment();
+        static BgfxStartupCallback callback;
+        init.type = preferredRendererType();
         init.fallback = true;
+        init.callback = &callback;
         init.resolution.width = std::max(width, 1u);
         init.resolution.height = std::max(height, 1u);
         init.resolution.reset = reset_flags_;

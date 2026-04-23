@@ -67,6 +67,14 @@ add_vendor_library(
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/lodepng
 )
 
+add_vendor_library(
+    TARGET vendor_tinygltf
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinygltf/tiny_gltf.cc
+    INCLUDE_DIRS
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinygltf
+)
+
 if(WIN32)
     set(OSCPACK_PLATFORM_SOURCES
         ${OSCPACK_DIR}/ip/win32/NetworkingUtils.cpp

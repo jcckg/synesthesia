@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 #include <functional>
@@ -17,6 +18,8 @@ using StatusCallback = std::function<void(const std::string&)>;
 
 using PreviewCallback = std::function<void(const std::vector<AudioColourSample>&)>;
 
+inline constexpr std::size_t DEFAULT_MAX_ANALYSIS_FRAMES = 100000;
+
 bool importAudioFile(
     const std::string& filepath,
     ColourCore::ColourSpace colourSpace,
@@ -32,7 +35,8 @@ bool importAudioFile(
     const PreviewCallback& onPreview = nullptr,
     bool enableSmoothing = true,
     bool enableMelWeighting = true,
-    std::vector<float>* playbackAudio = nullptr
+    std::vector<float>* playbackAudio = nullptr,
+    std::size_t maxAnalysisFrames = DEFAULT_MAX_ANALYSIS_FRAMES
 );
 
 bool importRsynFile(

@@ -5,6 +5,7 @@
 #include <iostream>
 #include <string>
 
+#include "misc/gltf_gradient_command.h"
 #include "misc/vector_gradient_command.h"
 
 namespace CLI {
@@ -22,6 +23,9 @@ std::string toLower(std::string value) {
 
 int MiscCommands::run(const Arguments& args) {
     const std::string command = toLower(args.miscCommand);
+    if (command == "gltf-gradient") {
+        return Misc::runGltfGradientCommand(args);
+    }
     if (command == "vector-gradient") {
         return Misc::runVectorGradientCommand(args);
     }

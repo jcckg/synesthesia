@@ -58,11 +58,6 @@ void updateFluxHistory(const std::vector<float>& visualiserMagnitudes,
 
     history.previousMagnitudes = visualiserMagnitudes;
 
-    if (fluxComputed) {
-        history.fluxHistory[history.fluxHistoryIndex] = spectralFlux;
-        history.fluxHistoryIndex = (history.fluxHistoryIndex + 1) % history.fluxHistory.size();
-    }
-
     float maxFlux = 0.0f;
     for (const float flux : history.fluxHistory) {
         maxFlux = std::max(maxFlux, flux);
@@ -74,6 +69,11 @@ void updateFluxHistory(const std::vector<float>& visualiserMagnitudes,
         maxFlux > 0.0f &&
         spectralFlux > maxFlux * 1.3f &&
         spectralFlux > 0.001f;
+
+    if (fluxComputed) {
+        history.fluxHistory[history.fluxHistoryIndex] = spectralFlux;
+        history.fluxHistoryIndex = (history.fluxHistoryIndex + 1) % history.fluxHistory.size();
+    }
 }
 
 }

@@ -12,10 +12,11 @@ public:
                    int width = 0,
                    int height = 0,
                    const std::string& gradientFormat = "png",
-                   bool writeLabSidecar = false,
+                   bool writeConditionSidecar = false,
                    bool trueSize = false,
                    int numWorkers = 1,
-                   int analysisHop = 1024);
+                   int analysisHop = 1024,
+                   bool disableSmoothing = false);
 };
 
 }

@@ -124,7 +124,7 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
 
     for (size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         const auto& frame = channelFrames[0][frameIndex];
-        if (state.samples.size() >= RecorderState::MAX_SAMPLES) {
+        if (state.samples.size() >= RecorderState::MAX_RECORDING_SAMPLES) {
             state.isRecording = false;
             return;
         }

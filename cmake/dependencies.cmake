@@ -24,7 +24,7 @@ function(resolve_synesthesia_bgfx_config definitions_var)
         )
     elseif(WIN32)
         list(APPEND bgfx_renderer_definitions
-            BGFX_CONFIG_RENDERER_DIRECT3D11=0
+            BGFX_CONFIG_RENDERER_DIRECT3D11=1
             BGFX_CONFIG_RENDERER_DIRECT3D12=1
             BGFX_CONFIG_RENDERER_METAL=0
             BGFX_CONFIG_RENDERER_OPENGL=0
@@ -57,7 +57,7 @@ function(configure_synesthesia_bgfx_target)
     if(APPLE)
         message(STATUS "Configuring bgfx backends for macOS: Metal")
     elseif(WIN32)
-        message(STATUS "Configuring bgfx backends for Windows: Direct3D 12")
+        message(STATUS "Configuring bgfx backends for Windows: prefer Direct3D 12 with Direct3D 11 fallback")
     elseif(UNIX)
         message(STATUS "Configuring bgfx backends for Linux: Vulkan")
     endif()

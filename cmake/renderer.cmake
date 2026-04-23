@@ -169,6 +169,7 @@ if(APPLE)
         vendor_implot
         vendor_kissfft
         vendor_lodepng
+        vendor_tinygltf
         vendor_oscpack
         vendor_imgui_backends
         m
@@ -189,6 +190,7 @@ elseif(WIN32)
         vendor_implot
         vendor_kissfft
         vendor_lodepng
+        vendor_tinygltf
         vendor_oscpack
         vendor_imgui_backends
         dwmapi
@@ -211,6 +213,7 @@ else()
         vendor_implot
         vendor_kissfft
         vendor_lodepng
+        vendor_tinygltf
         vendor_oscpack
         vendor_imgui_backends
         dl

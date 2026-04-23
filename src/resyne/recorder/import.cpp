@@ -35,16 +35,9 @@ std::string extractFilename(const std::string& path) {
     return name.empty() ? path : name;
 }
 
-void clampSamplesToLimit(std::vector<AudioColourSample>& samples) {
-    if (samples.size() > RecorderState::MAX_SAMPLES) {
-        samples.resize(RecorderState::MAX_SAMPLES);
-    }
-}
-
 void applyImportedSequence(RecorderState& state,
                            std::vector<AudioColourSample>&& samples,
                            AudioMetadata metadata) {
-    clampSamplesToLimit(samples);
     if (metadata.numFrames == 0 && !samples.empty()) {
         metadata.numFrames = samples.size();
     }
@@ -110,7 +103,8 @@ bool Recorder::importFromFile(RecorderState& state,
             nullptr,
             true,
             true,
-            &playbackAudio
+            &playbackAudio,
+            RecorderState::MAX_RECORDING_SAMPLES
         );
 	} else if (extension == ".tiff" || extension == ".tif") {
 		state.loadingProgress = 0.05f;
@@ -217,7 +211,8 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             updatePreview,
             true,
             true,
-            &playbackAudio
+            &playbackAudio,
+            RecorderState::MAX_RECORDING_SAMPLES
         );
 	} else if (extension == ".tiff" || extension == ".tif") {
 		setStatus("Loading TIFF file...");
@@ -275,7 +270,6 @@ void Recorder::importFromFileThreaded(RecorderState& state,
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         if (success) {
-            clampSamplesToLimit(samples);
             if (metadata.numFrames == 0 && !samples.empty()) {
                 metadata.numFrames = samples.size();
             }
