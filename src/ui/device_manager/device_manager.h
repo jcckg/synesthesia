@@ -2,6 +2,7 @@
 
 #include "audio_input.h"
 #include "audio_output.h"
+#include <array>
 #include <vector>
 #include <string>
 
@@ -45,10 +46,13 @@ public:
 
     static void renderDeviceSelection(DeviceState& deviceState,
                                      AudioInput& audioInput,
-                                     const std::vector<AudioInput::DeviceInfo>& devices);
+                                     const std::vector<AudioInput::DeviceInfo>& devices,
+                                     const AudioInputLevelMonitor& inputLevelMonitor);
 
     static void renderOutputDeviceSelection(DeviceState& deviceState,
-                                           const std::vector<AudioOutput::DeviceInfo>& outputDevices);
+                                           const std::vector<AudioOutput::DeviceInfo>& outputDevices,
+                                           bool outputDeviceActive,
+                                           const std::array<float, 2>& outputLevels);
 
     static void renderChannelSelection(DeviceState& deviceState,
                                       AudioInput& audioInput,

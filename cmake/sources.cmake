@@ -42,6 +42,7 @@ set(SOURCES
     ${SRC_DIR}/ui/handlers/import_handler.cpp
     ${SRC_DIR}/ui/controls/controls.cpp
     ${SRC_DIR}/ui/device_manager/device_manager.cpp
+    ${SRC_DIR}/ui/device_manager/device_selector.cpp
     ${SRC_DIR}/ui/updating/update.cpp
     ${SRC_DIR}/ui/smoothing/smoothing.cpp
     ${SRC_DIR}/ui/smoothing/smoothing_features.cpp

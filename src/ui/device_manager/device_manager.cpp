@@ -1,8 +1,57 @@
 #include "device_manager.h"
+#include "device_selector.h"
 #include <imgui.h>
 #include <portaudio.h>
 #include <algorithm>
+#include <array>
 #include <string>
+
+namespace {
+
+std::vector<DeviceSelector::Item> buildSelectorItems(const std::vector<const char*>& names,
+                                                     const int selectedIndex,
+                                                     const bool selectedActive,
+                                                     const std::array<float, 2>& selectedLevels) {
+    std::vector<DeviceSelector::Item> items;
+    items.reserve(names.size());
+    for (size_t i = 0; i < names.size(); ++i) {
+        const bool useLevels = selectedActive && selectedIndex == static_cast<int>(i);
+        items.push_back(DeviceSelector::Item{
+            names[i],
+            useLevels ? selectedLevels[0] : 0.0f,
+            useLevels ? selectedLevels[1] : 0.0f
+        });
+    }
+    return items;
+}
+
+std::vector<DeviceSelector::Item> buildInputSelectorItems(
+    const std::vector<const char*>& names,
+    const std::vector<AudioInput::DeviceInfo>& devices,
+    const int selectedIndex,
+    const bool selectedActive,
+    const std::array<float, 2>& selectedLevels,
+    const AudioInputLevelMonitor& inputLevelMonitor) {
+    std::vector<DeviceSelector::Item> items;
+    items.reserve(names.size());
+    for (size_t i = 0; i < names.size(); ++i) {
+        std::array<float, 2> levels = inputLevelMonitor.getStereoLevels(i);
+        if (selectedActive && selectedIndex == static_cast<int>(i)) {
+            levels = selectedLevels;
+        }
+
+        const char* label = names[i];
+        if (i < devices.size()) {
+            label = devices[i].name.c_str();
+        }
+
+        items.push_back(DeviceSelector::Item{label, levels[0], levels[1]});
+    }
+
+    return items;
+}
+
+}
 
 void DeviceManager::populateDeviceNames(DeviceState& deviceState,
                                         const std::vector<AudioInput::DeviceInfo>& devices) {
@@ -66,14 +115,23 @@ void DeviceManager::selectChannel(DeviceState& deviceState,
 
 void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
                                          AudioInput& audioInput,
-                                         const std::vector<AudioInput::DeviceInfo>& devices) {
+                                         const std::vector<AudioInput::DeviceInfo>& devices,
+                                         const AudioInputLevelMonitor& inputLevelMonitor) {
     ImGui::Text("INPUT DEVICE");
-    ImGui::SetNextItemWidth(-FLT_MIN);
     
     if (!deviceState.deviceNames.empty()) {
-        if (ImGui::Combo("##device", &deviceState.selectedDeviceIndex, 
-                        deviceState.deviceNames.data(),
-                        static_cast<int>(deviceState.deviceNames.size()))) {
+        const bool selectedActive =
+            deviceState.selectedDeviceIndex >= 0 &&
+            !deviceState.streamError &&
+            audioInput.isStreamActive();
+        const std::vector<DeviceSelector::Item> items = buildInputSelectorItems(
+            deviceState.deviceNames,
+            devices,
+            deviceState.selectedDeviceIndex,
+            selectedActive,
+            audioInput.getStereoLevels(),
+            inputLevelMonitor);
+        if (DeviceSelector::renderCombo("##device", deviceState.selectedDeviceIndex, items)) {
             selectDevice(deviceState, audioInput, devices, deviceState.selectedDeviceIndex);
         }
         
@@ -90,14 +148,18 @@ void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
 }
 
 void DeviceManager::renderOutputDeviceSelection(DeviceState& deviceState,
-                                               const std::vector<AudioOutput::DeviceInfo>&) {
+                                               const std::vector<AudioOutput::DeviceInfo>&,
+                                               const bool outputDeviceActive,
+                                               const std::array<float, 2>& outputLevels) {
     ImGui::Text("OUTPUT DEVICE");
-    ImGui::SetNextItemWidth(-FLT_MIN);
 
     if (!deviceState.outputDeviceNames.empty()) {
-        ImGui::Combo("##outputdevice", &deviceState.selectedOutputDeviceIndex,
-                     deviceState.outputDeviceNames.data(),
-                     static_cast<int>(deviceState.outputDeviceNames.size()));
+        const std::vector<DeviceSelector::Item> items = buildSelectorItems(
+            deviceState.outputDeviceNames,
+            deviceState.selectedOutputDeviceIndex,
+            outputDeviceActive && deviceState.selectedOutputDeviceIndex >= 0,
+            outputLevels);
+        DeviceSelector::renderCombo("##outputdevice", deviceState.selectedOutputDeviceIndex, items);
 
         if (deviceState.selectedOutputDeviceIndex < 0) {
             ImGui::TextDisabled("Select an audio output device");

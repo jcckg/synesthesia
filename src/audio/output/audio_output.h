@@ -1,6 +1,7 @@
 #pragma once
 
 #include <portaudio.h>
+#include <array>
 #include <atomic>
 #include <vector>
 #include <mutex>
@@ -28,6 +29,9 @@ public:
 	void pause();
 	void stop();
 	bool isPlaying() const { return isPlaying_.load(); }
+	std::array<float, 2> getStereoLevels() const {
+		return {leftLevel_.load(), rightLevel_.load()};
+	}
 
 	void seek(size_t framePosition);
 	size_t getPlaybackPosition() const { return playbackPosition_.load(); }
@@ -69,7 +73,11 @@ private:
 	std::atomic<size_t> seekFadeRemaining_;
 	double oldSeekCursor_;
 	PlaybackEqualiser playbackEqualiser_;
+	std::atomic<float> leftLevel_;
+	std::atomic<float> rightLevel_;
 
+	void updateStereoLevels(float left, float right);
+	void resetStereoLevels();
 	static int audioCallback(const void* input, void* output,
 						 unsigned long frameCount,
 						 const PaStreamCallbackTimeInfo* timeInfo,

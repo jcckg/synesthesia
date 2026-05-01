@@ -2,7 +2,9 @@
 
 #include <portaudio.h>
 
+#include <array>
 #include <atomic>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,6 +29,9 @@ public:
 	bool pauseStream();
 	bool resumeStream();
 	bool isStreamActive() const;
+	std::array<float, 2> getStereoLevels() const {
+		return {leftLevel.load(), rightLevel.load()};
+	}
 	AudioProcessor::SpectralData getSpectralData() const;
 	void copySpectralData(AudioProcessor::SpectralData& out) const { processor.copySpectralData(out); }
 	FFTProcessor& getFFTProcessor(size_t channel = 0) { return processor.getFFTProcessor(channel); }
@@ -51,9 +56,34 @@ private:
 	float sampleRate;
 	int channelCount;
 	std::atomic<int> activeChannel;
+	std::atomic<float> leftLevel;
+	std::atomic<float> rightLevel;
 
 	void stopStream();
+	void updateStereoLevels(float left, float right);
+	void resetStereoLevels();
 	static int audioCallback(const void* input, void* output, unsigned long frameCount,
 							 const PaStreamCallbackTimeInfo* timeInfo,
 							 PaStreamCallbackFlags statusFlags, void* userData);
+};
+
+class AudioInputLevelMonitor {
+public:
+	AudioInputLevelMonitor();
+	~AudioInputLevelMonitor();
+
+	void syncDevices(const std::vector<AudioInput::DeviceInfo>& devices, int selectedPaIndex = -1);
+	std::array<float, 2> getStereoLevels(size_t deviceListIndex) const;
+
+private:
+	struct MonitoredDevice;
+
+	std::vector<std::unique_ptr<MonitoredDevice>> monitoredDevices_;
+
+	void stopAll();
+	static void stopDevice(MonitoredDevice& device);
+	static bool startDevice(MonitoredDevice& device);
+	static int monitorCallback(const void* input, void* output, unsigned long frameCount,
+							   const PaStreamCallbackTimeInfo* timeInfo,
+							   PaStreamCallbackFlags statusFlags, void* userData);
 };

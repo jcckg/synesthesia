@@ -1,7 +1,9 @@
 #include "audio_input.h"
 
 #include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 
 #ifdef __linux__
@@ -24,13 +26,23 @@ public:
 };
 #endif
 
+namespace {
+
+float smoothedLevel(const float current, const float target) {
+	return std::max(target, current * 0.84f);
+}
+
+}
+
 AudioInput::AudioInput()
 	: stream(nullptr),
 	  dcFilter(0.995f),
 	  noiseGate(0.0001f),
 	  sampleRate(44100.0f),
 	  channelCount(1),
-	  activeChannel(0) {
+	  activeChannel(0),
+	  leftLevel(0.0f),
+	  rightLevel(0.0f) {
 #ifdef __linux__
 	ALSAErrorSuppressor suppressor;
 #endif
@@ -160,6 +172,17 @@ void AudioInput::stopStream() {
 		Pa_CloseStream(stream);
 		stream = nullptr;
 	}
+	resetStereoLevels();
+}
+
+void AudioInput::updateStereoLevels(const float left, const float right) {
+	leftLevel.store(smoothedLevel(leftLevel.load(), std::clamp(left, 0.0f, 1.0f)));
+	rightLevel.store(smoothedLevel(rightLevel.load(), std::clamp(right, 0.0f, 1.0f)));
+}
+
+void AudioInput::resetStereoLevels() {
+	leftLevel.store(0.0f);
+	rightLevel.store(0.0f);
 }
 
 int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
@@ -182,6 +205,18 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 		}
 
 		audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount), audio->sampleRate, static_cast<size_t>(audio->channelCount));
+
+		float leftPeak = 0.0f;
+		float rightPeak = 0.0f;
+		const size_t channels = static_cast<size_t>(std::max(audio->channelCount, 1));
+		for (unsigned long frame = 0; frame < frameCount; ++frame) {
+			const size_t offset = static_cast<size_t>(frame) * channels;
+			const float left = std::abs(inBuffer[offset]);
+			const float right = channels > 1 ? std::abs(inBuffer[offset + 1]) : left;
+			leftPeak = std::max(leftPeak, left);
+			rightPeak = std::max(rightPeak, right);
+		}
+		audio->updateStereoLevels(leftPeak, rightPeak);
 	}
 	catch (const std::exception& e) {
 		std::cerr << "[Audio] Exception in audio callback: " << e.what() << std::endl;
@@ -192,5 +227,159 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 		return paContinue;
 	}
 
+	return paContinue;
+}
+
+struct AudioInputLevelMonitor::MonitoredDevice {
+	int paIndex = paNoDevice;
+	int channelCount = 0;
+	PaStream* stream = nullptr;
+	bool startAttempted = false;
+	std::atomic<float> leftLevel{0.0f};
+	std::atomic<float> rightLevel{0.0f};
+};
+
+AudioInputLevelMonitor::AudioInputLevelMonitor() = default;
+
+AudioInputLevelMonitor::~AudioInputLevelMonitor() {
+	stopAll();
+}
+
+void AudioInputLevelMonitor::syncDevices(const std::vector<AudioInput::DeviceInfo>& devices,
+										 const int selectedPaIndex) {
+	bool topologyChanged = monitoredDevices_.size() != devices.size();
+	if (!topologyChanged) {
+		for (size_t i = 0; i < devices.size(); ++i) {
+			if (monitoredDevices_[i]->paIndex != devices[i].paIndex) {
+				topologyChanged = true;
+				break;
+			}
+		}
+	}
+
+	if (topologyChanged) {
+		stopAll();
+		monitoredDevices_.reserve(devices.size());
+		for (const auto& device : devices) {
+			auto monitoredDevice = std::make_unique<MonitoredDevice>();
+			monitoredDevice->paIndex = device.paIndex;
+			monitoredDevices_.push_back(std::move(monitoredDevice));
+		}
+	}
+
+	for (const auto& device : monitoredDevices_) {
+		if (!device) {
+			continue;
+		}
+
+		if (device->paIndex == selectedPaIndex) {
+			stopDevice(*device);
+			device->startAttempted = false;
+			continue;
+		}
+
+		if (!device->stream && !device->startAttempted) {
+			startDevice(*device);
+		}
+	}
+}
+
+std::array<float, 2> AudioInputLevelMonitor::getStereoLevels(const size_t deviceListIndex) const {
+	if (deviceListIndex >= monitoredDevices_.size() || !monitoredDevices_[deviceListIndex]) {
+		return {0.0f, 0.0f};
+	}
+
+	const MonitoredDevice& device = *monitoredDevices_[deviceListIndex];
+	return {device.leftLevel.load(), device.rightLevel.load()};
+}
+
+void AudioInputLevelMonitor::stopAll() {
+	for (const auto& device : monitoredDevices_) {
+		if (device) {
+			stopDevice(*device);
+		}
+	}
+	monitoredDevices_.clear();
+}
+
+void AudioInputLevelMonitor::stopDevice(MonitoredDevice& device) {
+	if (device.stream) {
+		Pa_StopStream(device.stream);
+		Pa_CloseStream(device.stream);
+		device.stream = nullptr;
+	}
+	device.channelCount = 0;
+	device.leftLevel.store(0.0f);
+	device.rightLevel.store(0.0f);
+}
+
+bool AudioInputLevelMonitor::startDevice(MonitoredDevice& device) {
+	device.startAttempted = true;
+
+	const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(device.paIndex);
+	if (!deviceInfo || deviceInfo->maxInputChannels < 1) {
+		return false;
+	}
+
+	device.channelCount = std::min(2, deviceInfo->maxInputChannels);
+
+	PaStreamParameters inputParameters{};
+	inputParameters.device = device.paIndex;
+	inputParameters.channelCount = device.channelCount;
+	inputParameters.sampleFormat = paFloat32;
+	inputParameters.suggestedLatency = deviceInfo->defaultLowInputLatency;
+	inputParameters.hostApiSpecificStreamInfo = nullptr;
+
+	PaStream* stream = nullptr;
+	const PaError openErr = Pa_OpenStream(
+		&stream,
+		&inputParameters,
+		nullptr,
+		deviceInfo->defaultSampleRate,
+		256,
+		paClipOff,
+		monitorCallback,
+		&device);
+
+	if (openErr != paNoError) {
+		device.channelCount = 0;
+		return false;
+	}
+
+	const PaError startErr = Pa_StartStream(stream);
+	if (startErr != paNoError) {
+		Pa_CloseStream(stream);
+		device.channelCount = 0;
+		return false;
+	}
+
+	device.stream = stream;
+	return true;
+}
+
+int AudioInputLevelMonitor::monitorCallback(const void* input, [[maybe_unused]] void* output,
+											const unsigned long frameCount,
+											[[maybe_unused]] const PaStreamCallbackTimeInfo* timeInfo,
+											[[maybe_unused]] PaStreamCallbackFlags statusFlags,
+											void* userData) {
+	auto* device = static_cast<MonitoredDevice*>(userData);
+	if (!device || !input || device->channelCount < 1) {
+		return paContinue;
+	}
+
+	const auto* inBuffer = static_cast<const float*>(input);
+	float leftPeak = 0.0f;
+	float rightPeak = 0.0f;
+	const size_t channels = static_cast<size_t>(device->channelCount);
+	for (unsigned long frame = 0; frame < frameCount; ++frame) {
+		const size_t offset = static_cast<size_t>(frame) * channels;
+		const float left = std::abs(inBuffer[offset]);
+		const float right = channels > 1 ? std::abs(inBuffer[offset + 1]) : left;
+		leftPeak = std::max(leftPeak, left);
+		rightPeak = std::max(rightPeak, right);
+	}
+
+	device->leftLevel.store(smoothedLevel(device->leftLevel.load(), std::clamp(leftPeak, 0.0f, 1.0f)));
+	device->rightLevel.store(smoothedLevel(device->rightLevel.load(), std::clamp(rightPeak, 0.0f, 1.0f)));
 	return paContinue;
 }

@@ -3,6 +3,7 @@
 #include "resyne/ui/timeline/timeline.h"
 
 #include <algorithm>
+#include <array>
 
 #include <imgui.h>
 
@@ -226,8 +227,18 @@ void render(RenderArgs& args) {
 
     renderViewTabs(args);
 
-    DeviceManager::renderDeviceSelection(args.uiState.deviceState, args.audioInput, args.devices);
-    DeviceManager::renderOutputDeviceSelection(args.uiState.deviceState, args.outputDevices);
+    DeviceManager::renderDeviceSelection(
+        args.uiState.deviceState,
+        args.audioInput,
+        args.devices,
+        args.uiState.inputLevelMonitor);
+    DeviceManager::renderOutputDeviceSelection(
+        args.uiState.deviceState,
+        args.outputDevices,
+        args.recorderState.audioOutput != nullptr && args.recorderState.audioOutput->isPlaying(),
+        args.recorderState.audioOutput != nullptr
+            ? args.recorderState.audioOutput->getStereoLevels()
+            : std::array<float, 2>{0.0f, 0.0f});
 
     bool deviceSelected = args.uiState.deviceState.selectedDeviceIndex >= 0;
     bool streamHealthy = !args.uiState.deviceState.streamError;

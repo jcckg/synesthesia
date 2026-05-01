@@ -3,6 +3,14 @@
 #include <cmath>
 #include <cstring>
 
+namespace {
+
+float smoothedLevel(const float current, const float target) {
+	return std::max(target, current * 0.84f);
+}
+
+}
+
 AudioOutput::AudioOutput()
 	: stream_(nullptr),
 	  audioBuffer_(std::make_shared<std::vector<float>>()),
@@ -18,7 +26,9 @@ AudioOutput::AudioOutput()
 	  seekCrossfadeActive_(false),
 	  pendingSeekPosition_(0),
 	  seekFadeRemaining_(0),
-	  oldSeekCursor_(0.0) {
+	  oldSeekCursor_(0.0),
+	  leftLevel_(0.0f),
+	  rightLevel_(0.0f) {
 }
 
 AudioOutput::~AudioOutput() {
@@ -161,6 +171,7 @@ void AudioOutput::pause() {
 	}
 
 	isPlaying_.store(false);
+	resetStereoLevels();
 }
 
 void AudioOutput::stop() {
@@ -178,6 +189,7 @@ void AudioOutput::stop() {
 		playbackCursor_ = 0.0;
 	}
 	playbackEqualiser_.requestReset();
+	resetStereoLevels();
 }
 
 void AudioOutput::seek(size_t framePosition) {
@@ -212,6 +224,7 @@ void AudioOutput::clearAudioData() {
 	playbackPosition_.store(0);
 	playbackCursor_ = 0.0;
 	playbackEqualiser_.requestReset();
+	resetStereoLevels();
 }
 
 float AudioOutput::getPlaybackRateRatio() const {
@@ -221,6 +234,16 @@ float AudioOutput::getPlaybackRateRatio() const {
 		return 1.0f;
 	}
 	return requested / actual;
+}
+
+void AudioOutput::updateStereoLevels(const float left, const float right) {
+	leftLevel_.store(smoothedLevel(leftLevel_.load(), std::clamp(left, 0.0f, 1.0f)));
+	rightLevel_.store(smoothedLevel(rightLevel_.load(), std::clamp(right, 0.0f, 1.0f)));
+}
+
+void AudioOutput::resetStereoLevels() {
+	leftLevel_.store(0.0f);
+	rightLevel_.store(0.0f);
 }
 
 int AudioOutput::audioCallback(const void* input, void* output,
@@ -238,6 +261,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 
 	if (!audioOutput->isPlaying_.load()) {
 		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
+		audioOutput->resetStereoLevels();
 		return paContinue;
 	}
 
@@ -266,6 +290,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 
 	if (!bufferSnapshot || bufferSnapshot->empty() || totalFrames == 0) {
 		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
+		audioOutput->resetStereoLevels();
 		return paContinue;
 	}
 
@@ -445,6 +470,17 @@ int AudioOutput::audioCallback(const void* input, void* output,
 			out[i] = (sample >= 0.0f) ? limited : -limited;
 		}
 	}
+
+	float leftPeak = 0.0f;
+	float rightPeak = 0.0f;
+	for (unsigned long frame = 0; frame < frameCount; ++frame) {
+		const size_t offset = static_cast<size_t>(frame) * outputChannels;
+		const float left = std::abs(out[offset]);
+		const float right = outputChannels > 1 ? std::abs(out[offset + 1]) : left;
+		leftPeak = std::max(leftPeak, left);
+		rightPeak = std::max(rightPeak, right);
+	}
+	audioOutput->updateStereoLevels(leftPeak, rightPeak);
 
 	return paContinue;
 }

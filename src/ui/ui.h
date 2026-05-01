@@ -85,6 +85,7 @@ struct UIState {
     UIVisibility visibility;
 
     DeviceState deviceState;
+    AudioInputLevelMonitor inputLevelMonitor;
 
 #ifdef ENABLE_MIDI
     MIDIDeviceState midiDeviceState;

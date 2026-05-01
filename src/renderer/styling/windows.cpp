@@ -10,6 +10,7 @@
 #include <Windows.h>
 #include <dwmapi.h>
 
+#include "renderer/windows/resource.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
@@ -22,6 +23,38 @@
 
 namespace Renderer::Styling {
 
+namespace {
+
+void applyApplicationIcon(HWND hwnd) {
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+    HICON bigIcon = static_cast<HICON>(LoadImageW(
+        instance,
+        MAKEINTRESOURCEW(IDI_ICON1),
+        IMAGE_ICON,
+        GetSystemMetrics(SM_CXICON),
+        GetSystemMetrics(SM_CYICON),
+        LR_DEFAULTCOLOR | LR_SHARED));
+    HICON smallIcon = static_cast<HICON>(LoadImageW(
+        instance,
+        MAKEINTRESOURCEW(IDI_ICON1),
+        IMAGE_ICON,
+        GetSystemMetrics(SM_CXSMICON),
+        GetSystemMetrics(SM_CYSMICON),
+        LR_DEFAULTCOLOR | LR_SHARED));
+
+    if (bigIcon != nullptr) {
+        SendMessageW(hwnd, WM_SETICON, ICON_BIG, reinterpret_cast<LPARAM>(bigIcon));
+        SetClassLongPtrW(hwnd, GCLP_HICON, reinterpret_cast<LONG_PTR>(bigIcon));
+    }
+
+    if (smallIcon != nullptr) {
+        SendMessageW(hwnd, WM_SETICON, ICON_SMALL, reinterpret_cast<LPARAM>(smallIcon));
+        SetClassLongPtrW(hwnd, GCLP_HICONSM, reinterpret_cast<LONG_PTR>(smallIcon));
+    }
+}
+
+}
+
 void applyPlatformWindowStyling(GLFWwindow* window) {
     if (window == nullptr) {
         return;
@@ -31,6 +64,8 @@ void applyPlatformWindowStyling(GLFWwindow* window) {
     if (hwnd == nullptr) {
         return;
     }
+
+    applyApplicationIcon(hwnd);
 
     const SystemTheme theme = SystemThemeDetector::detectSystemTheme();
     BOOL darkMode = theme == SystemTheme::Dark ? TRUE : FALSE;

@@ -237,6 +237,14 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 
     DeviceManager::populateDeviceNames(state.deviceState, devices);
+    int activeInputPaIndex = -1;
+    if (state.deviceState.selectedDeviceIndex >= 0 &&
+        static_cast<size_t>(state.deviceState.selectedDeviceIndex) < devices.size() &&
+        !state.deviceState.streamError &&
+        audioInput.isStreamActive()) {
+        activeInputPaIndex = devices[static_cast<size_t>(state.deviceState.selectedDeviceIndex)].paIndex;
+    }
+    state.inputLevelMonitor.syncDevices(devices, activeInputPaIndex);
     DeviceManager::populateOutputDeviceNames(state.deviceState, outputDevices);
 
     const int previousOutputDeviceIndex = recorderState.outputDeviceIndex;

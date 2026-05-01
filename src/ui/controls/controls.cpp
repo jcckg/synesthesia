@@ -519,6 +519,7 @@ void renderAdvancedSettingsPanel(UIState& state
             }
         }
 #endif
+
     }
 }
 

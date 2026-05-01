@@ -1,6 +1,7 @@
 #include "resource.h"
 
 IDI_ICON1               ICON                    "app.ico"
+GLFW_ICON               ICON                    "app.ico"
 
 IDR_FONT_IBM_PLEX_MONO_MEDIUM RCDATA "@SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM@"
 IDR_FONT_IBM_PLEX_MONO_LIGHT  RCDATA "@SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT@"
