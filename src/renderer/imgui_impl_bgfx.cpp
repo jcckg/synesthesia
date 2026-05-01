@@ -170,7 +170,7 @@ bgfx::TextureHandle createTextureFromImGuiData(ImTextureData* textureData) {
         static_cast<uint16_t>(textureData->Height),
         false,
         1,
-        bgfx::TextureFormat::BGRA8,
+        bgfx::TextureFormat::RGBA8,
         BGFX_TEXTURE_NONE |
             BGFX_SAMPLER_U_CLAMP |
             BGFX_SAMPLER_V_CLAMP

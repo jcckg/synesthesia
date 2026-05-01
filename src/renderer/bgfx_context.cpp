@@ -28,10 +28,17 @@ namespace {
 
 constexpr uint32_t kTransientVertexBufferLimit = 16u * 1024u * 1024u;
 constexpr uint32_t kTransientIndexBufferLimit = 8u * 1024u * 1024u;
+#if defined(_WIN32)
+constexpr std::array kPreferredColourFormats{
+    bgfx::TextureFormat::BGRA8,
+    bgfx::TextureFormat::RGB10A2
+};
+#else
 constexpr std::array kPreferredColourFormats{
     bgfx::TextureFormat::RGB10A2,
     bgfx::TextureFormat::BGRA8
 };
+#endif
 
 class BgfxStartupCallback final : public bgfx::CallbackI {
 public:
