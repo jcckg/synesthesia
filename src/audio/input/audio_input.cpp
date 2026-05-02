@@ -1,10 +1,14 @@
 #include "audio_input.h"
 
 #include <algorithm>
+#include <cctype>
+#include <cstddef>
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <string_view>
 
 #ifdef __linux__
 #include <alsa/asoundlib.h>
@@ -26,11 +30,191 @@ public:
 };
 #endif
 
+#ifdef __APPLE__
+#include <CoreAudio/CoreAudio.h>
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 namespace {
 
 float smoothedLevel(const float current, const float target) {
 	return std::max(target, current * 0.84f);
 }
+
+#ifdef __APPLE__
+constexpr UInt32 makeFourCC(const char a, const char b, const char c, const char d) {
+	return (static_cast<UInt32>(static_cast<unsigned char>(a)) << 24U) |
+		   (static_cast<UInt32>(static_cast<unsigned char>(b)) << 16U) |
+		   (static_cast<UInt32>(static_cast<unsigned char>(c)) << 8U) |
+		   static_cast<UInt32>(static_cast<unsigned char>(d));
+}
+
+bool getAudioObjectProperty(const AudioObjectID objectId,
+							const AudioObjectPropertySelector selector,
+							const AudioObjectPropertyScope scope,
+							const AudioObjectPropertyElement element,
+							UInt32& dataSize,
+							void* data) {
+	AudioObjectPropertyAddress address{selector, scope, element};
+	return AudioObjectGetPropertyData(objectId, &address, 0, nullptr, &dataSize, data) == noErr;
+}
+
+std::vector<AudioDeviceID> coreAudioDeviceIds() {
+	AudioObjectPropertyAddress address{
+		kAudioHardwarePropertyDevices,
+		kAudioObjectPropertyScopeGlobal,
+		kAudioObjectPropertyElementMain
+	};
+	UInt32 dataSize = 0;
+	if (AudioObjectGetPropertyDataSize(kAudioObjectSystemObject, &address, 0, nullptr, &dataSize) != noErr ||
+		dataSize == 0) {
+		return {};
+	}
+
+	std::vector<AudioDeviceID> deviceIds(dataSize / sizeof(AudioDeviceID));
+	if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, nullptr, &dataSize, deviceIds.data()) != noErr) {
+		return {};
+	}
+	return deviceIds;
+}
+
+std::string coreAudioDeviceName(const AudioDeviceID deviceId) {
+	CFStringRef nameRef = nullptr;
+	UInt32 dataSize = sizeof(nameRef);
+	if (!getAudioObjectProperty(deviceId,
+								kAudioDevicePropertyDeviceNameCFString,
+								kAudioObjectPropertyScopeGlobal,
+								kAudioObjectPropertyElementMain,
+								dataSize,
+								&nameRef) ||
+		nameRef == nullptr) {
+		return {};
+	}
+
+	char name[256]{};
+	const bool copied = CFStringGetCString(nameRef, name, sizeof(name), kCFStringEncodingUTF8);
+	CFRelease(nameRef);
+	return copied ? std::string(name) : std::string();
+}
+
+int coreAudioChannelCount(const AudioDeviceID deviceId, const AudioObjectPropertyScope scope) {
+	AudioObjectPropertyAddress address{
+		kAudioDevicePropertyStreamConfiguration,
+		scope,
+		kAudioObjectPropertyElementMain
+	};
+	UInt32 dataSize = 0;
+	if (AudioObjectGetPropertyDataSize(deviceId, &address, 0, nullptr, &dataSize) != noErr ||
+		dataSize == 0) {
+		return -1;
+	}
+
+	std::vector<std::byte> storage(dataSize);
+	auto* bufferList = reinterpret_cast<AudioBufferList*>(storage.data());
+	if (AudioObjectGetPropertyData(deviceId, &address, 0, nullptr, &dataSize, bufferList) != noErr) {
+		return -1;
+	}
+
+	UInt32 channelCount = 0;
+	for (UInt32 i = 0; i < bufferList->mNumberBuffers; ++i) {
+		channelCount += bufferList->mBuffers[i].mNumberChannels;
+	}
+	return static_cast<int>(channelCount);
+}
+
+bool hasCoreAudioDeviceInfo(const AudioDeviceID deviceId) {
+	return !coreAudioDeviceName(deviceId).empty() &&
+		   coreAudioChannelCount(deviceId, kAudioObjectPropertyScopeInput) >= 0 &&
+		   coreAudioChannelCount(deviceId, kAudioObjectPropertyScopeOutput) >= 0;
+}
+
+std::optional<int> coreAudioHostApiDeviceIndex(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
+	const PaHostApiInfo* hostApiInfo = Pa_GetHostApiInfo(paDeviceInfo.hostApi);
+	if (!hostApiInfo || hostApiInfo->type != paCoreAudio) {
+		return std::nullopt;
+	}
+
+	for (int i = 0; i < hostApiInfo->deviceCount; ++i) {
+		if (Pa_HostApiDeviceIndexToDeviceIndex(paDeviceInfo.hostApi, i) == paIndex) {
+			return i;
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<AudioDeviceID> coreAudioDeviceIdForPortAudioDevice(const PaDeviceIndex paIndex,
+																 const PaDeviceInfo& paDeviceInfo) {
+	const std::optional<int> hostApiDeviceIndex = coreAudioHostApiDeviceIndex(paIndex, paDeviceInfo);
+	if (!hostApiDeviceIndex) {
+		return std::nullopt;
+	}
+
+	std::vector<AudioDeviceID> deviceIds = coreAudioDeviceIds();
+	std::vector<AudioDeviceID> portAudioDeviceOrder;
+	portAudioDeviceOrder.reserve(deviceIds.size());
+	for (const AudioDeviceID deviceId : deviceIds) {
+		if (hasCoreAudioDeviceInfo(deviceId)) {
+			portAudioDeviceOrder.push_back(deviceId);
+		}
+	}
+
+	if (*hostApiDeviceIndex >= 0 && static_cast<size_t>(*hostApiDeviceIndex) < portAudioDeviceOrder.size()) {
+		const AudioDeviceID orderedDeviceId = portAudioDeviceOrder[static_cast<size_t>(*hostApiDeviceIndex)];
+		if (coreAudioDeviceName(orderedDeviceId) == paDeviceInfo.name) {
+			return orderedDeviceId;
+		}
+	}
+
+	for (const AudioDeviceID deviceId : portAudioDeviceOrder) {
+		if (coreAudioDeviceName(deviceId) == paDeviceInfo.name &&
+			coreAudioChannelCount(deviceId, kAudioObjectPropertyScopeInput) == paDeviceInfo.maxInputChannels &&
+			coreAudioChannelCount(deviceId, kAudioObjectPropertyScopeOutput) == paDeviceInfo.maxOutputChannels) {
+			return deviceId;
+		}
+	}
+
+	return std::nullopt;
+}
+
+bool isContinuityCaptureTransport(const UInt32 transportType) {
+	return transportType == makeFourCC('c', 'c', 'w', 'd') ||
+		   transportType == makeFourCC('c', 'c', 'w', 'l') ||
+		   transportType == makeFourCC('c', 'c', 'a', 'p');
+}
+
+bool looksLikeContinuityDeviceName(const std::string_view name) {
+	std::string lowerName;
+	lowerName.reserve(name.size());
+	for (const char ch : name) {
+		lowerName.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+	}
+	return lowerName.find("iphone") != std::string::npos ||
+		   lowerName.find("ipad") != std::string::npos ||
+		   lowerName.find("continuity") != std::string::npos;
+}
+
+bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
+	const std::optional<AudioDeviceID> deviceId = coreAudioDeviceIdForPortAudioDevice(paIndex, paDeviceInfo);
+	if (deviceId) {
+		UInt32 transportType = 0;
+		UInt32 dataSize = sizeof(transportType);
+		if (getAudioObjectProperty(*deviceId,
+								   kAudioDevicePropertyTransportType,
+								   kAudioObjectPropertyScopeGlobal,
+								   kAudioObjectPropertyElementMain,
+								   dataSize,
+								   &transportType)) {
+			return isContinuityCaptureTransport(transportType);
+		}
+	}
+
+	return looksLikeContinuityDeviceName(paDeviceInfo.name != nullptr ? paDeviceInfo.name : "");
+}
+#else
+bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex, const PaDeviceInfo&) {
+	return false;
+}
+#endif
 
 }
 
@@ -79,7 +263,12 @@ std::vector<AudioInput::DeviceInfo> AudioInput::getInputDevices() {
 	for (int i = 0; i < deviceCount; ++i) {
 		if (const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i)) {
 			if (deviceInfo->maxInputChannels > 0) {
-				devices.emplace_back(DeviceInfo{deviceInfo->name, i, deviceInfo->maxInputChannels});
+				devices.emplace_back(DeviceInfo{
+					deviceInfo->name,
+					i,
+					deviceInfo->maxInputChannels,
+					!shouldSkipBackgroundLevelMonitoring(i, *deviceInfo)
+				});
 			}
 		}
 	}
@@ -235,6 +424,7 @@ struct AudioInputLevelMonitor::MonitoredDevice {
 	int channelCount = 0;
 	PaStream* stream = nullptr;
 	bool startAttempted = false;
+	bool allowLevelMonitoring = true;
 	std::atomic<float> leftLevel{0.0f};
 	std::atomic<float> rightLevel{0.0f};
 };
@@ -250,7 +440,8 @@ void AudioInputLevelMonitor::syncDevices(const std::vector<AudioInput::DeviceInf
 	bool topologyChanged = monitoredDevices_.size() != devices.size();
 	if (!topologyChanged) {
 		for (size_t i = 0; i < devices.size(); ++i) {
-			if (monitoredDevices_[i]->paIndex != devices[i].paIndex) {
+			if (monitoredDevices_[i]->paIndex != devices[i].paIndex ||
+				monitoredDevices_[i]->allowLevelMonitoring != devices[i].allowLevelMonitoring) {
 				topologyChanged = true;
 				break;
 			}
@@ -263,12 +454,19 @@ void AudioInputLevelMonitor::syncDevices(const std::vector<AudioInput::DeviceInf
 		for (const auto& device : devices) {
 			auto monitoredDevice = std::make_unique<MonitoredDevice>();
 			monitoredDevice->paIndex = device.paIndex;
+			monitoredDevice->allowLevelMonitoring = device.allowLevelMonitoring;
 			monitoredDevices_.push_back(std::move(monitoredDevice));
 		}
 	}
 
 	for (const auto& device : monitoredDevices_) {
 		if (!device) {
+			continue;
+		}
+
+		if (!device->allowLevelMonitoring) {
+			stopDevice(*device);
+			device->startAttempted = true;
 			continue;
 		}
 
@@ -318,6 +516,9 @@ bool AudioInputLevelMonitor::startDevice(MonitoredDevice& device) {
 
 	const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(device.paIndex);
 	if (!deviceInfo || deviceInfo->maxInputChannels < 1) {
+		return false;
+	}
+	if (!device.allowLevelMonitoring) {
 		return false;
 	}
 

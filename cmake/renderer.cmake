@@ -146,6 +146,7 @@ if(APPLE)
     find_library(METAL_FRAMEWORK Metal REQUIRED)
     find_library(METALKIT_FRAMEWORK MetalKit REQUIRED)
     find_library(COCOA_FRAMEWORK Cocoa REQUIRED)
+    find_library(COREAUDIO_FRAMEWORK CoreAudio REQUIRED)
     find_library(IOKIT_FRAMEWORK IOKit REQUIRED)
     find_library(COREVIDEO_FRAMEWORK CoreVideo REQUIRED)
     find_library(QUARTZCORE_FRAMEWORK QuartzCore REQUIRED)
@@ -155,6 +156,7 @@ if(APPLE)
         ${METAL_FRAMEWORK}
         ${METALKIT_FRAMEWORK}
         ${COCOA_FRAMEWORK}
+        ${COREAUDIO_FRAMEWORK}
         ${IOKIT_FRAMEWORK}
         ${COREVIDEO_FRAMEWORK}
         ${QUARTZCORE_FRAMEWORK}

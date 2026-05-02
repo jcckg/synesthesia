@@ -19,6 +19,7 @@ public:
 		std::string name;
 		int paIndex;
 		int maxChannels;
+		bool allowLevelMonitoring = true;
 	};
 
 	AudioInput();

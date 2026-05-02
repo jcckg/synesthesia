@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
+#include <imgui_internal.h>
 #include <string>
 
 namespace DeviceSelector {
@@ -23,18 +24,18 @@ float selectorTextWidth(std::span<const Item> items) {
 }
 
 float selectorWidth(std::span<const Item> items) {
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float arrowWidth = ImGui::GetFrameHeight();
-    const float desiredWidth = selectorTextWidth(items) +
-                               kMeterWidth +
-                               kIndicatorSpacing +
-                               style.FramePadding.x * 2.0f +
-                               arrowWidth;
     const float availableWidth = ImGui::GetContentRegionAvail().x;
     if (availableWidth <= 0.0f) {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float arrowWidth = ImGui::GetFrameHeight();
+        const float desiredWidth = selectorTextWidth(items) +
+                                   kMeterWidth +
+                                   kIndicatorSpacing +
+                                   style.FramePadding.x * 2.0f +
+                                   arrowWidth;
         return std::max(kMinimumComboWidth, desiredWidth);
     }
-    return std::max(kMinimumComboWidth, std::min(desiredWidth, availableWidth));
+    return std::max(kMinimumComboWidth, availableWidth);
 }
 
 float popupWidth(std::span<const Item> items, const float comboWidth) {
@@ -55,21 +56,31 @@ int validSelectionIndex(const int selectedIndex, std::span<const Item> items) {
 
 ImVec4 levelColour(const float normalisedPosition) {
     const float t = std::clamp(normalisedPosition, 0.0f, 1.0f);
+    const ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+    const bool lightMode = textColour.x + textColour.y + textColour.z < 1.5f;
     if (t < 0.5f) {
         const float mix = t * 2.0f;
+        if (lightMode) {
+            return ImVec4(0.92f, 0.34f + mix * 0.34f, 0.16f, 1.0f);
+        }
         return ImVec4(1.0f, 0.20f + mix * 0.70f, 0.12f, 1.0f);
     }
 
     const float mix = (t - 0.5f) * 2.0f;
+    if (lightMode) {
+        return ImVec4(0.92f - mix * 0.62f, 0.68f - mix * 0.10f, 0.16f + mix * 0.12f, 1.0f);
+    }
     return ImVec4(1.0f - mix * 0.72f, 0.90f - mix * 0.08f, 0.12f + mix * 0.16f, 1.0f);
 }
 
 void drawMeterBar(ImDrawList* drawList, const ImVec2 min, const ImVec2 max, const float level) {
-    const ImU32 backgroundColour = ImGui::GetColorU32(ImVec4(0.16f, 0.16f, 0.17f, 0.75f));
     const ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
     const bool lightMode = textColour.x + textColour.y + textColour.z < 1.5f;
+    const ImU32 backgroundColour = lightMode
+        ? ImGui::GetColorU32(ImVec4(0.96f, 0.965f, 0.975f, 1.0f))
+        : ImGui::GetColorU32(ImVec4(0.16f, 0.16f, 0.17f, 0.75f));
     const ImU32 borderColour = lightMode
-        ? ImGui::GetColorU32(ImVec4(0.68f, 0.68f, 0.70f, 0.95f))
+        ? ImGui::GetColorU32(ImVec4(0.76f, 0.78f, 0.82f, 0.55f))
         : ImGui::GetColorU32(ImVec4(0.06f, 0.06f, 0.07f, 0.95f));
     drawList->AddRectFilled(min, max, backgroundColour, 0.0f);
 
@@ -90,7 +101,7 @@ void drawMeterBar(ImDrawList* drawList, const ImVec2 min, const ImVec2 max, cons
             ImGui::GetColorU32(levelColour(static_cast<float>(segment) / static_cast<float>(kMeterSegments - 1))));
     }
 
-    drawList->AddRect(min, max, borderColour, 1.0f);
+    drawList->AddRect(min, max, borderColour, 0.0f, 0, lightMode ? 0.55f : 1.0f);
 }
 
 void drawStereoMeter(ImDrawList* drawList, const Item& item, const ImVec2 min, const ImVec2 max) {
@@ -107,6 +118,28 @@ void drawStereoMeter(ImDrawList* drawList, const Item& item, const ImVec2 min, c
         ImVec2(meterPos.x + barWidth + gap, meterPos.y),
         ImVec2(meterPos.x + barWidth * 2.0f + gap, meterPos.y + kMeterHeight),
         item.rightLevel);
+}
+
+void drawPreview(const Item& item, const char* label) {
+    ImGuiContext& g = *GImGui;
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const ImRect previewRect = g.ComboPreviewData.PreviewRect;
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+
+    drawStereoMeter(drawList, item, previewRect.Min, previewRect.Max);
+
+    const ImVec2 textMin(
+        previewRect.Min.x + style.FramePadding.x + kMeterWidth + kIndicatorSpacing,
+        previewRect.Min.y + style.FramePadding.y);
+    const ImVec2 textMax(
+        previewRect.Max.x - style.FramePadding.x,
+        previewRect.Max.y);
+    ImGui::RenderTextClipped(
+        textMin,
+        textMax,
+        label != nullptr ? label : "",
+        nullptr,
+        nullptr);
 }
 
 const char* previewLabel(const int selectedIndex, std::span<const Item> items) {
@@ -138,17 +171,12 @@ bool renderCombo(const char* label, int& selectedIndex, std::span<const Item> it
 
     const float comboWidth = selectorWidth(items);
     const float desiredPopupWidth = popupWidth(items, comboWidth);
-    const std::string preview = paddedLabel(previewLabel(selectedIndex, items));
-    ImDrawList* previewDrawList = ImGui::GetWindowDrawList();
+    const char* previewText = previewLabel(selectedIndex, items);
+    const Item currentPreviewItem = previewItem(selectedIndex, items);
 
     ImGui::SetNextItemWidth(comboWidth);
     ImGui::SetNextWindowSizeConstraints(ImVec2(desiredPopupWidth, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
-    const bool open = ImGui::BeginCombo(label, preview.c_str());
-    drawStereoMeter(
-        previewDrawList,
-        previewItem(selectedIndex, items),
-        ImGui::GetItemRectMin(),
-        ImGui::GetItemRectMax());
+    const bool open = ImGui::BeginCombo(label, nullptr, ImGuiComboFlags_CustomPreview);
 
     bool changed = false;
     if (open) {
@@ -175,6 +203,10 @@ bool renderCombo(const char* label, int& selectedIndex, std::span<const Item> it
         }
 
         ImGui::EndCombo();
+    }
+    if (ImGui::BeginComboPreview()) {
+        drawPreview(currentPreviewItem, previewText);
+        ImGui::EndComboPreview();
     }
 
     return changed;
