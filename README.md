@@ -4,8 +4,7 @@ Synesthesia is an application designed to provide a real-time visualisation of a
 
 Synesthesia features two modes of visualisation, one being "ReSyne", allowing you to import audio files (WAV/FLAC/OGG/MP3), visualise the entire song as a gradient (constructed via our mapping process), and export as `.rsyn` for native archival/presentation exchange or as `.tiff` for external editing in applications like Photoshop (allowing for intuitive effects: blacking out w/ shapes -> EQ, blur -> reverb). We can also export (our gradient + colour) as a video file on macOS hosts.
 
-<img alt="Synesthesia's ReSyne Window, '4T Recordings' by Four Tet" src="https://github.com/user-attachments/assets/b5b71813-8f61-4ac6-b69f-5b3717b3d37f" />
-
+<img alt="Synesthesia's ReSyne Window, 'Another Green World' by Brian Eno loaded in." src="https://github.com/user-attachments/assets/77827119-9e15-4048-a406-950a87c2cc0a" />
 </div>
 
 ### Installation
