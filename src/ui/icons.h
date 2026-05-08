@@ -19,6 +19,7 @@
 #define ICON_FA_PAINTBRUSH "\xef\x87\xbc"        // U+f1fc
 #define ICON_FA_WINDOW_RESTORE "\xef\x8b\x92"    // U+f2d2
 #define ICON_FA_CIRCLE_XMARK "\xef\x81\x97"      // U+f057 (X/close)
+#define ICON_FA_TRASH "\xef\x87\xb8"             // U+f1f8 (trash)
 #define ICON_FA_ARROW_POINTER "\xef\x89\x85"       // U+f245 (cursor)
 #define ICON_FA_MAGNIFYING_GLASS_PLUS "\xef\x80\x8e" // U+f00e (zoom)
 #define ICON_FA_HAND_POINTER "\xef\x89\x9a"       // U+f25a (grab)

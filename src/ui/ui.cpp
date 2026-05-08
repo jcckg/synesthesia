@@ -340,6 +340,10 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 
 	bool hasMicInput = state.deviceState.selectedDeviceIndex >= 0;
+    const bool canStartRecording =
+        state.deviceState.selectedDeviceIndex >= 0 &&
+        !state.deviceState.streamError &&
+        audioInput.isStreamActive();
 
 	if (!hasPlaybackSession && hasMicInput) {
 		UI::AudioVisualisation::processLiveAudioState(
@@ -441,6 +445,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			ReSyne::renderMainView(
 				state.resyneState,
 				audioInput,
+				canStartRecording,
 				windowX,
 				windowY,
 				windowWidth,
@@ -453,6 +458,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			ReSyne::renderRecorderPanel(
 				state.resyneState,
 				audioInput.getAudioProcessor(),
+				canStartRecording,
 				panelX,
 				panelY,
 				panelWidth,

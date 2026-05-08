@@ -100,6 +100,7 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
 	float maxDominantFreq = 0.0f;
 	float maxMagnitudeVal = 0.0f;
 	FFTProcessor::AnalysisState primaryAnalysis{};
+	bool hasPrimaryAnalysis = false;
 
 	for (size_t ch = 0; ch < buffer.numChannels; ++ch) {
 		for (size_t i = 0; i < frames; ++i) {
@@ -128,8 +129,11 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
 			}
 		}
 
-		if (ch == 0) {
+		if (!hasPrimaryAnalysis || analysis.totalEnergy > primaryAnalysis.totalEnergy ||
+			(analysis.totalEnergy == primaryAnalysis.totalEnergy &&
+			 analysis.maxMagnitude > primaryAnalysis.maxMagnitude)) {
 			primaryAnalysis = analysis;
+			hasPrimaryAnalysis = true;
 		}
 	}
 

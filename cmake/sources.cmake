@@ -80,6 +80,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/ui/recorder/exporting_dialog.cpp
     ${SRC_DIR}/resyne/ui/recorder/utils.cpp
     ${SRC_DIR}/resyne/ui/recorder/shared_components.cpp
+    ${SRC_DIR}/resyne/ui/recorder/timeline_actions.cpp
     ${SRC_DIR}/resyne/ui/toolbar/tool_state.cpp
     ${SRC_DIR}/resyne/ui/toolbar/toolbar.cpp
     ${SRC_DIR}/resyne/ui/timeline/timeline.cpp

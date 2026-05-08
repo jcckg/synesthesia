@@ -70,6 +70,9 @@ struct RecorderState {
     float dropFlashAlpha = 0.0f;
     std::string statusMessage;
     float statusMessageTimer = 0.0f;
+    bool showClearTimelineDialog = false;
+    bool recordingCountdownActive = false;
+    float recordingCountdownRemaining = 0.0f;
 
     bool showLoadingDialog = false;
     std::string loadingFilename;
@@ -150,6 +153,7 @@ public:
 
     static void drawBottomPanel(RecorderState& state,
                                 AudioProcessor& audioProcessor,
+                                bool canStartRecording,
                                 float panelX,
                                 float panelY,
                                 float panelWidth,
@@ -157,6 +161,7 @@ public:
 
     static void drawFullWindow(RecorderState& state,
                                AudioInput& audioInput,
+                               bool canStartRecording,
                                float windowX,
                                float windowY,
                                float windowWidth,

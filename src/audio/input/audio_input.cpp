@@ -1,6 +1,7 @@
 #include "audio_input.h"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <cmath>
@@ -33,6 +34,7 @@ public:
 #ifdef __APPLE__
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
+#include <pa_mac_core.h>
 #endif
 
 namespace {
@@ -193,7 +195,55 @@ bool looksLikeContinuityDeviceName(const std::string_view name) {
 		   lowerName.find("continuity") != std::string::npos;
 }
 
+bool looksLikeBuiltInMacBookMicrophone(const std::string_view name) {
+	std::string lowerName;
+	lowerName.reserve(name.size());
+	for (const char ch : name) {
+		lowerName.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+	}
+	return (lowerName.find("macbook") != std::string::npos &&
+			lowerName.find("microphone") != std::string::npos) ||
+		   lowerName.find("built-in microphone") != std::string::npos;
+}
+
+bool isCoreAudioInputDevice(const PaDeviceInfo& paDeviceInfo) {
+	const PaHostApiInfo* hostApiInfo = Pa_GetHostApiInfo(paDeviceInfo.hostApi);
+	return hostApiInfo != nullptr && hostApiInfo->type == paCoreAudio;
+}
+
+bool shouldUseMonoCoreAudioInput(const PaDeviceInfo& paDeviceInfo) {
+	return isCoreAudioInputDevice(paDeviceInfo) &&
+		   looksLikeBuiltInMacBookMicrophone(paDeviceInfo.name != nullptr ? paDeviceInfo.name : "");
+}
+
+std::optional<SInt32> preferredCoreAudioInputChannel(const PaDeviceIndex paIndex,
+													 const PaDeviceInfo& paDeviceInfo) {
+	const std::optional<AudioDeviceID> deviceId = coreAudioDeviceIdForPortAudioDevice(paIndex, paDeviceInfo);
+	if (!deviceId) {
+		return std::nullopt;
+	}
+
+	std::array<UInt32, 2> preferredChannels{};
+	UInt32 dataSize = static_cast<UInt32>(preferredChannels.size() * sizeof(UInt32));
+	if (!getAudioObjectProperty(*deviceId,
+								kAudioDevicePropertyPreferredChannelsForStereo,
+								kAudioObjectPropertyScopeInput,
+								kAudioObjectPropertyElementMain,
+								dataSize,
+								preferredChannels.data()) ||
+		dataSize < sizeof(UInt32) ||
+		preferredChannels[0] == 0) {
+		return std::nullopt;
+	}
+
+	return static_cast<SInt32>(preferredChannels[0] - 1);
+}
+
 bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
+	if (shouldUseMonoCoreAudioInput(paDeviceInfo)) {
+		return true;
+	}
+
 	const std::optional<AudioDeviceID> deviceId = coreAudioDeviceIdForPortAudioDevice(paIndex, paDeviceInfo);
 	if (deviceId) {
 		UInt32 transportType = 0;
@@ -212,6 +262,10 @@ bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex paIndex, const PaDe
 }
 #else
 bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex, const PaDeviceInfo&) {
+	return false;
+}
+
+bool shouldUseMonoCoreAudioInput(const PaDeviceInfo&) {
 	return false;
 }
 #endif
@@ -291,6 +345,9 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 	channelCount = std::min(numChannels, deviceInfo->maxInputChannels);
 	if (channelCount < 1)
 		channelCount = 1;
+	if (shouldUseMonoCoreAudioInput(*deviceInfo)) {
+		channelCount = 1;
+	}
 
 	activeChannel = 0;
 	dcFilter.setChannelCount(static_cast<size_t>(channelCount));
@@ -302,9 +359,20 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 	inputParameters.suggestedLatency = deviceInfo->defaultLowInputLatency;
 	inputParameters.hostApiSpecificStreamInfo = nullptr;
 
+#ifdef __APPLE__
+	PaMacCoreStreamInfo macStreamInfo{};
+	std::array<SInt32, 1> inputChannelMap{};
+	if (isCoreAudioInputDevice(*deviceInfo) && channelCount == 1) {
+		inputChannelMap[0] = preferredCoreAudioInputChannel(deviceIndex, *deviceInfo).value_or(0);
+		PaMacCore_SetupStreamInfo(&macStreamInfo, paMacCorePlayNice);
+		PaMacCore_SetupChannelMap(&macStreamInfo, inputChannelMap.data(), inputChannelMap.size());
+		inputParameters.hostApiSpecificStreamInfo = &macStreamInfo;
+	}
+#endif
+
 	const PaError err =
 		Pa_OpenStream(&stream, &inputParameters, nullptr, deviceInfo->defaultSampleRate,
-					  FFTProcessor::FFT_SIZE, paClipOff, audioCallback, this);
+					  paFramesPerBufferUnspecified, paClipOff, audioCallback, this);
 
 	if (err != paNoError) {
 		std::cerr << "AudioInput: Failed to open stream: " << Pa_GetErrorText(err) << std::endl;
@@ -395,16 +463,35 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 
 		audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount), audio->sampleRate, static_cast<size_t>(audio->channelCount));
 
-		float leftPeak = 0.0f;
-		float rightPeak = 0.0f;
+		constexpr size_t MAX_LEVEL_CHANNELS = 16;
+		std::array<float, MAX_LEVEL_CHANNELS> channelPeaks{};
 		const size_t channels = static_cast<size_t>(std::max(audio->channelCount, 1));
+		const size_t meteredChannels = std::min(channels, channelPeaks.size());
 		for (unsigned long frame = 0; frame < frameCount; ++frame) {
 			const size_t offset = static_cast<size_t>(frame) * channels;
-			const float left = std::abs(inBuffer[offset]);
-			const float right = channels > 1 ? std::abs(inBuffer[offset + 1]) : left;
-			leftPeak = std::max(leftPeak, left);
-			rightPeak = std::max(rightPeak, right);
+			for (size_t ch = 0; ch < meteredChannels; ++ch) {
+				channelPeaks[ch] = std::max(channelPeaks[ch], std::abs(inBuffer[offset + ch]));
+			}
 		}
+
+		float leftPeak = channelPeaks[0];
+		float rightPeak = meteredChannels > 1 ? channelPeaks[1] : leftPeak;
+		if (meteredChannels > 2) {
+			float strongestPeak = 0.0f;
+			float secondStrongestPeak = 0.0f;
+			for (size_t ch = 0; ch < meteredChannels; ++ch) {
+				const float peak = channelPeaks[ch];
+				if (peak > strongestPeak) {
+					secondStrongestPeak = strongestPeak;
+					strongestPeak = peak;
+				} else if (peak > secondStrongestPeak) {
+					secondStrongestPeak = peak;
+				}
+			}
+			leftPeak = strongestPeak;
+			rightPeak = secondStrongestPeak > 0.0f ? secondStrongestPeak : strongestPeak;
+		}
+
 		audio->updateStereoLevels(leftPeak, rightPeak);
 	}
 	catch (const std::exception& e) {
@@ -522,7 +609,9 @@ bool AudioInputLevelMonitor::startDevice(MonitoredDevice& device) {
 		return false;
 	}
 
-	device.channelCount = std::min(2, deviceInfo->maxInputChannels);
+	device.channelCount = shouldUseMonoCoreAudioInput(*deviceInfo)
+		? 1
+		: std::min(2, deviceInfo->maxInputChannels);
 
 	PaStreamParameters inputParameters{};
 	inputParameters.device = device.paIndex;
@@ -530,6 +619,17 @@ bool AudioInputLevelMonitor::startDevice(MonitoredDevice& device) {
 	inputParameters.sampleFormat = paFloat32;
 	inputParameters.suggestedLatency = deviceInfo->defaultLowInputLatency;
 	inputParameters.hostApiSpecificStreamInfo = nullptr;
+
+#ifdef __APPLE__
+	PaMacCoreStreamInfo macStreamInfo{};
+	std::array<SInt32, 1> inputChannelMap{};
+	if (isCoreAudioInputDevice(*deviceInfo) && device.channelCount == 1) {
+		inputChannelMap[0] = preferredCoreAudioInputChannel(device.paIndex, *deviceInfo).value_or(0);
+		PaMacCore_SetupStreamInfo(&macStreamInfo, paMacCorePlayNice);
+		PaMacCore_SetupChannelMap(&macStreamInfo, inputChannelMap.data(), inputChannelMap.size());
+		inputParameters.hostApiSpecificStreamInfo = &macStreamInfo;
+	}
+#endif
 
 	PaStream* stream = nullptr;
 	const PaError openErr = Pa_OpenStream(

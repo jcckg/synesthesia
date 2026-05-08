@@ -12,6 +12,7 @@
 #include "resyne/ui/recorder/utils.h"
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
+#include "resyne/ui/recorder/timeline_actions.h"
 #include "resyne/ui/toolbar/toolbar.h"
 #include "renderer/presentation_resources.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
@@ -20,6 +21,7 @@ namespace ReSyne {
 
 void Recorder::drawFullWindow(RecorderState& state,
                               AudioInput& audioInput,
+                              bool canStartRecording,
                               float windowX,
                               float windowY,
                               float windowWidth,
@@ -225,6 +227,12 @@ void Recorder::drawFullWindow(RecorderState& state,
 
     const bool windowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     Recorder::handleKeyboardShortcuts(state, windowFocused, hasData && !state.isRecording);
+    if (!canStartRecording && state.recordingCountdownActive) {
+        RecorderUI::cancelRecordingCountdown(state);
+    }
+    if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
+        startRecording(state, audioInput.getAudioProcessor(), 2048, 1024);
+    }
 
     constexpr float BUTTON_WIDTH = 80.0f;
     constexpr float BUTTON_HEIGHT = 26.0f;
@@ -241,8 +249,10 @@ void Recorder::drawFullWindow(RecorderState& state,
     const float controlsSpacing = transportSpacing * 1.5f;
     const float lockToVisualisationSpacing = 6.0f;
     const float visualisationToExportSpacing = 6.0f;
+    const float clearToExportSpacing = 6.0f;
     const float utilityControlsWidth =
-        BUTTON_HEIGHT + lockToVisualisationSpacing + BUTTON_HEIGHT + visualisationToExportSpacing + BUTTON_WIDTH;
+        BUTTON_HEIGHT + lockToVisualisationSpacing + BUTTON_HEIGHT +
+        visualisationToExportSpacing + BUTTON_HEIGHT + clearToExportSpacing + BUTTON_WIDTH;
     const float rightGroupWidth = toolbarWidth + controlsSpacing + utilityControlsWidth;
 
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(4.0f, 0.0f));
@@ -257,9 +267,19 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        ImGui::BeginDisabled(state.isRecording);
-        if (ImGui::Button("START", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
-            startRecording(state, audioInput.getAudioProcessor(), 2048, 1024);
+        ImGui::BeginDisabled(state.isRecording || !canStartRecording);
+        const char* startLabel = state.recordingCountdownActive
+            ? RecorderUI::recordingStartButtonLabel(state)
+            : "START";
+        if (ImGui::Button(startLabel, ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
+            if (state.recordingCountdownActive) {
+                RecorderUI::cancelRecordingCountdown(state);
+            } else {
+                RecorderUI::beginRecordingCountdown(state);
+            }
+        }
+        if (!canStartRecording && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            ImGui::SetTooltip("Select an input device in the sidebar");
         }
         ImGui::EndDisabled();
 
@@ -273,7 +293,7 @@ void Recorder::drawFullWindow(RecorderState& state,
 
         ImGui::SameLine(0.0f, BUTTON_SPACING);
 
-        ImGui::BeginDisabled(state.isRecording);
+        ImGui::BeginDisabled(state.isRecording || state.recordingCountdownActive);
         if (ImGui::Button("LOAD", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
             state.shouldOpenLoadDialog = true;
         }
@@ -373,6 +393,20 @@ void Recorder::drawFullWindow(RecorderState& state,
 
         ImGui::SameLine(0.0f, visualisationToExportSpacing);
 
+        const bool clearTimelineEnabled =
+            hasData && !state.isRecording && !state.recordingCountdownActive &&
+            !state.importRunning.load(std::memory_order_acquire);
+        if (UI::Utilities::drawToolButton(
+                ICON_FA_TRASH,
+                "Clear timeline",
+                false,
+                clearTimelineEnabled,
+                BUTTON_HEIGHT)) {
+            RecorderUI::requestTimelineClear(state);
+        }
+
+        ImGui::SameLine(0.0f, clearToExportSpacing);
+
         if (ImGui::Button("Export", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
             state.showExportDialog = true;
         }
@@ -394,6 +428,7 @@ void Recorder::drawFullWindow(RecorderState& state,
     drawExportDialog(state);
     drawLoadingDialog(state);
     drawExportingDialog(state);
+    RecorderUI::drawClearTimelineDialog(state);
 }
 
 }

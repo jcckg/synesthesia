@@ -228,6 +228,8 @@ DeviceSelectionResult DeviceManager::validateAndSelectDevice(DeviceState& device
     if (!audioInput.initStream(devices[static_cast<size_t>(newDeviceIndex)].paIndex, channelsToUse)) {
         return {false, "Error opening device!"};
     }
+
+    channelsToUse = audioInput.getChannelCount();
     
     deviceState.selectedDeviceIndex = newDeviceIndex;
     createChannelNames(deviceState, channelsToUse);

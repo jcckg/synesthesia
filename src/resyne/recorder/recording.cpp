@@ -64,6 +64,9 @@ bool Recorder::hasLoadedAudio(RecorderState& state) {
 
 void Recorder::clearLoadedAudio(RecorderState& state) {
     state.isRecording = false;
+    state.recordingCountdownActive = false;
+    state.recordingCountdownRemaining = 0.0f;
+    state.showClearTimelineDialog = false;
     if (state.audioOutput) {
         state.audioOutput->stop();
         state.audioOutput->clearAudioData();
