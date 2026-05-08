@@ -240,10 +240,6 @@ std::optional<SInt32> preferredCoreAudioInputChannel(const PaDeviceIndex paIndex
 }
 
 bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
-	if (shouldUseMonoCoreAudioInput(paDeviceInfo)) {
-		return true;
-	}
-
 	const std::optional<AudioDeviceID> deviceId = coreAudioDeviceIdForPortAudioDevice(paIndex, paDeviceInfo);
 	if (deviceId) {
 		UInt32 transportType = 0;
