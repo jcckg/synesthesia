@@ -107,6 +107,9 @@ struct RecorderState {
     std::unique_ptr<AudioOutput> audioOutput;
     std::vector<float> playbackAudio;
     bool isPlaybackInitialised = false;
+    bool playbackOutputRefreshPending = false;
+    bool playbackStartPending = false;
+    double playbackRouteReadyTime = 0.0;
 
     bool loopEnabled = true;
     bool showExportDialog = false;
@@ -203,6 +206,7 @@ public:
     static void seekPlayback(RecorderState& state, float normalisedPosition);
     static void reconstructAudio(RecorderState& state);
     static bool refreshPlaybackOutput(RecorderState& state);
+    static bool completePendingPlaybackRouteRefresh(RecorderState& state);
     static void importFromFileThreaded(RecorderState& state,
                                        std::string filepath,
                                        ColourCore::ColourSpace colourSpace,

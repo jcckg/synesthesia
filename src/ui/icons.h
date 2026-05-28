@@ -5,11 +5,15 @@
 #pragma once
 
 #define FONT_ICON_FILE_NAME_FAS "fa-solid-900.ttf"
+#define FONT_ICON_FILE_NAME_FAB "fa-brands-400.ttf"
 
 // Font Awesome icon ranges
 #define ICON_MIN_FA 0xe005
 #define ICON_MAX_16_FA 0xf8ff
 #define ICON_MAX_FA 0xf8ff
+
+#define ICON_MIN_FAB 0xf293
+#define ICON_MAX_FAB 0xf294
 
 // Icons used in Synesthesia
 #define ICON_FA_PLAY "\xef\x81\x8b"              // U+f04b
@@ -25,3 +29,4 @@
 #define ICON_FA_HAND_POINTER "\xef\x89\x9a"       // U+f25a (grab)
 #define ICON_FA_CROSSHAIRS "\xef\x81\x9b"         // U+f05b (track)
 #define ICON_FA_BACKWARD_STEP "\xef\x81\x88"      // U+f048 (skip to start)
+#define ICON_FA_BLUETOOTH "\xef\x8a\x93"

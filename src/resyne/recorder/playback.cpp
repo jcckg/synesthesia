@@ -8,6 +8,35 @@
 
 namespace ReSyne {
 
+namespace {
+
+bool refreshPlaybackOutputPreservingPosition(RecorderState& state) {
+    const bool wasPlaying = state.audioOutput && state.audioOutput->isPlaying();
+    const size_t playbackPosition = state.audioOutput ? state.audioOutput->getPlaybackPosition() : 0;
+
+    if (state.audioOutput) {
+        state.audioOutput->pause();
+    }
+
+    if (!Recorder::refreshPlaybackOutput(state)) {
+        return false;
+    }
+
+    if (state.audioOutput) {
+        const size_t totalFrames = state.audioOutput->getTotalFrames();
+        if (totalFrames > 0) {
+            state.audioOutput->seek(std::min(playbackPosition, totalFrames - 1));
+        }
+        if (wasPlaying) {
+            state.audioOutput->play();
+        }
+    }
+
+    return true;
+}
+
+}
+
 bool Recorder::ensureRsynSamplesLoaded(RecorderState& state) {
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
@@ -151,6 +180,19 @@ void Recorder::reconstructAudio(RecorderState& state) {
 }
 
 void Recorder::startPlayback(RecorderState& state) {
+    if (state.playbackOutputRefreshPending) {
+        const double now = ImGui::GetTime();
+        if (now < state.playbackRouteReadyTime) {
+            state.playbackStartPending = true;
+            state.statusMessage = "Preparing Bluetooth playback";
+            state.statusMessageTimer = static_cast<float>(state.playbackRouteReadyTime - now);
+            return;
+        }
+
+        state.playbackOutputRefreshPending = false;
+        refreshPlaybackOutputPreservingPosition(state);
+    }
+
     ensureRsynSamplesLoaded(state);
 
     if (!state.isPlaybackInitialised || state.playbackAudio.empty()) {
@@ -191,13 +233,35 @@ void Recorder::startPlayback(RecorderState& state) {
     state.audioOutput->play();
 }
 
+bool Recorder::completePendingPlaybackRouteRefresh(RecorderState& state) {
+    if (!state.playbackOutputRefreshPending || ImGui::GetTime() < state.playbackRouteReadyTime) {
+        return false;
+    }
+
+    const bool startPending = state.playbackStartPending;
+    state.playbackOutputRefreshPending = false;
+    state.playbackStartPending = false;
+
+    const bool refreshed = refreshPlaybackOutputPreservingPosition(state);
+    if (refreshed && startPending) {
+        if (state.statusMessage == "Preparing Bluetooth playback") {
+            state.statusMessage.clear();
+            state.statusMessageTimer = 0.0f;
+        }
+        startPlayback(state);
+    }
+    return refreshed;
+}
+
 void Recorder::pausePlayback(RecorderState& state) {
+    state.playbackStartPending = false;
     if (state.audioOutput) {
         state.audioOutput->pause();
     }
 }
 
 void Recorder::stopPlayback(RecorderState& state) {
+    state.playbackStartPending = false;
     if (state.audioOutput) {
         state.audioOutput->stop();
     }

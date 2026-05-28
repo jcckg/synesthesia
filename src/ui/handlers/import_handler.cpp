@@ -63,6 +63,9 @@ void ImportHandler::processFileImport(UIState& state) {
 					recorderState.metadata = std::move(recorderState.importedMetadata);
 					recorderState.isRecording = false;
 					recorderState.isPlaybackInitialised = false;
+					recorderState.playbackOutputRefreshPending = false;
+					recorderState.playbackStartPending = false;
+					recorderState.playbackRouteReadyTime = 0.0;
 					recorderState.timelinePreviewCache.clear();
 					recorderState.timelinePreviewCacheDirty = true;
 

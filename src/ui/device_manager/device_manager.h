@@ -38,7 +38,8 @@ public:
     static bool selectDevice(DeviceState& deviceState,
                             AudioInput& audioInput,
                             const std::vector<AudioInput::DeviceInfo>& devices,
-                            int newDeviceIndex);
+                            int newDeviceIndex,
+                            bool activateInputStream = true);
 
     static void selectChannel(DeviceState& deviceState,
                              AudioInput& audioInput,
@@ -47,7 +48,8 @@ public:
     static void renderDeviceSelection(DeviceState& deviceState,
                                      AudioInput& audioInput,
                                      const std::vector<AudioInput::DeviceInfo>& devices,
-                                     const AudioInputLevelMonitor& inputLevelMonitor);
+                                     const AudioInputLevelMonitor& inputLevelMonitor,
+                                     bool deferProtectedInputCapture = false);
 
     static void renderOutputDeviceSelection(DeviceState& deviceState,
                                            const std::vector<AudioOutput::DeviceInfo>& outputDevices,
@@ -64,5 +66,6 @@ private:
     static DeviceSelectionResult validateAndSelectDevice(DeviceState& deviceState,
                                                         AudioInput& audioInput,
                                                         const std::vector<AudioInput::DeviceInfo>& devices,
-                                                        int newDeviceIndex);
+                                                        int newDeviceIndex,
+                                                        bool activateInputStream);
 };

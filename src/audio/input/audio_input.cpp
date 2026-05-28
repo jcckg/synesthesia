@@ -4,12 +4,15 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <cwctype>
 #include <cmath>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
+#include <vector>
 
 #ifdef __linux__
 #include <alsa/asoundlib.h>
@@ -35,6 +38,21 @@ public:
 #include <CoreAudio/CoreAudio.h>
 #include <CoreFoundation/CoreFoundation.h>
 #include <pa_mac_core.h>
+#endif
+
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define INITGUID
+#include <windows.h>
+#include <devpkey.h>
+#include <propkeydef.h>
+#include <functiondiscoverykeys_devpkey.h>
+#include <mmdeviceapi.h>
+#include <pa_win_wasapi.h>
+#include <propidl.h>
+#include <setupapi.h>
 #endif
 
 namespace {
@@ -184,6 +202,11 @@ bool isContinuityCaptureTransport(const UInt32 transportType) {
 		   transportType == makeFourCC('c', 'c', 'a', 'p');
 }
 
+bool isBluetoothAudioTransport(const UInt32 transportType) {
+	return transportType == makeFourCC('b', 'l', 'u', 'e') ||
+		   transportType == makeFourCC('b', 'l', 'e', 'a');
+}
+
 bool looksLikeContinuityDeviceName(const std::string_view name) {
 	std::string lowerName;
 	lowerName.reserve(name.size());
@@ -239,7 +262,7 @@ std::optional<SInt32> preferredCoreAudioInputChannel(const PaDeviceIndex paIndex
 	return static_cast<SInt32>(preferredChannels[0] - 1);
 }
 
-bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
+bool shouldProtectPassiveLevelMonitoring(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
 	const std::optional<AudioDeviceID> deviceId = coreAudioDeviceIdForPortAudioDevice(paIndex, paDeviceInfo);
 	if (deviceId) {
 		UInt32 transportType = 0;
@@ -250,15 +273,309 @@ bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex paIndex, const PaDe
 								   kAudioObjectPropertyElementMain,
 								   dataSize,
 								   &transportType)) {
-			return isContinuityCaptureTransport(transportType);
+			return isContinuityCaptureTransport(transportType) ||
+				   isBluetoothAudioTransport(transportType);
 		}
 	}
 
 	return looksLikeContinuityDeviceName(paDeviceInfo.name != nullptr ? paDeviceInfo.name : "");
 }
-#else
-bool shouldSkipBackgroundLevelMonitoring(const PaDeviceIndex, const PaDeviceInfo&) {
+#elif !defined(_WIN32)
+bool shouldProtectPassiveLevelMonitoring(const PaDeviceIndex, const PaDeviceInfo&) {
 	return false;
+}
+
+bool shouldUseMonoCoreAudioInput(const PaDeviceInfo&) {
+	return false;
+}
+#endif
+
+#ifdef _WIN32
+std::wstring toLowerWide(std::wstring value) {
+	std::transform(value.begin(), value.end(), value.begin(), [](const wchar_t ch) {
+		return static_cast<wchar_t>(std::towlower(ch));
+	});
+	return value;
+}
+
+bool wideTextContainsBluetoothHint(const std::wstring& value) {
+	const std::wstring lower = toLowerWide(value);
+	return lower.find(L"bluetooth") != std::wstring::npos ||
+		   lower.find(L"hands-free") != std::wstring::npos ||
+		   lower.find(L"hands free") != std::wstring::npos;
+}
+
+bool wideTextContainsBluetoothIdHint(const std::wstring& value) {
+	return wideTextContainsBluetoothHint(value) ||
+		   toLowerWide(value).find(L"bth") != std::wstring::npos;
+}
+
+bool textContainsBluetoothHint(const std::string_view value) {
+	std::string lower;
+	lower.reserve(value.size());
+	for (const char ch : value) {
+		lower.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(ch))));
+	}
+	return lower.find("bluetooth") != std::string::npos ||
+		   lower.find("hands-free") != std::string::npos ||
+		   lower.find("hands free") != std::string::npos;
+}
+
+bool propVariantToGuid(const PROPVARIANT& value, GUID& guid) {
+	if (value.vt == VT_CLSID && value.puuid != nullptr) {
+		guid = *value.puuid;
+		return true;
+	}
+	if (value.vt == VT_LPWSTR && value.pwszVal != nullptr) {
+		return CLSIDFromString(value.pwszVal, &guid) == S_OK;
+	}
+	return false;
+}
+
+std::optional<GUID> devicePropertyGuid(HDEVINFO deviceInfoSet,
+									   SP_DEVINFO_DATA& deviceInfoData,
+									   const DEVPROPKEY& key) {
+	DEVPROPTYPE propertyType = 0;
+	GUID value{};
+	DWORD requiredSize = 0;
+	if (SetupDiGetDevicePropertyW(deviceInfoSet,
+								  &deviceInfoData,
+								  &key,
+								  &propertyType,
+								  reinterpret_cast<PBYTE>(&value),
+								  sizeof(value),
+								  &requiredSize,
+								  0) &&
+		propertyType == DEVPROP_TYPE_GUID) {
+		return value;
+	}
+	return std::nullopt;
+}
+
+std::wstring devicePropertyString(HDEVINFO deviceInfoSet,
+								  SP_DEVINFO_DATA& deviceInfoData,
+								  const DEVPROPKEY& key) {
+	DEVPROPTYPE propertyType = 0;
+	DWORD requiredSize = 0;
+	if (SetupDiGetDevicePropertyW(deviceInfoSet,
+								  &deviceInfoData,
+								  &key,
+								  &propertyType,
+								  nullptr,
+								  0,
+								  &requiredSize,
+								  0) ||
+		GetLastError() != ERROR_INSUFFICIENT_BUFFER ||
+		requiredSize == 0) {
+		return {};
+	}
+
+	std::vector<BYTE> buffer(requiredSize);
+	if (!SetupDiGetDevicePropertyW(deviceInfoSet,
+								   &deviceInfoData,
+								   &key,
+								   &propertyType,
+								   buffer.data(),
+								   static_cast<DWORD>(buffer.size()),
+								   nullptr,
+								   0) ||
+		propertyType != DEVPROP_TYPE_STRING) {
+		return {};
+	}
+
+	return reinterpret_cast<const wchar_t*>(buffer.data());
+}
+
+std::wstring deviceInstanceId(HDEVINFO deviceInfoSet, SP_DEVINFO_DATA& deviceInfoData) {
+	DWORD requiredSize = 0;
+	SetupDiGetDeviceInstanceIdW(deviceInfoSet, &deviceInfoData, nullptr, 0, &requiredSize);
+	if (requiredSize == 0) {
+		return {};
+	}
+
+	std::vector<wchar_t> buffer(requiredSize);
+	if (!SetupDiGetDeviceInstanceIdW(deviceInfoSet,
+									 &deviceInfoData,
+									 buffer.data(),
+									 static_cast<DWORD>(buffer.size()),
+									 nullptr)) {
+		return {};
+	}
+	return buffer.data();
+}
+
+bool isBluetoothEnumeratorName(const std::wstring& value) {
+	const std::wstring lower = toLowerWide(value);
+	return lower == L"bthenum" ||
+		   lower == L"bthle" ||
+		   lower == L"bthhfenum" ||
+		   lower == L"btha2dp" ||
+		   lower == L"bluetooth" ||
+		   lower.find(L"bluetooth") != std::wstring::npos;
+}
+
+std::vector<GUID> bluetoothDeviceContainerIds() {
+	std::vector<GUID> containerIds;
+	HDEVINFO deviceInfoSet = SetupDiGetClassDevsW(nullptr, nullptr, nullptr, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+	if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+		return containerIds;
+	}
+
+	for (DWORD index = 0;; ++index) {
+		SP_DEVINFO_DATA deviceInfoData{};
+		deviceInfoData.cbSize = sizeof(deviceInfoData);
+		if (!SetupDiEnumDeviceInfo(deviceInfoSet, index, &deviceInfoData)) {
+			break;
+		}
+
+		const std::wstring enumeratorName = devicePropertyString(
+			deviceInfoSet,
+			deviceInfoData,
+			DEVPKEY_Device_EnumeratorName);
+		const std::wstring instanceId = deviceInstanceId(deviceInfoSet, deviceInfoData);
+		if (!isBluetoothEnumeratorName(enumeratorName) && !wideTextContainsBluetoothIdHint(instanceId)) {
+			continue;
+		}
+
+		const std::optional<GUID> containerId = devicePropertyGuid(
+			deviceInfoSet,
+			deviceInfoData,
+			DEVPKEY_Device_ContainerId);
+		if (!containerId) {
+			continue;
+		}
+
+		const bool alreadyPresent = std::any_of(
+			containerIds.begin(),
+			containerIds.end(),
+			[&containerId](const GUID& existing) {
+				return IsEqualGUID(existing, *containerId);
+			});
+		if (!alreadyPresent) {
+			containerIds.push_back(*containerId);
+		}
+	}
+
+	SetupDiDestroyDeviceInfoList(deviceInfoSet);
+	return containerIds;
+}
+
+class ScopedComInitialiser {
+public:
+	ScopedComInitialiser()
+		: result_(CoInitializeEx(nullptr, COINIT_MULTITHREADED)) {
+	}
+
+	~ScopedComInitialiser() {
+		if (result_ == S_OK || result_ == S_FALSE) {
+			CoUninitialize();
+		}
+	}
+
+	bool available() const {
+		return SUCCEEDED(result_) || result_ == RPC_E_CHANGED_MODE;
+	}
+
+private:
+	HRESULT result_;
+};
+
+std::wstring endpointStringProperty(IPropertyStore* propertyStore, const PROPERTYKEY& key) {
+	if (propertyStore == nullptr) {
+		return {};
+	}
+
+	PROPVARIANT value;
+	PropVariantInit(&value);
+	std::wstring result;
+	if (SUCCEEDED(propertyStore->GetValue(key, &value)) && value.vt == VT_LPWSTR && value.pwszVal != nullptr) {
+		result = value.pwszVal;
+	}
+	PropVariantClear(&value);
+	return result;
+}
+
+std::optional<GUID> endpointContainerId(IPropertyStore* propertyStore) {
+	if (propertyStore == nullptr) {
+		return std::nullopt;
+	}
+
+	PROPVARIANT value;
+	PropVariantInit(&value);
+	GUID containerId{};
+	const bool found =
+		SUCCEEDED(propertyStore->GetValue(PKEY_Device_ContainerId, &value)) &&
+		propVariantToGuid(value, containerId);
+	PropVariantClear(&value);
+	if (found) {
+		return containerId;
+	}
+	return std::nullopt;
+}
+
+bool endpointContainerIsBluetooth(const GUID& endpointContainerId) {
+	const std::vector<GUID> bluetoothContainers = bluetoothDeviceContainerIds();
+	return std::any_of(
+		bluetoothContainers.begin(),
+		bluetoothContainers.end(),
+		[&endpointContainerId](const GUID& bluetoothContainerId) {
+			return IsEqualGUID(endpointContainerId, bluetoothContainerId);
+		});
+}
+
+bool endpointPropertiesSuggestBluetooth(IMMDevice* device) {
+	IPropertyStore* propertyStore = nullptr;
+	if (FAILED(device->OpenPropertyStore(STGM_READ, &propertyStore)) || propertyStore == nullptr) {
+		return false;
+	}
+
+	bool bluetooth = false;
+	if (const std::optional<GUID> containerId = endpointContainerId(propertyStore)) {
+		bluetooth = endpointContainerIsBluetooth(*containerId);
+	}
+
+	if (!bluetooth) {
+		bluetooth =
+			wideTextContainsBluetoothHint(endpointStringProperty(propertyStore, PKEY_Device_FriendlyName)) ||
+			wideTextContainsBluetoothHint(endpointStringProperty(propertyStore, PKEY_Device_DeviceDesc)) ||
+			wideTextContainsBluetoothHint(endpointStringProperty(propertyStore, PKEY_DeviceInterface_FriendlyName));
+	}
+
+	propertyStore->Release();
+	return bluetooth;
+}
+
+bool windowsWasapiInputIsBluetooth(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
+	const PaHostApiInfo* hostApiInfo = Pa_GetHostApiInfo(paDeviceInfo.hostApi);
+	if (hostApiInfo == nullptr || hostApiInfo->type != paWASAPI) {
+		return textContainsBluetoothHint(paDeviceInfo.name != nullptr ? paDeviceInfo.name : "");
+	}
+
+	ScopedComInitialiser com;
+	if (!com.available()) {
+		return textContainsBluetoothHint(paDeviceInfo.name != nullptr ? paDeviceInfo.name : "");
+	}
+
+	void* rawDevice = nullptr;
+	if (PaWasapi_GetIMMDevice(paIndex, &rawDevice) != paNoError || rawDevice == nullptr) {
+		return textContainsBluetoothHint(paDeviceInfo.name != nullptr ? paDeviceInfo.name : "");
+	}
+
+	auto* device = static_cast<IMMDevice*>(rawDevice);
+	bool bluetooth = endpointPropertiesSuggestBluetooth(device);
+	LPWSTR endpointId = nullptr;
+	if (!bluetooth && SUCCEEDED(device->GetId(&endpointId)) && endpointId != nullptr) {
+		bluetooth = wideTextContainsBluetoothIdHint(endpointId);
+	}
+	if (endpointId != nullptr) {
+		CoTaskMemFree(endpointId);
+	}
+
+	return bluetooth;
+}
+
+bool shouldProtectPassiveLevelMonitoring(const PaDeviceIndex paIndex, const PaDeviceInfo& paDeviceInfo) {
+	return windowsWasapiInputIsBluetooth(paIndex, paDeviceInfo);
 }
 
 bool shouldUseMonoCoreAudioInput(const PaDeviceInfo&) {
@@ -313,11 +630,14 @@ std::vector<AudioInput::DeviceInfo> AudioInput::getInputDevices() {
 	for (int i = 0; i < deviceCount; ++i) {
 		if (const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i)) {
 			if (deviceInfo->maxInputChannels > 0) {
+				const bool passiveMonitoringProtected =
+					shouldProtectPassiveLevelMonitoring(i, *deviceInfo);
 				devices.emplace_back(DeviceInfo{
 					deviceInfo->name,
 					i,
 					deviceInfo->maxInputChannels,
-					!shouldSkipBackgroundLevelMonitoring(i, *deviceInfo)
+					!passiveMonitoringProtected,
+					passiveMonitoringProtected
 				});
 			}
 		}
@@ -413,6 +733,10 @@ bool AudioInput::resumeStream() {
 		}
 	}
 	return false;
+}
+
+void AudioInput::closeStream() {
+	stopStream();
 }
 
 bool AudioInput::isStreamActive() const {

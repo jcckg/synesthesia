@@ -87,6 +87,9 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     state.fallbackFftSize = 0;
     state.fallbackHopSize = 0;
     state.isPlaybackInitialised = false;
+    state.playbackOutputRefreshPending = false;
+    state.playbackStartPending = false;
+    state.playbackRouteReadyTime = 0.0;
     state.dropFlashAlpha = 0.0f;
     state.statusMessage.clear();
     state.statusMessageTimer = 0.0f;

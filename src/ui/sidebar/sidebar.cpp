@@ -231,7 +231,10 @@ void render(RenderArgs& args) {
         args.uiState.deviceState,
         args.audioInput,
         args.devices,
-        args.uiState.inputLevelMonitor);
+        args.uiState.inputLevelMonitor,
+        ReSyne::Recorder::hasLoadedAudio(args.recorderState) &&
+            !args.recorderState.isRecording &&
+            !args.recorderState.recordingCountdownActive);
     DeviceManager::renderOutputDeviceSelection(
         args.uiState.deviceState,
         args.outputDevices,
@@ -240,13 +243,14 @@ void render(RenderArgs& args) {
             ? args.recorderState.audioOutput->getStereoLevels()
             : std::array<float, 2>{0.0f, 0.0f});
 
-    bool deviceSelected = args.uiState.deviceState.selectedDeviceIndex >= 0;
-    bool streamHealthy = !args.uiState.deviceState.streamError;
-    bool hasLiveInput = (deviceSelected && streamHealthy) && !args.isPlaybackActive;
+    const bool deviceSelected = args.uiState.deviceState.selectedDeviceIndex >= 0;
+    const bool streamHealthy = !args.uiState.deviceState.streamError;
+    const bool inputStreamActive = args.audioInput.isStreamActive();
+    const bool hasLiveInput = (deviceSelected && streamHealthy && inputStreamActive) && !args.isPlaybackActive;
     const bool hasProcessedAudio = args.recorderState.isRecording || ReSyne::Recorder::hasLoadedAudio(args.recorderState);
     const bool showEQControls = !hasProcessedAudio;
 
-    bool showFrequencyInfo = (deviceSelected && streamHealthy) || args.isPlaybackActive;
+    const bool showFrequencyInfo = (deviceSelected && streamHealthy && inputStreamActive) || args.isPlaybackActive;
 
     if (args.uiState.visualSettings.activeView == UIState::View::ReSyne) {
         if (showFrequencyInfo) {

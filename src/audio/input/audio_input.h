@@ -20,6 +20,7 @@ public:
 		int paIndex;
 		int maxChannels;
 		bool allowLevelMonitoring = true;
+		bool passiveMonitoringProtected = false;
 	};
 
 	AudioInput();
@@ -29,6 +30,7 @@ public:
 	bool initStream(int deviceIndex, int numChannels = 1);
 	bool pauseStream();
 	bool resumeStream();
+	void closeStream();
 	bool isStreamActive() const;
 	std::array<float, 2> getStereoLevels() const {
 		return {leftLevel.load(), rightLevel.load()};

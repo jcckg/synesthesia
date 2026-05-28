@@ -128,6 +128,53 @@ void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dro
 	}
 }
 
+bool selectedInputIsPassiveMonitoringProtected(const DeviceState& deviceState,
+											   const std::vector<AudioInput::DeviceInfo>& devices) {
+	return deviceState.selectedDeviceIndex >= 0 &&
+		   static_cast<size_t>(deviceState.selectedDeviceIndex) < devices.size() &&
+		   devices[static_cast<size_t>(deviceState.selectedDeviceIndex)].passiveMonitoringProtected;
+}
+
+bool selectedInputIsValid(const DeviceState& deviceState,
+						  const std::vector<AudioInput::DeviceInfo>& devices) {
+	return deviceState.selectedDeviceIndex >= 0 &&
+		   static_cast<size_t>(deviceState.selectedDeviceIndex) < devices.size() &&
+		   !deviceState.streamError;
+}
+
+bool ensureSelectedInputStream(DeviceState& deviceState,
+							   AudioInput& audioInput,
+							   const std::vector<AudioInput::DeviceInfo>& devices) {
+	if (!selectedInputIsValid(deviceState, devices)) {
+		return false;
+	}
+	if (audioInput.isStreamActive()) {
+		return true;
+	}
+	return DeviceManager::selectDevice(
+		deviceState,
+		audioInput,
+		devices,
+		deviceState.selectedDeviceIndex,
+		true);
+}
+
+void schedulePlaybackRouteRefresh(ReSyne::RecorderState& recorderState) {
+	const double readyTime = ImGui::GetTime() + 2.25;
+	recorderState.playbackRouteReadyTime = std::max(recorderState.playbackRouteReadyTime, readyTime);
+	recorderState.playbackOutputRefreshPending = true;
+}
+
+void cancelPlaybackRouteRefresh(ReSyne::RecorderState& recorderState) {
+	recorderState.playbackOutputRefreshPending = false;
+	recorderState.playbackStartPending = false;
+	recorderState.playbackRouteReadyTime = 0.0;
+	if (recorderState.statusMessage == "Preparing Bluetooth playback") {
+		recorderState.statusMessage.clear();
+		recorderState.statusMessageTimer = 0.0f;
+	}
+}
+
 }
 
 void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>& devices,
@@ -237,6 +284,28 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 
     DeviceManager::populateDeviceNames(state.deviceState, devices);
+	const bool hasPlaybackSession = UI::AudioVisualisation::hasPlaybackSession(recorderState);
+	const bool protectedSelectedInput =
+		selectedInputIsPassiveMonitoringProtected(state.deviceState, devices);
+	const bool recordingNeedsInput =
+		recorderState.isRecording || recorderState.recordingCountdownActive;
+
+	if (recordingNeedsInput) {
+		cancelPlaybackRouteRefresh(recorderState);
+	}
+
+	if (protectedSelectedInput && recordingNeedsInput) {
+		if (!ensureSelectedInputStream(state.deviceState, audioInput, devices)) {
+			recorderState.recordingCountdownActive = false;
+			recorderState.recordingCountdownRemaining = 0.0f;
+		}
+	} else if (protectedSelectedInput && ReSyne::Recorder::hasLoadedAudio(recorderState) && audioInput.isStreamActive()) {
+		audioInput.closeStream();
+		schedulePlaybackRouteRefresh(recorderState);
+	}
+
+	ReSyne::Recorder::completePendingPlaybackRouteRefresh(recorderState);
+
     int activeInputPaIndex = -1;
     if (state.deviceState.selectedDeviceIndex >= 0 &&
         static_cast<size_t>(state.deviceState.selectedDeviceIndex) < devices.size() &&
@@ -317,8 +386,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	static float currentDisplayG = 0.0f;
 	static float currentDisplayB = 0.0f;
 
-	bool hasPlaybackSession = UI::AudioVisualisation::hasPlaybackSession(recorderState);
-
 	UI::AudioVisualisation::ColourUpdateContext colourCtx{
 		deltaTime,
 		state.visualSettings.smoothingEnabled,
@@ -339,11 +406,13 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			colourCtx);
 	}
 
-	bool hasMicInput = state.deviceState.selectedDeviceIndex >= 0;
+	const bool hasMicInput =
+		state.deviceState.selectedDeviceIndex >= 0 &&
+		!state.deviceState.streamError &&
+		audioInput.isStreamActive();
     const bool canStartRecording =
-        state.deviceState.selectedDeviceIndex >= 0 &&
-        !state.deviceState.streamError &&
-        audioInput.isStreamActive();
+        selectedInputIsValid(state.deviceState, devices) &&
+        (audioInput.isStreamActive() || protectedSelectedInput);
 
 	if (!hasPlaybackSession && hasMicInput) {
 		UI::AudioVisualisation::processLiveAudioState(

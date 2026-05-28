@@ -19,12 +19,14 @@ if(WIN32)
     syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/IBMPlexMono-Medium.ttf" "embedded_assets/fonts/IBMPlexMono-Medium.ttf" SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM)
     syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/IBMPlexMono-Light.ttf" "embedded_assets/fonts/IBMPlexMono-Light.ttf" SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT)
     syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/icons/fa-solid-900.ttf" "embedded_assets/fonts/icons/fa-solid-900.ttf" SYN_ASSET_FONT_AWESOME_SOLID)
+    syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/fonts/icons/fa-brands-400.ttf" "embedded_assets/fonts/icons/fa-brands-400.ttf" SYN_ASSET_FONT_AWESOME_BRANDS)
     syn_register_embedded_asset("${CMAKE_SOURCE_DIR}/assets/luts/ReSyne_Display_v1.cube" "embedded_assets/luts/ReSyne_Display_v1.cube" SYN_ASSET_RESYNE_DISPLAY_LUT)
 
     file(READ ${CMAKE_SOURCE_DIR}/src/renderer/windows/app.rc.in APP_RC_TEMPLATE)
     string(REPLACE "@SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM@" "${SYN_ASSET_FONT_IBM_PLEX_MONO_MEDIUM}" APP_RC_CONTENT "${APP_RC_TEMPLATE}")
     string(REPLACE "@SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT@" "${SYN_ASSET_FONT_IBM_PLEX_MONO_LIGHT}" APP_RC_CONTENT "${APP_RC_CONTENT}")
     string(REPLACE "@SYN_ASSET_FONT_AWESOME_SOLID@" "${SYN_ASSET_FONT_AWESOME_SOLID}" APP_RC_CONTENT "${APP_RC_CONTENT}")
+    string(REPLACE "@SYN_ASSET_FONT_AWESOME_BRANDS@" "${SYN_ASSET_FONT_AWESOME_BRANDS}" APP_RC_CONTENT "${APP_RC_CONTENT}")
     string(REPLACE "@SYN_ASSET_RESYNE_DISPLAY_LUT@" "${SYN_ASSET_RESYNE_DISPLAY_LUT}" APP_RC_CONTENT "${APP_RC_CONTENT}")
 
     file(WRITE ${CMAKE_BINARY_DIR}/app.rc "${APP_RC_CONTENT}")
@@ -196,6 +198,9 @@ elseif(WIN32)
         vendor_oscpack
         vendor_imgui_backends
         dwmapi
+        ole32
+        setupapi
+        uuid
         windowsapp
     )
 

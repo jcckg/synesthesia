@@ -104,6 +104,7 @@ bool loadFonts(ImGuiIO& io, float dpiScale) {
     io.FontDefault = mainFont;
 
     static const ImWchar iconRanges[] = { ICON_MIN_FA, ICON_MAX_16_FA, 0 };
+    static const ImWchar brandIconRanges[] = { ICON_MIN_FAB, ICON_MAX_FAB, 0 };
     ImFontConfig iconConfig;
     iconConfig.MergeMode = true;
     iconConfig.PixelSnapH = true;
@@ -124,6 +125,17 @@ bool loadFonts(ImGuiIO& io, float dpiScale) {
             iconRanges
         );
         iconFontLoaded = iconFont != nullptr;
+
+        static std::vector<unsigned char> brandIconFontData = ResourceLoader::loadResourceAsVector(IDR_FONT_AWESOME_BRANDS);
+        ImFontConfig brandConfig = iconConfig;
+        brandConfig.FontDataOwnedByAtlas = false;
+        io.Fonts->AddFontFromMemoryTTF(
+            brandIconFontData.data(),
+            static_cast<int>(brandIconFontData.size()),
+            16.0f * dpiScale,
+            &brandConfig,
+            brandIconRanges
+        );
     } catch (const std::exception&) {
     }
 #endif
@@ -144,6 +156,25 @@ bool loadFonts(ImGuiIO& io, float dpiScale) {
             iconConfig.FontDataOwnedByAtlas = true;
             ImFont* iconFont = io.Fonts->AddFontFromFileTTF(path.c_str(), 16.0f * dpiScale, &iconConfig, iconRanges);
             iconFontLoaded = iconFont != nullptr;
+        }
+    }
+
+    {
+        std::vector<std::string> candidates;
+#if defined(__APPLE__)
+        if (!bundleResourcesPath.empty()) {
+            candidates.push_back(bundleResourcesPath + "/assets/fonts/icons/" + std::string(FONT_ICON_FILE_NAME_FAB));
+        }
+#endif
+        candidates.push_back(std::string("../assets/fonts/icons/") + FONT_ICON_FILE_NAME_FAB);
+        candidates.push_back(std::string("assets/fonts/icons/") + FONT_ICON_FILE_NAME_FAB);
+        candidates.push_back(FONT_ICON_FILE_NAME_FAB);
+
+        const std::string path = resolveResourceFile(candidates);
+        if (!path.empty()) {
+            ImFontConfig brandIconConfig = iconConfig;
+            brandIconConfig.FontDataOwnedByAtlas = true;
+            io.Fonts->AddFontFromFileTTF(path.c_str(), 16.0f * dpiScale, &brandIconConfig, brandIconRanges);
         }
     }
 

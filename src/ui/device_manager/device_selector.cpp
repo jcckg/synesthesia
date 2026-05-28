@@ -6,10 +6,12 @@
 #include <imgui_internal.h>
 #include <string>
 
+#include "ui/icons.h"
+
 namespace DeviceSelector {
 namespace {
 
-constexpr float kMeterWidth = 13.0f;
+constexpr float kMeterWidth = 16.0f;
 constexpr float kMeterHeight = 18.0f;
 constexpr float kIndicatorSpacing = 8.0f;
 constexpr float kMinimumComboWidth = 150.0f;
@@ -120,13 +122,37 @@ void drawStereoMeter(ImDrawList* drawList, const Item& item, const ImVec2 min, c
         item.rightLevel);
 }
 
+void drawBluetoothIndicator(ImDrawList* drawList, const ImVec2 min, const ImVec2 max) {
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float height = max.y - min.y;
+    const ImVec2 iconMin(
+        min.x + style.FramePadding.x,
+        min.y + (height - kMeterHeight) * 0.5f);
+    const ImVec2 iconMax(iconMin.x + kMeterWidth, iconMin.y + kMeterHeight);
+    const ImVec2 textSize = ImGui::CalcTextSize(ICON_FA_BLUETOOTH);
+    const ImVec2 textPos(
+        iconMin.x + (kMeterWidth - textSize.x) * 0.5f,
+        iconMin.y + (kMeterHeight - textSize.y) * 0.5f);
+    drawList->AddText(textPos, ImGui::GetColorU32(ImGuiCol_TextDisabled), ICON_FA_BLUETOOTH);
+    drawList->AddRect(iconMin, iconMax, ImGui::GetColorU32(ImGuiCol_Border), 0.0f, 0, 0.35f);
+}
+
+void drawIndicator(ImDrawList* drawList, const Item& item, const ImVec2 min, const ImVec2 max) {
+    if (item.indicatorKind == IndicatorKind::Bluetooth) {
+        drawBluetoothIndicator(drawList, min, max);
+        return;
+    }
+
+    drawStereoMeter(drawList, item, min, max);
+}
+
 void drawPreview(const Item& item, const char* label) {
     ImGuiContext& g = *GImGui;
     const ImGuiStyle& style = ImGui::GetStyle();
     const ImRect previewRect = g.ComboPreviewData.PreviewRect;
     ImDrawList* drawList = ImGui::GetWindowDrawList();
 
-    drawStereoMeter(drawList, item, previewRect.Min, previewRect.Max);
+    drawIndicator(drawList, item, previewRect.Min, previewRect.Max);
 
     const ImVec2 textMin(
         previewRect.Min.x + style.FramePadding.x + kMeterWidth + kIndicatorSpacing,
@@ -191,7 +217,7 @@ bool renderCombo(const char* label, int& selectedIndex, std::span<const Item> it
                 selectedIndex = static_cast<int>(i);
                 changed = true;
             }
-            drawStereoMeter(
+            drawIndicator(
                 ImGui::GetWindowDrawList(),
                 items[i],
                 ImGui::GetItemRectMin(),

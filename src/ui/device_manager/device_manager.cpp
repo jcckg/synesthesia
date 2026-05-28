@@ -19,7 +19,8 @@ std::vector<DeviceSelector::Item> buildSelectorItems(const std::vector<const cha
         items.push_back(DeviceSelector::Item{
             names[i],
             useLevels ? selectedLevels[0] : 0.0f,
-            useLevels ? selectedLevels[1] : 0.0f
+            useLevels ? selectedLevels[1] : 0.0f,
+            DeviceSelector::IndicatorKind::Meter
         });
     }
     return items;
@@ -41,11 +42,15 @@ std::vector<DeviceSelector::Item> buildInputSelectorItems(
         }
 
         const char* label = names[i];
+        DeviceSelector::IndicatorKind indicatorKind = DeviceSelector::IndicatorKind::Meter;
         if (i < devices.size()) {
             label = devices[i].name.c_str();
+            if (devices[i].passiveMonitoringProtected && !(selectedActive && selectedIndex == static_cast<int>(i))) {
+                indicatorKind = DeviceSelector::IndicatorKind::Bluetooth;
+            }
         }
 
-        items.push_back(DeviceSelector::Item{label, levels[0], levels[1]});
+        items.push_back(DeviceSelector::Item{label, levels[0], levels[1], indicatorKind});
     }
 
     return items;
@@ -89,8 +94,9 @@ void DeviceManager::populateOutputDeviceNames(DeviceState& deviceState,
 bool DeviceManager::selectDevice(DeviceState& deviceState, 
                                 AudioInput& audioInput,
                                 const std::vector<AudioInput::DeviceInfo>& devices,
-                                int newDeviceIndex) {
-    DeviceSelectionResult result = validateAndSelectDevice(deviceState, audioInput, devices, newDeviceIndex);
+                                int newDeviceIndex,
+                                bool activateInputStream) {
+    DeviceSelectionResult result = validateAndSelectDevice(deviceState, audioInput, devices, newDeviceIndex, activateInputStream);
     
     if (result.success) {
         deviceState.streamError = false;
@@ -116,7 +122,8 @@ void DeviceManager::selectChannel(DeviceState& deviceState,
 void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
                                          AudioInput& audioInput,
                                          const std::vector<AudioInput::DeviceInfo>& devices,
-                                         const AudioInputLevelMonitor& inputLevelMonitor) {
+                                         const AudioInputLevelMonitor& inputLevelMonitor,
+                                         const bool deferProtectedInputCapture) {
     ImGui::Text("INPUT DEVICE");
     
     if (!deviceState.deviceNames.empty()) {
@@ -132,7 +139,12 @@ void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
             audioInput.getStereoLevels(),
             inputLevelMonitor);
         if (DeviceSelector::renderCombo("##device", deviceState.selectedDeviceIndex, items)) {
-            selectDevice(deviceState, audioInput, devices, deviceState.selectedDeviceIndex);
+            const bool activateInputStream =
+                deviceState.selectedDeviceIndex < 0 ||
+                static_cast<size_t>(deviceState.selectedDeviceIndex) >= devices.size() ||
+                !deferProtectedInputCapture ||
+                !devices[static_cast<size_t>(deviceState.selectedDeviceIndex)].passiveMonitoringProtected;
+            selectDevice(deviceState, audioInput, devices, deviceState.selectedDeviceIndex, activateInputStream);
         }
         
         if (deviceState.streamError) {
@@ -215,7 +227,8 @@ void DeviceManager::resetDeviceState(DeviceState& deviceState) {
 DeviceSelectionResult DeviceManager::validateAndSelectDevice(DeviceState& deviceState,
                                                            AudioInput& audioInput,
                                                            const std::vector<AudioInput::DeviceInfo>& devices,
-                                                           int newDeviceIndex) {
+                                                           int newDeviceIndex,
+                                                           const bool activateInputStream) {
     if (newDeviceIndex < 0 || static_cast<size_t>(newDeviceIndex) >= devices.size()) {
         return {false, "Invalid device selection index."};
     }
@@ -225,11 +238,15 @@ DeviceSelectionResult DeviceManager::validateAndSelectDevice(DeviceState& device
     deviceState.selectedChannelIndex = 0;
     int channelsToUse = std::min(maxChannels, 16);
 
-    if (!audioInput.initStream(devices[static_cast<size_t>(newDeviceIndex)].paIndex, channelsToUse)) {
-        return {false, "Error opening device!"};
-    }
+    if (activateInputStream) {
+        if (!audioInput.initStream(devices[static_cast<size_t>(newDeviceIndex)].paIndex, channelsToUse)) {
+            return {false, "Error opening device!"};
+        }
 
-    channelsToUse = audioInput.getChannelCount();
+        channelsToUse = audioInput.getChannelCount();
+    } else {
+        audioInput.closeStream();
+    }
     
     deviceState.selectedDeviceIndex = newDeviceIndex;
     createChannelNames(deviceState, channelsToUse);
