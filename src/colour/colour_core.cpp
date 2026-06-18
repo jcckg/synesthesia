@@ -75,7 +75,7 @@ constexpr OutputProfileDefinition kRec2020Definition{
                  0.0f, 0.02807269f, 1.0609851f},
     .transfer = TransferFunction::Rec2020,
     .videoProfile = {
-        "colorspace=ispace=gbr:iprimaries=bt2020:itrc=bt2020-10:irange=pc:space=bt2020ncl:primaries=bt2020:trc=bt2020-10:range=tv:format=yuv420p10le",
+        "colorspace=ispace=gbr:iprimaries=bt2020:itrc=bt2020-10:irange=pc:space=bt2020ncl:primaries=bt2020:trc=bt2020-10:range=tv",
         "bt2020nc",
         "bt2020",
         "bt2020-10",
@@ -102,7 +102,7 @@ constexpr OutputProfileDefinition kDisplayP3Definition{
                  0.0f, 0.04511338f, 1.0439444f},
     .transfer = TransferFunction::SRGB,
     .videoProfile = {
-        "colorspace=ispace=gbr:iprimaries=smpte432:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=smpte432:trc=iec61966-2-1:range=tv:format=yuv420p",
+        "colorspace=ispace=gbr:iprimaries=smpte432:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=smpte432:trc=iec61966-2-1:range=tv",
         "bt709",
         "smpte432",
         "iec61966-2-1",
@@ -129,7 +129,7 @@ constexpr OutputProfileDefinition kSrgbDefinition{
                  0.01933082f, 0.11919478f, 0.95053214f},
     .transfer = TransferFunction::SRGB,
     .videoProfile = {
-        "colorspace=ispace=gbr:iprimaries=bt709:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=bt709:trc=iec61966-2-1:range=tv:format=yuv420p",
+        "colorspace=ispace=gbr:iprimaries=bt709:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=bt709:trc=iec61966-2-1:range=tv",
         "bt709",
         "bt709",
         "iec61966-2-1",

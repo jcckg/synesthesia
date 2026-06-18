@@ -4,11 +4,13 @@
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <numeric>
 #include <sstream>
 #include <string>
@@ -44,6 +46,11 @@ struct RGB {
     float b;
 };
 
+struct EncoderSettings {
+    std::string name;
+    std::string pixelFormat;
+};
+
 struct TempFile {
     fs::path path;
     ~TempFile() {
@@ -66,7 +73,15 @@ int closePipe(FILE* handle) {
     return _pclose(handle);
 }
 #else
+void ignoreSigpipeForFFmpegPipes() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        std::signal(SIGPIPE, SIG_IGN);
+    });
+}
+
 FILE* openPipe(const std::string& command) {
+    ignoreSigpipeForFFmpegPipes();
     return popen(command.c_str(), "w");
 }
 int closePipe(FILE* handle) {
@@ -243,43 +258,77 @@ double computeDuration(const std::vector<AudioColourSample>& samples,
     return std::max(0.1, static_cast<double>(samples.size()));
 }
 
-std::string determineVideoEncoder(const ColourCore::ColourSpace colourSpace) {
+std::string compatiblePixelFormatForEncoder(const std::string& encoder,
+                                            const char* preferredPixelFormat) {
+    if (encoder == "libx265") {
+        return preferredPixelFormat && *preferredPixelFormat ? preferredPixelFormat : "yuv420p10le";
+    }
+
+    if (encoder == "libx264" ||
+        encoder == "h264_videotoolbox" ||
+        encoder == "hevc_videotoolbox" ||
+        encoder == "mpeg4") {
+        return "yuv420p";
+    }
+
+    return preferredPixelFormat && *preferredPixelFormat ? preferredPixelFormat : "yuv420p";
+}
+
+EncoderSettings makeEncoderSettings(const std::string& encoder,
+                                    const char* preferredPixelFormat) {
+    return EncoderSettings{
+        encoder,
+        compatiblePixelFormatForEncoder(encoder, preferredPixelFormat)
+    };
+}
+
+EncoderSettings determineVideoEncoder(const ColourCore::ColourSpace colourSpace,
+                                      const char* preferredPixelFormat) {
     if (const char* overrideCodec = std::getenv("RESYNE_FFMPEG_VIDEO_CODEC"); overrideCodec && *overrideCodec) {
-        return overrideCodec;
+        return makeEncoderSettings(overrideCodec, preferredPixelFormat);
     }
 
     const auto& locator = Utilities::Video::FFmpegLocator::instance();
     if (colourSpace == ColourCore::ColourSpace::Rec2020) {
         if (locator.supportsEncoder("libx265")) {
-            return "libx265";
+            return makeEncoderSettings("libx265", preferredPixelFormat);
+        }
+        if (locator.supportsEncoder("libx264")) {
+            return makeEncoderSettings("libx264", preferredPixelFormat);
+        }
+        if (locator.supportsEncoder("mpeg4")) {
+            return makeEncoderSettings("mpeg4", preferredPixelFormat);
         }
 #if defined(__APPLE__)
         if (locator.supportsEncoder("hevc_videotoolbox")) {
-            return "hevc_videotoolbox";
+            return makeEncoderSettings("hevc_videotoolbox", preferredPixelFormat);
+        }
+        if (locator.supportsEncoder("h264_videotoolbox")) {
+            return makeEncoderSettings("h264_videotoolbox", preferredPixelFormat);
         }
 #endif
     }
 
     if (locator.supportsEncoder("libx264")) {
-        return "libx264";
+        return makeEncoderSettings("libx264", preferredPixelFormat);
+    }
+
+    if (locator.supportsEncoder("mpeg4")) {
+        return makeEncoderSettings("mpeg4", preferredPixelFormat);
     }
 
 #if defined(__APPLE__)
     if (locator.supportsEncoder("h264_videotoolbox")) {
-        return "h264_videotoolbox";
+        return makeEncoderSettings("h264_videotoolbox", preferredPixelFormat);
     }
 #endif
 
-    if (locator.supportsEncoder("mpeg4")) {
-        return "mpeg4";
-    }
-
-    return "mpeg4";
+    return makeEncoderSettings("mpeg4", preferredPixelFormat);
 }
 
 void appendEncoderParameters(std::ostringstream& stream,
                              const std::string& encoder,
-                             const char* pixelFormat) {
+                             const std::string& pixelFormat) {
     if (encoder == "libx264") {
         stream << " -pix_fmt " << pixelFormat << " -preset medium -crf 18";
     } else if (encoder == "libx265") {
@@ -301,8 +350,8 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
                                int height,
                                int fps,
                                const ColourCore::ColourSpace colourSpace) {
-    const std::string videoEncoder = determineVideoEncoder(colourSpace);
     const auto& colourProfile = ColourCore::videoProfileFor(colourSpace);
+    const EncoderSettings encoderSettings = determineVideoEncoder(colourSpace, colourProfile.pixelFormat);
 
     std::ostringstream oss;
     oss << '"' << ffmpegPath << '"'
@@ -313,10 +362,10 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
         << " -i -"
         << " -i " << '"' << audioPath.string() << '"'
         << " -map 0:v:0 -map 1:a:0"
-        << " -vf \"" << colourProfile.filter << '"'
-        << " -c:v " << videoEncoder;
+        << " -vf \"" << colourProfile.filter << ",format=" << encoderSettings.pixelFormat << '"'
+        << " -c:v " << encoderSettings.name;
 
-    appendEncoderParameters(oss, videoEncoder, colourProfile.pixelFormat);
+    appendEncoderParameters(oss, encoderSettings.name, encoderSettings.pixelFormat);
 
     oss << " -color_primaries " << colourProfile.primaries
         << " -color_trc " << colourProfile.transfer
