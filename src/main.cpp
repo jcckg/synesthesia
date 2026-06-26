@@ -49,6 +49,12 @@ int main(int argc, char* argv[]) {
             return 0;
         }
 
+        if (args.exportGradients && args.exportRsyn) {
+            std::cerr << "Error: choose either --export-gradients or --export-rsyn\n";
+            std::cerr << "Use --help for usage information.\n";
+            return 1;
+        }
+
         if (args.exportGradients) {
             if (args.inputDir.empty()) {
                 std::cerr << "Error: --export-gradients requires --input <dir>\n";
@@ -60,9 +66,24 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Use --help for usage information.\n";
                 return 1;
             }
-            return CLI::BatchExporter::run(args.inputDir, args.outputDir, args.copyAudio,
-                                           args.gradientWidth, args.gradientHeight, args.gradientFormat, args.writeConditionSidecar, args.trueSize,
-                                           args.numWorkers, args.analysisHop, args.disableSmoothing);
+            return CLI::BatchExporter::runGradients(args.inputDir, args.outputDir, args.copyAudio,
+                                                    args.gradientWidth, args.gradientHeight, args.trueSize,
+                                                    args.numWorkers, args.analysisHop, args.disableSmoothing);
+        }
+
+        if (args.exportRsyn) {
+            if (args.inputDir.empty()) {
+                std::cerr << "Error: --export-rsyn requires --input <path>\n";
+                std::cerr << "Use --help for usage information.\n";
+                return 1;
+            }
+            if (args.outputDir.empty()) {
+                std::cerr << "Error: --export-rsyn requires --output <dir>\n";
+                std::cerr << "Use --help for usage information.\n";
+                return 1;
+            }
+            return CLI::BatchExporter::runRsyn(args.inputDir, args.outputDir,
+                                               args.numWorkers, args.analysisHop);
         }
 
         if (args.runMisc) {

@@ -50,6 +50,9 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         else if (strcmp(argv[i], "--export-gradients") == 0) {
             args.exportGradients = true;
         }
+        else if (strcmp(argv[i], "--export-rsyn") == 0) {
+            args.exportRsyn = true;
+        }
         else if (strcmp(argv[i], "--misc") == 0) {
             args.runMisc = true;
             if (i + 1 < argc) {
@@ -68,9 +71,6 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
         }
         else if (strcmp(argv[i], "--copy-audio") == 0) {
             args.copyAudio = true;
-        }
-        else if (strcmp(argv[i], "--write-condition-sidecar") == 0) {
-            args.writeConditionSidecar = true;
         }
         else if (strcmp(argv[i], "--true-size") == 0) {
             args.trueSize = true;
@@ -99,17 +99,6 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
                 if (args.analysisHop < 1) {
                     args.analysisHop = 1;
                 }
-            }
-        }
-        else if (strcmp(argv[i], "--gradient-format") == 0) {
-            if (i + 1 < argc) {
-                args.gradientFormat = argv[++i];
-                std::transform(args.gradientFormat.begin(),
-                               args.gradientFormat.end(),
-                               args.gradientFormat.begin(),
-                               [](unsigned char c) {
-                                   return static_cast<char>(std::tolower(c));
-                               });
             }
         }
         else if (strcmp(argv[i], "--disable-smoothing") == 0) {
@@ -159,12 +148,11 @@ void Arguments::printHelp() {
     std::cout << "  --help                  Show this help message\n\n";
     std::cout << "Batch export:\n";
     std::cout << "  --export-gradients      Batch export gradient images from audio files\n";
-    std::cout << "  --input, -i <dir>       Input directory to scan for audio files\n";
-    std::cout << "  --output, -o <dir>      Output directory for gradient PNG images\n";
-    std::cout << "  --copy-audio            Also copy audio files alongside gradients\n";
-    std::cout << "                          (creates 'gradients/' and 'audio/' subdirectories)\n";
-    std::cout << "  --gradient-format <m>   Export mode: png, slices, or both (default: png)\n";
-    std::cout << "  --write-condition-sidecar Also write a .cond.npy sidecar when exporting PNGs\n";
+    std::cout << "  --export-rsyn           Batch export .rsyn assets from audio files\n";
+    std::cout << "  --input, -i <path>      Input audio directory, or one audio file for --export-rsyn\n";
+    std::cout << "  --output, -o <dir>      Output directory\n";
+    std::cout << "  --copy-audio            Also copy audio files alongside gradient PNGs\n";
+    std::cout << "                          (gradient export creates 'gradients/' and 'audio/' subdirectories)\n";
     std::cout << "  --true-size             Use exact analyser frame count as image width\n";
     std::cout << "                          (no temporal interpolation in export)\n";
     std::cout << "  --disable-smoothing     Use analysis colours instead of active presentation smoothing\n";
@@ -179,8 +167,6 @@ void Arguments::printHelp() {
     std::cout << "  --normalise             Shorthand for --normalise-length and --normalise-height\n";
     std::cout << "  --normalise-length      Compress GLTF length to a relaxed compact range\n";
     std::cout << "  --normalise-height      Normalise GLTF height to a compact 0..1 range\n\n";
-    std::cout << "Slice export writes float32 condition arrays as .cond.npy.\n";
-    std::cout << "PNG export writes condition sidecars only when --write-condition-sidecar is set.\n\n";
     std::cout << "Misc commands:\n";
     std::cout << "  vector-gradient         Export a lossless SVG strip from an audio or .rsyn presentation track\n";
     std::cout << "  gltf-gradient           Export a formatted .gltf solid with loudness-driven height\n\n";
@@ -189,6 +175,8 @@ void Arguments::printHelp() {
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/GradientExport\n";
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/Export --copy-audio\n";
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/Export --disable-smoothing\n";
+    std::cout << "  Synesthesia --export-rsyn -i ~/Music -o ~/RsynExport\n";
+    std::cout << "  Synesthesia --export-rsyn -i ~/track.wav -o ~/Desktop\n";
     std::cout << "  Synesthesia --misc vector-gradient -i ~/track.rsyn -o ~/track.svg\n";
     std::cout << "  Synesthesia --misc gltf-gradient -i ~/track.wav -o ~/track.gltf --normalise\n\n";
 }

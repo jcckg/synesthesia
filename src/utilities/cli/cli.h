@@ -15,16 +15,15 @@ struct Arguments {
     int oscReceivePort = 7001;
 
     bool exportGradients = false;
+    bool exportRsyn = false;
     std::string inputDir;
     std::string outputDir;
     bool copyAudio = false;
-    bool writeConditionSidecar = false;
     bool trueSize = false;
     int numWorkers = 1;
     int gradientWidth  = 0;
     int gradientHeight = 0;
     int analysisHop = 1024;
-    std::string gradientFormat = "png";
     bool disableSmoothing = false;
 
     bool runMisc = false;
