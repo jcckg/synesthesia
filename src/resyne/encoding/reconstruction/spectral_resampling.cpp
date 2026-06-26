@@ -1,4 +1,5 @@
 #include "spectral_resampling.h"
+#include "constants.h"
 
 #include <algorithm>
 #include <cmath>
@@ -11,6 +12,24 @@ constexpr float EPSILON = 1e-6f;
 constexpr float MIN_SHIFT_RATIO = 0.25f;
 constexpr float MAX_SHIFT_RATIO = 4.0f;
 constexpr float SHIFT_DETECTION_THRESHOLD = 0.02f;
+
+bool isUsableFrequencyMapping(float expectedFrequency, float decodedFrequency, float magnitude) {
+	if (magnitude <= EPSILON) {
+		return false;
+	}
+	if (!std::isfinite(expectedFrequency) || !std::isfinite(decodedFrequency)) {
+		return false;
+	}
+	if (expectedFrequency < synesthesia::constants::MIN_AUDIO_FREQ ||
+		expectedFrequency > synesthesia::constants::MAX_AUDIO_FREQ) {
+		return false;
+	}
+	if (decodedFrequency < synesthesia::constants::MIN_AUDIO_FREQ ||
+		decodedFrequency > synesthesia::constants::MAX_AUDIO_FREQ) {
+		return false;
+	}
+	return true;
+}
 }
 
 float computeShiftRatio(float decodedFrequency, float expectedFrequency) {
@@ -50,13 +69,15 @@ ResampledSpectrum resampleSpectrum(
 		const float expectedFreq = freqResolution * static_cast<float>(bin);
 		const float decodedFreq = decodedFrequencies[bin];
 
-		if (expectedFreq > EPSILON && decodedFreq > EPSILON) {
-			const float ratio = decodedFreq / expectedFreq;
-			shiftRatios[bin] = std::clamp(ratio, MIN_SHIFT_RATIO, MAX_SHIFT_RATIO);
+		if (!isUsableFrequencyMapping(expectedFreq, decodedFreq, magnitudes[bin])) {
+			continue;
+		}
 
-			if (std::abs(ratio - 1.0f) > SHIFT_DETECTION_THRESHOLD) {
-				hasSignificantShift = true;
-			}
+		const float ratio = decodedFreq / expectedFreq;
+		shiftRatios[bin] = std::clamp(ratio, MIN_SHIFT_RATIO, MAX_SHIFT_RATIO);
+
+		if (std::abs(ratio - 1.0f) > SHIFT_DETECTION_THRESHOLD) {
+			hasSignificantShift = true;
 		}
 	}
 
@@ -70,12 +91,16 @@ ResampledSpectrum resampleSpectrum(
 	std::vector<float> accumulatedPhaseX(numBins, 0.0f);
 	std::vector<float> accumulatedPhaseY(numBins, 0.0f);
 	std::vector<float> accumulatedWeight(numBins, 0.0f);
+	std::vector<bool> movableSource(numBins, false);
 
 	for (size_t srcBin = 1; srcBin < numBins; ++srcBin) {
 		const float mag = magnitudes[srcBin];
-		if (mag < EPSILON) {
+		const float expectedFreq = freqResolution * static_cast<float>(srcBin);
+		const float decodedFreq = decodedFrequencies[srcBin];
+		if (!isUsableFrequencyMapping(expectedFreq, decodedFreq, mag)) {
 			continue;
 		}
+		movableSource[srcBin] = true;
 
 		const float ratio = shiftRatios[srcBin];
 		const float targetBinF = static_cast<float>(srcBin) * ratio;
@@ -118,6 +143,9 @@ ResampledSpectrum resampleSpectrum(
 			const float avgPhaseX = accumulatedPhaseX[bin];
 			const float avgPhaseY = accumulatedPhaseY[bin];
 			result.phases[bin] = std::atan2(avgPhaseY, avgPhaseX);
+		} else if (!movableSource[bin]) {
+			result.magnitudes[bin] = magnitudes[bin];
+			result.phases[bin] = phases[bin];
 		}
 	}
 

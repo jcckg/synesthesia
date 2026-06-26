@@ -28,6 +28,7 @@ bool exportToWAV(const std::string& filepath,
 		SpectralSample spectral;
 		spectral.magnitudes = sample.magnitudes;
 		spectral.phases = sample.phases;
+		spectral.frequencies = sample.frequencies;
 		spectral.timestamp = sample.timestamp;
 		spectral.sampleRate = sample.sampleRate;
 		spectralSamples.push_back(spectral);

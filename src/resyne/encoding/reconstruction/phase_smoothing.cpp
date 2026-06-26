@@ -9,8 +9,8 @@ namespace PhaseReconstruction {
 
 namespace {
 constexpr float MIN_BIN_INTENSITY = 1e-6f;
-constexpr float MOMENTUM = 0.95f;
 constexpr float SMOOTHING = 0.7f;
+constexpr float RELAXATION = 0.65f;
 }
 
 void smoothPhase(std::vector<float>& phases,
@@ -28,34 +28,39 @@ void smoothPhase(std::vector<float>& phases,
 				continue;
 			}
 
-			float phaseSum = 0.0f;
+			float phaseX = 0.0f;
+			float phaseY = 0.0f;
 			float weightSum = 0.0f;
 
 			if (targetMagnitudes[bin - 1] > MIN_BIN_INTENSITY) {
 				const float weight = targetMagnitudes[bin - 1];
-				phaseSum += phases[bin - 1] * weight;
+				phaseX += std::cos(phases[bin - 1]) * weight;
+				phaseY += std::sin(phases[bin - 1]) * weight;
 				weightSum += weight;
 			}
 
 			if (targetMagnitudes[bin + 1] > MIN_BIN_INTENSITY) {
 				const float weight = targetMagnitudes[bin + 1];
-				phaseSum += phases[bin + 1] * weight;
+				phaseX += std::cos(phases[bin + 1]) * weight;
+				phaseY += std::sin(phases[bin + 1]) * weight;
 				weightSum += weight;
 			}
 
 			const float centreWeight = targetMagnitudes[bin] * 2.0f;
-			phaseSum += phases[bin] * centreWeight;
+			phaseX += std::cos(phases[bin]) * centreWeight;
+			phaseY += std::sin(phases[bin]) * centreWeight;
 			weightSum += centreWeight;
 
 			if (weightSum > 0.0f) {
-				const float smoothedPhase = phaseSum / weightSum;
-				newPhase[bin] = wrapToPi(SMOOTHING * smoothedPhase + (1.0f - SMOOTHING) * phases[bin]);
+				const float smoothedPhase = std::atan2(phaseY, phaseX);
+				const float delta = wrapToPi(smoothedPhase - phases[bin]);
+				newPhase[bin] = wrapToPi(phases[bin] + SMOOTHING * delta);
 			}
 		}
 
 		for (size_t bin = 0; bin < phases.size(); ++bin) {
 			const float delta = wrapToPi(newPhase[bin] - phases[bin]);
-			phases[bin] = wrapToPi(phases[bin] + delta * (1.0f + MOMENTUM));
+			phases[bin] = wrapToPi(phases[bin] + delta * RELAXATION);
 		}
 	}
 

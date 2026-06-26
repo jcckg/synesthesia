@@ -1,5 +1,5 @@
 #include "resyne/encoding/audio/wav_encoder.h"
-#include "resyne/encoding/reconstruction/varispeed.h"
+#include "resyne/encoding/reconstruction/spectral_resampling.h"
 #include <kiss_fftr.h>
 #include <fstream>
 #include <iostream>
@@ -47,9 +47,9 @@ private:
 
 namespace {
 
-constexpr float TARGET_PEAK = 0.9f;
+constexpr float TARGET_PEAK = 0.98f;
 
-void applyLimiter(std::vector<float>& samples) {
+void applyPeakGuard(std::vector<float>& samples) {
 	if (samples.empty()) {
 		return;
 	}
@@ -100,76 +100,39 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	result.numChannels = numChannels;
 
 	std::vector<std::vector<float>> channelAudio(numChannels);
-	std::vector<std::vector<std::vector<float>>> channelFrequencies(numChannels);
 
 	for (size_t ch = 0; ch < numChannels; ++ch) {
 		std::vector<std::vector<float>> timeFrames;
 		timeFrames.reserve(samples.size());
-		channelFrequencies[ch].reserve(samples.size());
 
 		for (const auto& sample : samples) {
 			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
 				timeFrames.push_back(std::vector<float>(static_cast<size_t>(fftSize), 0.0f));
-				channelFrequencies[ch].push_back(std::vector<float>());
 				continue;
 			}
 
 			const auto& mags = sample.magnitudes[ch];
 			const auto& phs = sample.phases[ch];
 
-			if (ch < sample.frequencies.size()) {
-				channelFrequencies[ch].push_back(sample.frequencies[ch]);
-			} else {
-				channelFrequencies[ch].push_back(std::vector<float>());
+			std::vector<float> frameMagnitudes = mags;
+			std::vector<float> framePhases = phs;
+			if (ch < sample.frequencies.size() && !sample.frequencies[ch].empty()) {
+				auto resampled = SpectralResampling::resampleSpectrum(
+					frameMagnitudes,
+					framePhases,
+					sample.frequencies[ch],
+					sampleRate,
+					static_cast<size_t>(fftSize));
+				frameMagnitudes = std::move(resampled.magnitudes);
+				framePhases = std::move(resampled.phases);
 			}
 
-			std::vector<float> timeFrame = inverseFFT(mags, phs, fftSize);
-
-			float timeEnergy = 0.0f;
-			for (float value : timeFrame) {
-				timeEnergy += value * value;
-			}
-
-			if (!mags.empty() && fftSize > 0 && timeEnergy > std::numeric_limits<float>::epsilon()) {
-				const size_t binCount = mags.size();
-				float edgeEnergy = mags[0] * mags[0];
-				if (binCount > 1) {
-					edgeEnergy += mags[binCount - 1] * mags[binCount - 1];
-				}
-
-				float interiorSum = 0.0f;
-				for (size_t bin = 1; bin + 1 < binCount; ++bin) {
-					const float magnitude = mags[bin];
-					interiorSum += magnitude * magnitude;
-				}
-
-				const float spectralEnergy = static_cast<float>(fftSize) * (edgeEnergy + 0.5f * interiorSum);
-				if (spectralEnergy > std::numeric_limits<float>::epsilon()) {
-					const float gain = std::sqrt(spectralEnergy / timeEnergy);
-					const float clampedGain = std::clamp(gain, 0.1f, 10.0f);
-
-					if (std::isfinite(clampedGain) && std::abs(clampedGain - 1.0f) > 1e-4f) {
-						for (float& value : timeFrame) {
-							value *= clampedGain;
-						}
-					}
-				}
-			}
+			std::vector<float> timeFrame = inverseFFT(frameMagnitudes, framePhases, fftSize);
 
 			timeFrames.push_back(std::move(timeFrame));
 		}
 
 		channelAudio[ch] = overlapAdd(timeFrames, hopSize);
-
-		auto varispeedRegions = Varispeed::detectVarispeedRegions(
-			channelFrequencies[ch], sampleRate, static_cast<size_t>(fftSize));
-
-		if (!varispeedRegions.empty()) {
-			channelAudio[ch] = Varispeed::applyVarispeedRegions(
-				channelAudio[ch], varispeedRegions, hopSize);
-		}
-
-		applyLimiter(channelAudio[ch]);
 	}
 
 	if (numChannels == 1) {
@@ -177,16 +140,19 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	} else {
 		size_t numSamplesPerChannel = channelAudio[0].size();
 		for (size_t ch = 1; ch < numChannels; ++ch) {
-			numSamplesPerChannel = std::min(numSamplesPerChannel, channelAudio[ch].size());
+			numSamplesPerChannel = std::max(numSamplesPerChannel, channelAudio[ch].size());
 		}
 
 		result.audioSamples.resize(numSamplesPerChannel * numChannels);
 		for (size_t i = 0; i < numSamplesPerChannel; ++i) {
 			for (size_t ch = 0; ch < numChannels; ++ch) {
-				result.audioSamples[i * numChannels + ch] = channelAudio[ch][i];
+				result.audioSamples[i * numChannels + ch] =
+					i < channelAudio[ch].size() ? channelAudio[ch][i] : 0.0f;
 			}
 		}
 	}
+
+	applyPeakGuard(result.audioSamples);
 
 	result.success = true;
 
@@ -207,17 +173,10 @@ std::vector<float> WAVEncoder::inverseFFT(
 		float magnitude = magnitudes[i];
 		float phase = phases[i];
 
-		fftBins[i].r = magnitude * std::cos(phase);
-		fftBins[i].i = magnitude * std::sin(phase);
-	}
-
-	if (!fftBins.empty()) {
-		fftBins[0].r *= 2.0f;
-		fftBins[0].i *= 2.0f;
-		if (numBins > 1) {
-			fftBins[numBins - 1].r *= 2.0f;
-			fftBins[numBins - 1].i *= 2.0f;
-		}
+		const bool edgeBin = i == 0 || i + 1 == numBins;
+		const float scale = static_cast<float>(fftSize) * (edgeBin ? 1.0f : 0.5f);
+		fftBins[i].r = magnitude * scale * std::cos(phase);
+		fftBins[i].i = magnitude * scale * std::sin(phase);
 	}
 
 	KissFFTRConfig cfg(fftSize, 1);
@@ -227,6 +186,10 @@ std::vector<float> WAVEncoder::inverseFFT(
 
 	std::vector<float> timeDomain(static_cast<size_t>(fftSize));
 	kiss_fftri(cfg.get(), fftBins.data(), timeDomain.data());
+	const float inverseScale = 1.0f / static_cast<float>(fftSize);
+	for (float& value : timeDomain) {
+		value *= inverseScale;
+	}
 
 	return timeDomain;
 }
@@ -272,18 +235,9 @@ std::vector<float> WAVEncoder::overlapAdd(
 	}
 
 	constexpr float normalisationEpsilon = 1e-6f;
-	constexpr float expectedColaSumHann50 = 0.5f;
-
-	const size_t edgeStart = static_cast<size_t>(hopSize);
-	const size_t edgeEnd = totalSamples - (frameSize - static_cast<size_t>(hopSize));
-
 	for (size_t i = 0; i < output.size(); ++i) {
 		if (normalisation[i] > normalisationEpsilon) {
-			if (i < edgeStart || i >= edgeEnd) {
-				output[i] /= std::max(expectedColaSumHann50, normalisation[i]);
-			} else {
-				output[i] /= normalisation[i];
-			}
+			output[i] /= normalisation[i];
 		}
 	}
 
@@ -309,7 +263,7 @@ bool WAVEncoder::exportToWAV(
 	const uint16_t bitsPerSample = 16;
 	const uint32_t byteRate = static_cast<uint32_t>(sampleRate) * static_cast<uint32_t>(numChannels) * (bitsPerSample / 8);
 	const uint16_t blockAlign = static_cast<uint16_t>(numChannels * (bitsPerSample / 8));
-	const uint32_t dataSize = numSamples * blockAlign;
+	const uint32_t dataSize = numSamples * static_cast<uint32_t>(sizeof(int16_t));
 	const uint32_t fileSize = 36 + dataSize;
 
 	file.write("RIFF", 4);
