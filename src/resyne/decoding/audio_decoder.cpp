@@ -48,4 +48,26 @@ bool decodeFile(const std::string& filepath, DecodedAudio& out, std::string& err
     return false;
 }
 
+bool probeDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& errorMessage) {
+    durationSeconds = 0.0;
+
+    const std::string extension = extractExtension(filepath);
+
+    if (extension == ".wav") {
+        return probeWavDurationSeconds(filepath, durationSeconds, errorMessage);
+    }
+    if (extension == ".flac") {
+        return probeFlacDurationSeconds(filepath, durationSeconds, errorMessage);
+    }
+    if (extension == ".mp3" || extension == ".mpeg3" || extension == ".mpga") {
+        return probeMp3DurationSeconds(filepath, durationSeconds, errorMessage);
+    }
+    if (extension == ".ogg" || extension == ".oga") {
+        return probeOggDurationSeconds(filepath, durationSeconds, errorMessage);
+    }
+
+    errorMessage = "unsupported format";
+    return false;
+}
+
 }

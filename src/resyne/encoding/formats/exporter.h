@@ -37,6 +37,7 @@ struct AudioMetadata {
 
 struct RSYNExportOptions {
     RSYNPresentationSettings presentationSettings{};
+    int compressionLevel = 0;
 };
 
 using SequenceFrameCallback = std::function<void(const std::vector<AudioColourSample>&, size_t)>;

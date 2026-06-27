@@ -6,5 +6,6 @@
 namespace AudioDecoding {
 
 bool decodeMp3(const std::string& filepath, DecodedAudio& out, std::string& error);
+bool probeMp3DurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error);
 
 }

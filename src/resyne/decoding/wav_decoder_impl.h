@@ -13,5 +13,6 @@ struct DecodedWAV {
 };
 
 bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& errorMessage);
+bool probeDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& errorMessage);
 
 }

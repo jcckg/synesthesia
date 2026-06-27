@@ -6,5 +6,6 @@
 namespace AudioDecoding {
 
 bool decodeFlac(const std::string& filepath, DecodedAudio& out, std::string& error);
+bool probeFlacDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error);
 
 }

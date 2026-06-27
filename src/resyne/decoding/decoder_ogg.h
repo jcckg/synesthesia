@@ -6,5 +6,6 @@
 namespace AudioDecoding {
 
 bool decodeOgg(const std::string& filepath, DecodedAudio& out, std::string& error);
+bool probeOggDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error);
 
 }

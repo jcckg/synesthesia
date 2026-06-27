@@ -74,4 +74,26 @@ bool decodeMp3(const std::string& filepath, DecodedAudio& out, std::string& erro
     return true;
 }
 
+bool probeMp3DurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error) {
+    durationSeconds = 0.0;
+
+    drmp3 mp3{};
+    if (!drmp3_init_file(&mp3, filepath.c_str(), nullptr)) {
+        error = "unable to open mp3";
+        return false;
+    }
+
+    const auto frameCount = drmp3_get_pcm_frame_count(&mp3);
+    const auto sampleRate = mp3.sampleRate;
+    drmp3_uninit(&mp3);
+
+    if (frameCount == 0 || sampleRate == 0) {
+        error = "invalid mp3 stream";
+        return false;
+    }
+
+    durationSeconds = static_cast<double>(frameCount) / static_cast<double>(sampleRate);
+    return durationSeconds > 0.0;
+}
+
 }

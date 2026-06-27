@@ -13,6 +13,6 @@ struct DecodedAudio {
 };
 
 bool decodeFile(const std::string& filepath, DecodedAudio& out, std::string& errorMessage);
+bool probeDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& errorMessage);
 
 }
-

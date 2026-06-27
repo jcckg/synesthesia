@@ -90,4 +90,26 @@ bool decodeOgg(const std::string& filepath, DecodedAudio& out, std::string& erro
     return true;
 }
 
+bool probeOggDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error) {
+    durationSeconds = 0.0;
+
+    int openError = 0;
+    stb_vorbis* vorbis = stb_vorbis_open_filename(filepath.c_str(), &openError, nullptr);
+    if (!vorbis) {
+        error = "unable to open ogg";
+        return false;
+    }
+
+    const float seconds = stb_vorbis_stream_length_in_seconds(vorbis);
+    stb_vorbis_close(vorbis);
+
+    if (!std::isfinite(seconds) || seconds <= 0.0f) {
+        error = "invalid ogg stream";
+        return false;
+    }
+
+    durationSeconds = static_cast<double>(seconds);
+    return true;
+}
+
 }

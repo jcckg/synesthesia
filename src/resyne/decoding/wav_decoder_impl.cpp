@@ -201,4 +201,89 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
     return true;
 }
 
+bool probeDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& errorMessage) {
+    durationSeconds = 0.0;
+
+    std::ifstream file(filepath, std::ios::binary);
+    if (!file) {
+        errorMessage = "unable to open";
+        return false;
+    }
+
+    char riff[4];
+    if (!file.read(riff, 4) || std::strncmp(riff, "RIFF", 4) != 0) {
+        errorMessage = "invalid header";
+        return false;
+    }
+
+    file.seekg(4, std::ios::cur);
+
+    char wave[4];
+    if (!file.read(wave, 4) || std::strncmp(wave, "WAVE", 4) != 0) {
+        errorMessage = "not WAVE";
+        return false;
+    }
+
+    bool fmtFound = false;
+    bool dataFound = false;
+    uint16_t channels = 0;
+    uint32_t sampleRate = 0;
+    uint16_t bitsPerSample = 0;
+    uint32_t dataSize = 0;
+
+    while (file && !(fmtFound && dataFound)) {
+        char chunkId[4];
+        uint32_t chunkSize = 0;
+        if (!readChunkHeader(file, chunkId, chunkSize)) {
+            break;
+        }
+
+        if (std::strncmp(chunkId, "fmt ", 4) == 0) {
+            fmtFound = true;
+
+            uint16_t audioFormat = 0;
+            if (!file.read(reinterpret_cast<char*>(&audioFormat), sizeof(uint16_t)) ||
+                !file.read(reinterpret_cast<char*>(&channels), sizeof(uint16_t)) ||
+                !file.read(reinterpret_cast<char*>(&sampleRate), sizeof(uint32_t))) {
+                errorMessage = "malformed fmt";
+                return false;
+            }
+
+            file.seekg(6, std::ios::cur);
+
+            if (!file.read(reinterpret_cast<char*>(&bitsPerSample), sizeof(uint16_t))) {
+                errorMessage = "malformed fmt";
+                return false;
+            }
+
+            if (chunkSize > 16) {
+                file.seekg(static_cast<std::streamoff>(chunkSize - 16), std::ios::cur);
+            }
+        } else if (std::strncmp(chunkId, "data", 4) == 0) {
+            dataFound = true;
+            dataSize = chunkSize;
+            file.seekg(chunkSize, std::ios::cur);
+        } else {
+            file.seekg(chunkSize, std::ios::cur);
+        }
+
+        skipPadding(file, chunkSize);
+    }
+
+    if (!fmtFound || !dataFound || channels == 0 || sampleRate == 0 || bitsPerSample == 0) {
+        errorMessage = "invalid wav stream";
+        return false;
+    }
+
+    const uint16_t bytesPerSample = bitsPerSample / 8;
+    const std::uint32_t bytesPerFrame = static_cast<std::uint32_t>(bytesPerSample) * channels;
+    if (bytesPerFrame == 0) {
+        errorMessage = "invalid wav frame size";
+        return false;
+    }
+
+    durationSeconds = static_cast<double>(dataSize / bytesPerFrame) / static_cast<double>(sampleRate);
+    return durationSeconds > 0.0;
+}
+
 }

@@ -101,6 +101,7 @@ bool exportToRsyn(const std::string& filepath,
     const bool ok = RSYNContainer::writeFile(
         filepath,
         chunks,
+        std::clamp(options.compressionLevel, 0, 9),
         [&](const float value) {
             emitProgress(progress, 0.72f + value * 0.28f);
         });

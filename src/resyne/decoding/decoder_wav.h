@@ -6,5 +6,6 @@
 namespace AudioDecoding {
 
 bool decodeWav(const std::string& filepath, DecodedAudio& out, std::string& error);
+bool probeWavDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error);
 
 }

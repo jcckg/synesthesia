@@ -24,6 +24,10 @@ struct Arguments {
     int gradientWidth  = 0;
     int gradientHeight = 0;
     int analysisHop = 1024;
+    int rsynCompressionLevel = 0;
+    double storageCutoffGb = 0.0;
+    double skipLargeSeconds = 0.0;
+    bool randomiseOrder = false;
     bool disableSmoothing = false;
 
     bool runMisc = false;

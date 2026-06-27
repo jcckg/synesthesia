@@ -16,6 +16,7 @@ enum class Compression : std::uint32_t {
 struct Chunk {
     std::uint32_t tag = 0;
     std::vector<std::uint8_t> payload;
+    bool allowCompression = true;
 };
 
 struct ChunkLocator {
@@ -39,6 +40,7 @@ constexpr std::uint32_t makeTag(const char (&text)[5]) {
 
 bool writeFile(const std::string& filepath,
                const std::vector<Chunk>& chunks,
+               int compressionLevel = 0,
                const std::function<void(float)>& progress = {});
 
 bool readIndex(const std::string& filepath,

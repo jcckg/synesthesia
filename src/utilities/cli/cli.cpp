@@ -9,6 +9,41 @@
 
 namespace CLI {
 
+namespace {
+
+double parsePositiveDouble(const char* text) {
+    if (text == nullptr) {
+        return 0.0;
+    }
+    return std::max(0.0, std::atof(text));
+}
+
+double parseMinuteSecondLimit(const char* text) {
+    if (text == nullptr) {
+        return 0.0;
+    }
+
+    const std::string value(text);
+    const std::size_t dot = value.find('.');
+    if (dot == std::string::npos) {
+        return parsePositiveDouble(text) * 60.0;
+    }
+
+    const int minutes = std::max(0, std::atoi(value.substr(0, dot).c_str()));
+    std::string secondsText = value.substr(dot + 1);
+    if (secondsText.empty()) {
+        return static_cast<double>(minutes) * 60.0;
+    }
+    if (secondsText.size() > 2) {
+        secondsText = secondsText.substr(0, 2);
+    }
+
+    const int seconds = std::clamp(std::atoi(secondsText.c_str()), 0, 59);
+    return static_cast<double>(minutes * 60 + seconds);
+}
+
+}
+
 Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
     Arguments args;
     
@@ -101,6 +136,24 @@ Arguments Arguments::parseCommandLine(int argc, char* argv[]) {
                 }
             }
         }
+        else if (strcmp(argv[i], "--compression") == 0) {
+            if (i + 1 < argc) {
+                args.rsynCompressionLevel = std::clamp(std::atoi(argv[++i]), 0, 9);
+            }
+        }
+        else if (strcmp(argv[i], "--storage-cutoff") == 0) {
+            if (i + 1 < argc) {
+                args.storageCutoffGb = parsePositiveDouble(argv[++i]);
+            }
+        }
+        else if (strcmp(argv[i], "--randomise-order") == 0) {
+            args.randomiseOrder = true;
+        }
+        else if (strcmp(argv[i], "--skip-large") == 0) {
+            if (i + 1 < argc) {
+                args.skipLargeSeconds = parseMinuteSecondLimit(argv[++i]);
+            }
+        }
         else if (strcmp(argv[i], "--disable-smoothing") == 0) {
             args.disableSmoothing = true;
         }
@@ -158,6 +211,10 @@ void Arguments::printHelp() {
     std::cout << "  --disable-smoothing     Use analysis colours instead of active presentation smoothing\n";
     std::cout << "  --num-workers <n>       Number of worker threads for batch export (default: 1)\n";
     std::cout << "  --hop <samples>         Analysis hop size in samples (default: 1024)\n";
+    std::cout << "  --compression <0-9>     .rsyn deflate level: 0 off, 1 fastest, 9 highest (default: 0)\n";
+    std::cout << "  --storage-cutoff <GB>   Stop scheduling .rsyn exports once output reaches this many GB\n";
+    std::cout << "  --randomise-order       Shuffle .rsyn export order before processing\n";
+    std::cout << "  --skip-large <MM.SS>    Skip .rsyn inputs longer than this limit, e.g. 11.05\n";
     std::cout << "  --width <px>            Force gradient width in pixels\n";
     std::cout << "                          (default: 20px per second of audio)\n";
     std::cout << "  --height <px>           Force gradient height in pixels (default: 800)\n\n";
@@ -176,6 +233,8 @@ void Arguments::printHelp() {
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/Export --copy-audio\n";
     std::cout << "  Synesthesia --export-gradients -i ~/Music -o ~/Export --disable-smoothing\n";
     std::cout << "  Synesthesia --export-rsyn -i ~/Music -o ~/RsynExport\n";
+    std::cout << "  Synesthesia --export-rsyn -i ~/Music -o ~/RsynExport --compression 9\n";
+    std::cout << "  Synesthesia --export-rsyn -i ~/Music -o ~/RsynExport --storage-cutoff 500 --skip-large 11.05 --randomise-order\n";
     std::cout << "  Synesthesia --export-rsyn -i ~/track.wav -o ~/Desktop\n";
     std::cout << "  Synesthesia --misc vector-gradient -i ~/track.rsyn -o ~/track.svg\n";
     std::cout << "  Synesthesia --misc gltf-gradient -i ~/track.wav -o ~/track.gltf --normalise\n\n";

@@ -18,4 +18,8 @@ bool decodeWav(const std::string& filepath, DecodedAudio& out, std::string& erro
     return true;
 }
 
+bool probeWavDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error) {
+    return WAVDecoder::probeDurationSeconds(filepath, durationSeconds, error);
+}
+
 }

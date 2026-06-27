@@ -83,7 +83,11 @@ int main(int argc, char* argv[]) {
                 return 1;
             }
             return CLI::BatchExporter::runRsyn(args.inputDir, args.outputDir,
-                                               args.numWorkers, args.analysisHop);
+                                               args.numWorkers, args.analysisHop,
+                                               args.rsynCompressionLevel,
+                                               args.storageCutoffGb,
+                                               args.skipLargeSeconds,
+                                               args.randomiseOrder);
         }
 
         if (args.runMisc) {

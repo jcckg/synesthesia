@@ -19,7 +19,6 @@ namespace {
 
 constexpr std::array<char, 4> kMagic = {'R', 'S', 'Y', 'N'};
 constexpr std::uint32_t kVersion = 1;
-constexpr int kCompressionLevel = 6;
 
 struct Header {
     std::array<char, 4> magic{};
@@ -136,6 +135,7 @@ std::uint32_t crc32For(const std::vector<std::uint8_t>& data) {
 }
 
 bool compressPayload(const std::vector<std::uint8_t>& input,
+                     const int compressionLevel,
                      Compression& compression,
                      std::vector<std::uint8_t>& output) {
     if (input.empty()) {
@@ -156,7 +156,7 @@ bool compressPayload(const std::vector<std::uint8_t>& input,
         &compressedSize,
         input.data(),
         static_cast<mz_ulong>(input.size()),
-        kCompressionLevel);
+        compressionLevel);
 
     if (result != MZ_OK || compressedSize >= input.size()) {
         compression = Compression::None;
@@ -228,6 +228,7 @@ void emitProgress(const std::function<void(float)>& progress, const float value)
 
 bool writeFile(const std::string& filepath,
                const std::vector<Chunk>& chunks,
+               const int compressionLevel,
                const std::function<void(float)>& progress) {
     std::ofstream file(filepath, std::ios::binary);
     if (!file.is_open()) {
@@ -249,14 +250,18 @@ bool writeFile(const std::string& filepath,
 
     for (std::size_t index = 0; index < chunks.size(); ++index) {
         Compression compression = Compression::None;
-        std::vector<std::uint8_t> storedPayload;
-        if (!compressPayload(chunks[index].payload, compression, storedPayload)) {
-            return false;
+        std::vector<std::uint8_t> compressedPayload;
+        const std::vector<std::uint8_t>* storedPayload = &chunks[index].payload;
+        if (compressionLevel > 0 && chunks[index].allowCompression) {
+            if (!compressPayload(chunks[index].payload, compressionLevel, compression, compressedPayload)) {
+                return false;
+            }
+            storedPayload = &compressedPayload;
         }
 
         const std::uint64_t payloadOffset = static_cast<std::uint64_t>(file.tellp());
-        if (!storedPayload.empty()) {
-            file.write(reinterpret_cast<const char*>(storedPayload.data()), static_cast<std::streamsize>(storedPayload.size()));
+        if (!storedPayload->empty()) {
+            file.write(reinterpret_cast<const char*>(storedPayload->data()), static_cast<std::streamsize>(storedPayload->size()));
             if (!file.good()) {
                 return false;
             }
@@ -266,7 +271,7 @@ bool writeFile(const std::string& filepath,
         entry.tag = chunks[index].tag;
         entry.compression = static_cast<std::uint32_t>(compression);
         entry.offset = payloadOffset;
-        entry.storedSize = storedPayload.size();
+        entry.storedSize = storedPayload->size();
         entry.unpackedSize = chunks[index].payload.size();
         entry.crc32 = crc32For(chunks[index].payload);
         tocEntries.push_back(entry);

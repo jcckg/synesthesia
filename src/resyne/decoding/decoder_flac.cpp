@@ -75,4 +75,26 @@ bool decodeFlac(const std::string& filepath, DecodedAudio& out, std::string& err
     return true;
 }
 
+bool probeFlacDurationSeconds(const std::string& filepath, double& durationSeconds, std::string& error) {
+    durationSeconds = 0.0;
+
+    drflac* flac = drflac_open_file(filepath.c_str(), nullptr);
+    if (flac == nullptr) {
+        error = "unable to open flac";
+        return false;
+    }
+
+    const auto frameCount = flac->totalPCMFrameCount;
+    const auto sampleRate = flac->sampleRate;
+    drflac_close(flac);
+
+    if (frameCount == 0 || sampleRate == 0) {
+        error = "invalid flac stream";
+        return false;
+    }
+
+    durationSeconds = static_cast<double>(frameCount) / static_cast<double>(sampleRate);
+    return durationSeconds > 0.0;
+}
+
 }
