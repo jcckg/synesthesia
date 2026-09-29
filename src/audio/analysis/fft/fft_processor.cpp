@@ -169,7 +169,7 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
 void FFTProcessor::normalizeFFTOutput() {
 	// FFT normalisation convention: Scale by 2/N for positive frequencies
 	// DC (bin 0) and Nyquist (bin N/2) get additional 0.5x since they lack complex conjugates
-	// This gives energy-preserving normalisation: Parseval's theorem holds for magnitude²
+	// This is single-sided amplitude scaling; inner-bin energy has a 0.5 weight.
 	// Reference: KissFFT uses unnormalized FFT, so we apply 1/N scaling here
 	// Positive frequency bins: 2/N (to account for negative frequencies folded in real FFT)
 	// DC and Nyquist bins: 1/N (no negative frequency counterpart)
@@ -396,16 +396,20 @@ void FFTProcessor::calculateMagnitudes(std::vector<float>& rawMagnitudes, const 
 	} else
 #endif
 	{
-		for (size_t i = 1; i < fft_out.size() - 1; ++i) {
-			if (const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
-				freq < MIN_FREQ || freq > MAX_FREQ)
+		for (size_t i = 0; i < fft_out.size(); ++i) {
+			const bool endpoint = i == 0 || i + 1 == fft_out.size();
+			const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
+			if (!endpoint && (freq < MIN_FREQ || freq > MAX_FREQ)) {
+				rawMagnitudes[i] = 0.0f;
 				continue;
-
+			}
 			const float magnitudeSquared = fft_out[i].r * fft_out[i].r + fft_out[i].i * fft_out[i].i;
 			const float magnitude = std::sqrt(magnitudeSquared);
 			rawMagnitudes[i] = magnitude;
-			outTotalEnergy += magnitudeSquared;
-			outMaxMagnitude = std::max(outMaxMagnitude, magnitude);
+			if (!endpoint) {
+				outTotalEnergy += magnitudeSquared;
+				outMaxMagnitude = std::max(outMaxMagnitude, magnitude);
+			}
 		}
 	}
 }

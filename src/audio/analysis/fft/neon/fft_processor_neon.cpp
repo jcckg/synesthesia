@@ -259,9 +259,8 @@ void calculateMagnitudesFromComplex(std::span<float> magnitudes,
         float32x4_t realSq = vmulq_f32(real_vals, real_vals);
         float32x4_t imagSq = vmulq_f32(imag_vals, imag_vals);
         float32x4_t sum = vaddq_f32(realSq, imagSq);
-        float32x4_t sqrtApprox = vrsqrteq_f32(sum);
-        sqrtApprox = vmulq_f32(sqrtApprox, vrsqrtsq_f32(vmulq_f32(sum, sqrtApprox), sqrtApprox));
-        float32x4_t result = vmulq_f32(sum, sqrtApprox);
+        // Direct square root is defined at zero; reciprocal sqrt produced 0 * inf.
+        float32x4_t result = vsqrtq_f32(sum);
         
         vst1q_f32(&magnitudes[i], result);
     }

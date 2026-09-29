@@ -78,6 +78,57 @@ void writeSmoothedOutputs(RSYNPresentationFrame& frame,
 
 }
 
+struct ReplayState::Impl {
+    RSYNPresentationSettings settings;
+    SpectralPresentation::Settings presentationSettings;
+    SpringSmoother smoother;
+    UI::Smoothing::MagnitudeHistory fluxHistory;
+    AudioColourSample previous;
+    bool hasPrevious = false;
+    explicit Impl(const RSYNPresentationSettings& config)
+        : settings(config), presentationSettings(buildPresentationSettings(config)),
+          smoother(8.0f, 1.0f, config.springMass) {
+        smoother.setSmoothingAmount(config.smoothingAmount);
+    }
+};
+
+ReplayState::ReplayState(const RSYNPresentationSettings& settings)
+    : state(std::make_unique<Impl>(settings)) {}
+ReplayState::~ReplayState() = default;
+
+RSYNPresentationFrame ReplayState::process(const AudioColourSample& sample) {
+    auto& s = *state;
+    const auto prepared = SpectralPresentation::SampleSequence::prepareSampleFrame(
+        sample, s.presentationSettings, s.hasPrevious ? &s.previous : nullptr);
+    RSYNPresentationFrame frame{};
+    frame.timestamp = sample.timestamp;
+    frame.analysis = prepared.colourResult;
+    frame.targetOklab = xyzToOklab(prepared.colourResult);
+    auto features = UI::Smoothing::buildSignalFeatures(prepared.colourResult);
+    UI::Smoothing::updateFluxHistory(prepared.visualiserMagnitudes, s.fluxHistory, features);
+    frame.smoothingSignals = copySignals(features);
+    if (!s.settings.smoothingEnabled) {
+        writeSmoothedOutputs(frame, frame.targetOklab, s.settings);
+    } else {
+        if (!s.hasPrevious) {
+            s.smoother.resetOklab(frame.targetOklab[0], frame.targetOklab[1], frame.targetOklab[2]);
+        } else {
+            const double delta = sample.timestamp - s.previous.timestamp;
+            const float dt = std::isfinite(delta) && delta > 0.0 ? static_cast<float>(delta)
+                : SpectralPresentation::SampleSequence::kFallbackDeltaTimeSeconds;
+            s.smoother.setTargetOklab(frame.targetOklab[0], frame.targetOklab[1], frame.targetOklab[2]);
+            if (s.settings.manualSmoothing) s.smoother.update(dt * s.settings.smoothingUpdateFactor);
+            else s.smoother.update(dt * s.settings.smoothingUpdateFactor, features);
+        }
+        std::array<float, 3> smoothed{};
+        s.smoother.getCurrentOklab(smoothed[0], smoothed[1], smoothed[2]);
+        writeSmoothedOutputs(frame, smoothed, s.settings);
+    }
+    s.previous = sample;
+    s.hasPrevious = true;
+    return frame;
+}
+
 std::shared_ptr<RSYNPresentationData> buildPresentationData(
     const std::vector<AudioColourSample>& samples,
     const RSYNPresentationSettings& settings,
@@ -85,67 +136,12 @@ std::shared_ptr<RSYNPresentationData> buildPresentationData(
     auto presentation = std::make_shared<RSYNPresentationData>();
     presentation->settings = settings;
     presentation->frames.reserve(samples.size());
-
-    if (samples.empty()) {
-        if (progress) {
-            progress(1.0f);
-        }
-        return presentation;
-    }
-
-    SpringSmoother smoother(8.0f, 1.0f, settings.springMass);
-    smoother.setSmoothingAmount(settings.smoothingAmount);
-
-    const auto presentationSettings = buildPresentationSettings(settings);
-    UI::Smoothing::MagnitudeHistory fluxHistory;
-
+    ReplayState replay(settings);
     for (std::size_t index = 0; index < samples.size(); ++index) {
-        const AudioColourSample& sample = samples[index];
-        const AudioColourSample* previousSample = index > 0 ? &samples[index - 1] : nullptr;
-        const auto preparedFrame = SpectralPresentation::SampleSequence::prepareSampleFrame(
-            sample,
-            presentationSettings,
-            previousSample);
-
-        RSYNPresentationFrame frame{};
-        frame.timestamp = sample.timestamp;
-        frame.analysis = preparedFrame.colourResult;
-        frame.targetOklab = xyzToOklab(preparedFrame.colourResult);
-
-        auto features = UI::Smoothing::buildSignalFeatures(preparedFrame.colourResult);
-        UI::Smoothing::updateFluxHistory(preparedFrame.visualiserMagnitudes, fluxHistory, features);
-        frame.smoothingSignals = copySignals(features);
-
-        if (!settings.smoothingEnabled) {
-            writeSmoothedOutputs(frame, frame.targetOklab, settings);
-            presentation->frames.push_back(std::move(frame));
-        } else {
-            if (index == 0) {
-                smoother.resetOklab(frame.targetOklab[0], frame.targetOklab[1], frame.targetOklab[2]);
-            } else {
-                const double deltaSeconds = sample.timestamp - samples[index - 1].timestamp;
-                const float deltaTime = std::isfinite(deltaSeconds) && deltaSeconds > 0.0
-                    ? static_cast<float>(deltaSeconds)
-                    : SpectralPresentation::SampleSequence::kFallbackDeltaTimeSeconds;
-                smoother.setTargetOklab(frame.targetOklab[0], frame.targetOklab[1], frame.targetOklab[2]);
-                if (settings.manualSmoothing) {
-                    smoother.update(deltaTime * settings.smoothingUpdateFactor);
-                } else {
-                    smoother.update(deltaTime * settings.smoothingUpdateFactor, features);
-                }
-            }
-
-            std::array<float, 3> smoothedOklab{};
-            smoother.getCurrentOklab(smoothedOklab[0], smoothedOklab[1], smoothedOklab[2]);
-            writeSmoothedOutputs(frame, smoothedOklab, settings);
-            presentation->frames.push_back(std::move(frame));
-        }
-
-        if (progress) {
-            progress(static_cast<float>(index + 1) / static_cast<float>(samples.size()));
-        }
+        presentation->frames.push_back(replay.process(samples[index]));
+        if (progress) progress(static_cast<float>(index + 1) / static_cast<float>(samples.size()));
     }
-
+    if (samples.empty() && progress) progress(1.0f);
     return presentation;
 }
 
