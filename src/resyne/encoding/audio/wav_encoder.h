@@ -44,6 +44,7 @@ public:
 private:
 	static std::vector<float> overlapAdd(
 		const std::vector<std::vector<float>>& frames,
-		int hopSize
+		int hopSize,
+		const std::vector<bool>& frequencyShifted
 	);
 };

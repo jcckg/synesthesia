@@ -202,7 +202,7 @@ bool renderCombo(const char* label, int& selectedIndex, std::span<const Item> it
 
     ImGui::SetNextItemWidth(comboWidth);
     ImGui::SetNextWindowSizeConstraints(ImVec2(desiredPopupWidth, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
-    const bool open = ImGui::BeginCombo(label, nullptr, ImGuiComboFlags_CustomPreview);
+    const bool open = ImGui::BeginCombo(label, nullptr);
 
     bool changed = false;
     if (open) {

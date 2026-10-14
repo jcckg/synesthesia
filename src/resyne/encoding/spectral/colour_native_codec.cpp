@@ -116,9 +116,6 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 		const float frameSampleRate = sample.sampleRate > 0.0f
 			? sample.sampleRate
 			: metadata.sampleRate;
-		const float hopRatio = (metadata.fftSize > 0)
-			? static_cast<float>(metadata.hopSize) / static_cast<float>(metadata.fftSize)
-			: 0.5f;
 
 		for (uint32_t ch = 0; ch < numChannels; ++ch) {
 			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
@@ -127,7 +124,7 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 
 			std::vector<RGBAColour> column;
 			const std::vector<float>& rawFrequencies = (ch < sample.frequencies.size()) ? sample.frequencies[ch] : std::vector<float>();
-			encodeTimeFrame(sample.magnitudes[ch], sample.phases[ch], rawFrequencies, frameSampleRate, hopRatio, column);
+			encodeTimeFrame(sample.magnitudes[ch], sample.phases[ch], rawFrequencies, frameSampleRate, column);
 
 			const size_t yOffset = ch * numBinsPerChannel;
 			for (size_t bin = 0; bin < numBinsPerChannel && bin < column.size(); ++bin) {
@@ -202,6 +199,9 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 				continue;
 			}
 
+			if (pixel.g > 1.0f) {
+				continue;
+			}
 			const float frequencyNormalised = std::clamp(pixel.g, 0.0f, 1.0f);
 			const float frequency = denormaliseLogFrequency(frequencyNormalised);
 			if (!std::isfinite(frequency) || frequency <= 0.0f) {
@@ -607,7 +607,6 @@ void ColourNativeCodec::encodeTimeFrame(const std::vector<float>& magnitudes,
 									   const std::vector<float>& phases,
 									   const std::vector<float>& frequencies,
 									   const float sampleRate,
-									   const float hopRatio,
 									   std::vector<RGBAColour>& column) {
 	const size_t numBins = std::min(magnitudes.size(), phases.size());
 	column.assign(numBins, {0.0f, 0.0f, 0.5f, 0.5f});
@@ -637,8 +636,6 @@ void ColourNativeCodec::encodeTimeFrame(const std::vector<float>& magnitudes,
 
 		column[bin] = encodeFrequencyBin(frequency, magnitude, phase);
 	}
-
-	(void)hopRatio;
 }
 
 void ColourNativeCodec::decodeTimeFrame(const std::vector<RGBAColour>& column,
@@ -676,7 +673,7 @@ void ColourNativeCodec::decodeTimeFrame(const std::vector<RGBAColour>& column,
 		const float phase = decodePhaseVector(pixel.b, pixel.a, phaseValid);
 		phases[bin] = phaseValid ? phase : 0.0f;
 
-		float resolvedFrequency = denormaliseLogFrequency(std::clamp(pixel.g, 0.0f, 1.0f));
+		float resolvedFrequency = denormaliseLogFrequency(pixel.g);
 		if (!std::isfinite(resolvedFrequency) || resolvedFrequency <= 0.0f) {
 			resolvedFrequency = freqResolution > 0.0f
 				? freqResolution * static_cast<float>(bin)
@@ -739,9 +736,10 @@ float ColourNativeCodec::denormaliseLogFrequency(const float normalised) {
 	if (LOG_FREQ_RANGE <= EPSILON) {
 		return synesthesia::constants::MIN_AUDIO_FREQ;
 	}
-	const float clamped = std::clamp(normalised, 0.0f, 1.0f);
+	const float clamped = std::max(normalised, 0.0f);
 	const float logValue = LOG_FREQ_MIN + clamped * LOG_FREQ_RANGE;
-	return std::pow(2.0f, logValue);
+	const float maximumLogValue = std::log2(std::numeric_limits<float>::max()) - 1.0f;
+	return std::pow(2.0f, std::min(logValue, maximumLogValue));
 }
 
 std::pair<float, float> ColourNativeCodec::encodePhaseVector(const float phase) {

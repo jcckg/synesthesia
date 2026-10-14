@@ -164,13 +164,13 @@ bool DetachedVisualisationWindow::recreateFrameBufferIfNeeded() {
         return false;
     }
 
-    const bgfx::PlatformData platformData = window_.platformData();
-    if (platformData.nwh == nullptr) {
+    bgfx::SwapChain swapChain = window_.swapChain();
+    if (swapChain.nwh == nullptr) {
         return false;
     }
 
     if (bgfx::isValid(frameBuffer_) &&
-        nativeWindowHandle_ == platformData.nwh &&
+        nativeWindowHandle_ == swapChain.nwh &&
         framebufferWidth_ == size.width &&
         framebufferHeight_ == size.height) {
         return true;
@@ -178,16 +178,11 @@ bool DetachedVisualisationWindow::recreateFrameBufferIfNeeded() {
 
     destroyFrameBuffer(false);
 
-    nativeWindowHandle_ = platformData.nwh;
+    nativeWindowHandle_ = swapChain.nwh;
     framebufferWidth_ = size.width;
     framebufferHeight_ = size.height;
-    frameBuffer_ = bgfx::createFrameBuffer(
-        nativeWindowHandle_,
-        static_cast<uint16_t>(framebufferWidth_),
-        static_cast<uint16_t>(framebufferHeight_),
-        colourFormat_,
-        bgfx::TextureFormat::D24S8
-    );
+    swapChain.formatColor = colourFormat_;
+    frameBuffer_ = bgfx::createFrameBuffer(swapChain);
     return bgfx::isValid(frameBuffer_);
 }
 

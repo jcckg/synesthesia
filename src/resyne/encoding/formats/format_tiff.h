@@ -16,6 +16,7 @@ bool loadFromTIFF(const std::string& filepath,
                  std::vector<AudioColourSample>& samples,
                  AudioMetadata& metadata,
                  const std::function<void(float)>& progress = {},
-                 const SequenceFrameCallback& onFrameDecoded = {});
+                 const SequenceFrameCallback& onFrameDecoded = {},
+                 std::string* errorMessage = nullptr);
 
 }

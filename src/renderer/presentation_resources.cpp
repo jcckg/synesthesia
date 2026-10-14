@@ -10,7 +10,6 @@
 
 #include <bgfx/embedded_shader.h>
 #include <bx/math.h>
-#include <bx/uint32_t.h>
 
 #include "../../vendor/bgfx/examples/common/imgui/fs_ocornut_imgui.bin.h"
 #include "../../vendor/bgfx/examples/common/imgui/vs_ocornut_imgui.bin.h"

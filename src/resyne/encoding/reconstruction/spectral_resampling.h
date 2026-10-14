@@ -8,6 +8,13 @@ namespace SpectralResampling {
 struct ResampledSpectrum {
 	std::vector<float> magnitudes;
 	std::vector<float> phases;
+	bool frequencyShifted = false;
+};
+
+struct PhaseState {
+	std::vector<float> previousPhases;
+	std::vector<float> previousMagnitudes;
+	std::vector<float> offsets;
 };
 
 ResampledSpectrum resampleSpectrum(
@@ -15,7 +22,9 @@ ResampledSpectrum resampleSpectrum(
 	const std::vector<float>& phases,
 	const std::vector<float>& decodedFrequencies,
 	float sampleRate,
-	size_t fftSize
+	size_t fftSize,
+	int hopSize,
+	PhaseState& phaseState
 );
 
 float computeShiftRatio(float decodedFrequency, float expectedFrequency);

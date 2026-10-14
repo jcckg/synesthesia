@@ -89,11 +89,14 @@ void SpectrumAnalyser::drawSpectrumWindow(
             ImVec4 fillColour = SPECTRUM_COLOUR;
             fillColour.w = 0.1f;
 
-            ImPlot::SetNextFillStyle(fillColour);
-            ImPlot::PlotShaded(("##Fill" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT, 0.0);
+            ImPlotSpec fillStyle;
+            fillStyle.FillColor = fillColour;
+            ImPlot::PlotShaded(("##Fill" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT, 0.0, fillStyle);
 
-            ImPlot::SetNextLineStyle(SPECTRUM_COLOUR, 1.5f);
-            ImPlot::PlotLine(("##Line" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT);
+            ImPlotSpec lineStyle;
+            lineStyle.LineColor = SPECTRUM_COLOUR;
+            lineStyle.LineWeight = 1.5f;
+            ImPlot::PlotLine(("##Line" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT, lineStyle);
         }
         
         ImPlot::EndPlot();

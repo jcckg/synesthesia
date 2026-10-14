@@ -114,9 +114,14 @@ bool Recorder::importFromFile(RecorderState& state,
 			metadata,
 			[&state](float p) {
 				state.loadingProgress = std::clamp(0.05f + p * 0.85f, 0.0f, 0.95f);
-			});
+			},
+            {},
+            &errorMessage);
 		if (!success || importedSamples.empty()) {
-			errorMessage = "parse failure";
+            success = false;
+            if (errorMessage.empty()) {
+                errorMessage = "TIFF contains no decodable audio frames";
+            }
 		}
 		state.loadingProgress = 0.9f;
 	} else if (extension == ".rsyn") {
@@ -223,9 +228,13 @@ void Recorder::importFromFileThreaded(RecorderState& state,
 			[&updateProgress](float p) {
 				updateProgress(0.05f + p * 0.75f);
 			},
-			forwardDecodedFrame);
+			forwardDecodedFrame,
+            &errorMessage);
 		if (!success || (samples.empty() && metadata.presentationData == nullptr)) {
-			errorMessage = "parse failure";
+            success = false;
+            if (errorMessage.empty()) {
+                errorMessage = "TIFF contains no decodable audio frames";
+            }
 		} else {
 			updatePreview(samples);
 		}

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <bgfx/platform.h>
+#include <bgfx/bgfx.h>
 
 struct GLFWwindow;
 
@@ -39,6 +39,7 @@ public:
     [[nodiscard]] GLFWwindow* handle() const;
     [[nodiscard]] FramebufferSize framebufferSize() const;
     [[nodiscard]] bgfx::PlatformData platformData() const;
+    [[nodiscard]] bgfx::SwapChain swapChain() const;
 
 private:
     GLFWwindow* window_ = nullptr;

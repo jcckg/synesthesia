@@ -1,17 +1,10 @@
 #include "resyne/encoding/formats/format_tiff.h"
 
 #include "resyne/encoding/spectral/colour_native_codec.h"
+#include "resyne/encoding/formats/tiff_metadata.h"
 #include "resyne/recorder/loudness_utils.h"
 
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#define TINY_DNG_LOADER_NO_STB_IMAGE_INCLUDE
-#define TINY_DNG_LOADER_IMPLEMENTATION
-#define TINY_DNG_WRITER_IMPLEMENTATION
-#include <tiny_dng_loader.h>
-#include <tiny_dng_writer.h>
+#include <tinydng.h>
 
 #include <algorithm>
 #include <array>
@@ -20,6 +13,7 @@
 #include <cstring>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,17 +21,27 @@ namespace SequenceExporterInternal {
 
 namespace {
 constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
-constexpr unsigned short TIFFTAG_RESYNE_SAMPLE_RATE = 65000;
-constexpr unsigned short TIFFTAG_RESYNE_FFT_SIZE = 65001;
-constexpr unsigned short TIFFTAG_RESYNE_HOP_SIZE = 65002;
-constexpr unsigned short TIFFTAG_RESYNE_CHANNELS = 65003;
 
-struct EmbeddedTiffMetadata {
-	uint32_t sampleRate = 0;
-	uint32_t fftSize = 0;
-	uint32_t hopSize = 0;
-	uint32_t channels = 0;
+struct DecodedPixels {
+    tinydng_context* context;
+    tinydng_pixels data{};
+
+    ~DecodedPixels() {
+        tinydng_pixels_free(context, &data);
+    }
 };
+
+struct OutputSink {
+    tinydng_write_io data{};
+
+    ~OutputSink() {
+        if (data.close != nullptr) {
+            data.close(&data);
+        }
+    }
+};
+
+using DngContext = std::unique_ptr<tinydng_context, decltype(&tinydng_context_destroy)>;
 
 float srgbToLinear(const float value) {
 	if (value <= 0.04045f) {
@@ -50,7 +54,7 @@ float sanitiseFloat(const float value) {
 	if (!std::isfinite(value)) {
 		return 0.0f;
 	}
-	return std::clamp(value, 0.0f, 1.0f);
+	return value;
 }
 
 size_t resolveBinCount(const std::vector<AudioColourSample>& samples,
@@ -106,54 +110,6 @@ uint32_t resolveStoredChannels(const std::vector<AudioColourSample>& samples,
 		return metadata.channels;
 	}
 	return !samples.empty() ? std::max(1u, samples.front().channels) : 1u;
-}
-
-std::vector<tinydng::FieldInfo> buildEmbeddedMetadataFields() {
-	auto buildField = [](const int tag, const std::string& name) {
-		tinydng::FieldInfo field;
-		field.tag = tag;
-		field.read_count = 1;
-		field.write_count = 1;
-		field.type = tinydng::TYPE_LONG;
-		field.name = name;
-		return field;
-	};
-
-	return {
-		buildField(TIFFTAG_RESYNE_SAMPLE_RATE, "resyne_sample_rate"),
-		buildField(TIFFTAG_RESYNE_FFT_SIZE, "resyne_fft_size"),
-		buildField(TIFFTAG_RESYNE_HOP_SIZE, "resyne_hop_size"),
-		buildField(TIFFTAG_RESYNE_CHANNELS, "resyne_channels")
-	};
-}
-
-bool readEmbeddedULong(const tinydng::FieldData& field, uint32_t& value) {
-	if (field.data.size() != sizeof(uint32_t)) {
-		return false;
-	}
-	std::memcpy(&value, field.data.data(), sizeof(uint32_t));
-	return true;
-}
-
-EmbeddedTiffMetadata readEmbeddedMetadata(const tinydng::DNGImage& image) {
-	EmbeddedTiffMetadata metadata;
-	for (const auto& field : image.custom_fields) {
-		uint32_t value = 0;
-		if (!readEmbeddedULong(field, value)) {
-			continue;
-		}
-
-		if (field.name == "resyne_sample_rate") {
-			metadata.sampleRate = value;
-		} else if (field.name == "resyne_fft_size") {
-			metadata.fftSize = value;
-		} else if (field.name == "resyne_hop_size") {
-			metadata.hopSize = value;
-		} else if (field.name == "resyne_channels") {
-			metadata.channels = value;
-		}
-	}
-	return metadata;
 }
 
 bool resolveImageLayout(const size_t height,
@@ -237,217 +193,205 @@ bool exportToTIFF(const std::string& filepath,
 		return false;
 	}
 
-	std::vector<float> imageData(image.width * image.height * 4);
-	for (size_t row = 0; row < image.height; ++row) {
-		const size_t invertedRow = image.height - 1 - row;
-		for (size_t column = 0; column < image.width; ++column) {
-			const RGBAColour& pixel = image.at(column, invertedRow);
-			const size_t idx = (row * image.width + column) * 4;
+    if (image.width > std::numeric_limits<uint32_t>::max() ||
+        image.height > std::numeric_limits<uint32_t>::max() ||
+        image.width > std::numeric_limits<size_t>::max() / 4u / sizeof(float)) {
+        return false;
+    }
 
-			imageData[idx + 0] = pixel.r;
-			imageData[idx + 1] = pixel.g;
-			imageData[idx + 2] = pixel.b;
-			imageData[idx + 3] = pixel.a;
-		}
+    tinydng_error error{};
+    DngContext context(tinydng_context_create(nullptr, &error), tinydng_context_destroy);
+    if (!context) {
+        return false;
+    }
+    OutputSink sink;
+    if (tinydng_write_io_open_file(context.get(), filepath.c_str(), &sink.data, &error) != TINYDNG_OK) {
+        return false;
+    }
 
-		if (image.height > 0) {
-			const float rowProgress = static_cast<float>(row + 1) /
-				static_cast<float>(image.height);
-			emitProgress(0.65f + rowProgress * 0.25f);
-		}
-	}
+    tinydng_write_image output{};
+    output.width = static_cast<uint32_t>(image.width);
+    output.height = static_cast<uint32_t>(image.height);
+    output.samples_per_pixel = 4;
+    output.bits_per_sample = 32;
+    output.sample_format = TINYDNG_SAMPLEFORMAT_IEEEFP;
+    output.photometric = 2;
 
-	tinydngwriter::DNGImage dngImage;
-	tinydngwriter::DNGWriter dngWriter(false);
+    constexpr size_t rowsPerStrip = 64;
+    const size_t stripRows = std::min(image.height, rowsPerStrip);
+    if (image.width > std::numeric_limits<size_t>::max() / stripRows / 4u / sizeof(float)) {
+        return false;
+    }
+    std::vector<float> stripPixels(image.width * stripRows * 4u);
+    tinydng_write_options options{};
+    options.compression = TINYDNG_COMPRESSION_NONE;
+    options.bigtiff = image.width > (std::numeric_limits<uint32_t>::max() - 1024u * 1024u) /
+        image.height / 4u / sizeof(float);
+    tinydng_tiling layout{};
+    layout.rows_per_strip = static_cast<uint32_t>(rowsPerStrip);
 
-	dngImage.SetBigEndian(false);
-	dngImage.SetSubfileType(false, false, false);
-	dngImage.SetImageWidth(static_cast<uint32_t>(image.width));
-	dngImage.SetImageLength(static_cast<uint32_t>(image.height));
-	dngImage.SetRowsPerStrip(static_cast<uint32_t>(image.height));
-	dngImage.SetSamplesPerPixel(4);
+    tinydng_writer* rawWriter = nullptr;
+    if (tinydng_writer_create(context.get(), sink.data, &output, &options, &layout, &rawWriter, &error) != TINYDNG_OK) {
+        return false;
+    }
+    const auto releaseWriter = [](tinydng_writer* writer) { tinydng_writer_finish(writer, nullptr); };
+    std::unique_ptr<tinydng_writer, decltype(releaseWriter)> writer(rawWriter, releaseWriter);
+    for (size_t firstRow = 0; firstRow < image.height; firstRow += rowsPerStrip) {
+        const size_t rowCount = std::min(rowsPerStrip, image.height - firstRow);
+        for (size_t row = 0; row < rowCount; ++row) {
+            const size_t invertedRow = image.height - 1u - firstRow - row;
+            for (size_t column = 0; column < image.width; ++column) {
+                const auto& pixel = image.at(column, invertedRow);
+                const size_t index = (row * image.width + column) * 4u;
+                stripPixels[index] = pixel.r;
+                stripPixels[index + 1u] = pixel.g;
+                stripPixels[index + 2u] = pixel.b;
+                stripPixels[index + 3u] = pixel.a;
+            }
+        }
+        if (tinydng_writer_write_strip(writer.get(), static_cast<uint32_t>(firstRow / rowsPerStrip),
+                                       stripPixels.data(), &error) != TINYDNG_OK) {
+            return false;
+        }
+        emitProgress(0.65f + static_cast<float>(firstRow + rowCount) / static_cast<float>(image.height) * 0.25f);
+    }
 
-	uint16_t bitsPerSample[4] = {32, 32, 32, 32};
-	dngImage.SetBitsPerSample(4, bitsPerSample);
-
-	uint16_t sampleFormat[4] = {
-		tinydngwriter::SAMPLEFORMAT_IEEEFP,
-		tinydngwriter::SAMPLEFORMAT_IEEEFP,
-		tinydngwriter::SAMPLEFORMAT_IEEEFP,
-		tinydngwriter::SAMPLEFORMAT_IEEEFP
-	};
-	dngImage.SetSampleFormat(4, sampleFormat);
-
-	dngImage.SetPhotometric(tinydngwriter::PHOTOMETRIC_RGB);
-	dngImage.SetPlanarConfig(tinydngwriter::PLANARCONFIG_CONTIG);
-	dngImage.SetCompression(tinydngwriter::COMPRESSION_NONE);
-	dngImage.SetXResolution(1.0);
-	dngImage.SetYResolution(1.0);
-	dngImage.SetResolutionUnit(tinydngwriter::RESUNIT_NONE);
-	dngImage.SetSoftware("Synesthesia");
-
-	const uint32_t storedSampleRate = resolveStoredSampleRate(samples, metadata);
-	const uint32_t storedFftSize = resolveStoredFftSize(samples, metadata);
-	const uint32_t storedHopSize = resolveStoredHopSize(metadata, storedFftSize);
-	const uint32_t storedChannels = resolveStoredChannels(samples, metadata);
-
-	if (!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_SAMPLE_RATE, storedSampleRate) ||
-		!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_FFT_SIZE, storedFftSize) ||
-		!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_HOP_SIZE, storedHopSize) ||
-		!dngImage.SetCustomFieldULong(TIFFTAG_RESYNE_CHANNELS, storedChannels)) {
-		emitProgress(1.0f);
-		return false;
-	}
-
-	dngImage.SetImageData(reinterpret_cast<const unsigned char*>(imageData.data()),
-						  imageData.size() * sizeof(float));
-
-	dngWriter.AddImage(&dngImage);
-
-	std::string err;
-	emitProgress(0.92f);
-	const bool ok = dngWriter.WriteToFile(filepath.c_str(), &err);
-	emitProgress(ok ? 1.0f : 0.92f);
-	return ok;
+    emitProgress(0.92f);
+    const bool pixelsWritten = tinydng_writer_finish(writer.release(), &error) == TINYDNG_OK;
+    if (sink.data.close != nullptr) {
+        sink.data.close(&sink.data);
+        sink.data = {};
+    }
+    const auto storedFftSize = resolveStoredFftSize(samples, metadata);
+    const TiffMetadata::AudioFields storedMetadata{
+        resolveStoredSampleRate(samples, metadata),
+        storedFftSize,
+        resolveStoredHopSize(metadata, storedFftSize),
+        resolveStoredChannels(samples, metadata)
+    };
+    const bool ok = pixelsWritten && TiffMetadata::write(filepath, storedMetadata);
+    emitProgress(ok ? 1.0f : 0.92f);
+    return ok;
 }
 
 bool loadFromTIFF(const std::string& filepath,
                  std::vector<AudioColourSample>& samples,
                  AudioMetadata& metadata,
                  const std::function<void(float)>& progress,
-				 const SequenceFrameCallback& onFrameDecoded) {
-	std::vector<tinydng::DNGImage> images;
-	std::vector<tinydng::FieldInfo> customFields = buildEmbeddedMetadataFields();
-	std::string warn;
-	std::string err;
+				 const SequenceFrameCallback& onFrameDecoded,
+                 std::string* errorMessage) {
+    if (errorMessage != nullptr) {
+        errorMessage->clear();
+    }
+    const auto fail = [&](const std::string& message) {
+        if (errorMessage != nullptr) {
+            *errorMessage = message;
+        }
+        return false;
+    };
+    if (progress) {
+        progress(0.02f);
+    }
 
-	if (progress) {
-		progress(0.02f);
-	}
+    tinydng_error error{};
+    DngContext context(tinydng_context_create(nullptr, &error), tinydng_context_destroy);
+    if (!context) {
+        return fail(std::string("Could not initialise TIFF decoder: ") + error.message);
+    }
+    tinydng_document* rawDocument = nullptr;
+    tinydng_open_options openOptions{};
+    openOptions.flags = TINYDNG_OPEN_PREFER_MMAP;
+    if (tinydng_open_file(context.get(), filepath.c_str(), &openOptions, &rawDocument, &error) != TINYDNG_OK) {
+        return fail(std::string("Could not open TIFF: ") + error.message);
+    }
+    const auto releaseDocument = [&](tinydng_document* document) { tinydng_document_destroy(context.get(), document); };
+    std::unique_ptr<tinydng_document, decltype(releaseDocument)> document(rawDocument, releaseDocument);
+    const tinydng_image_info* image = tinydng_image_get(document.get(), 0);
+    if (image == nullptr || image->width == 0 || image->height == 0 || image->samples_per_pixel < 3 ||
+        !((image->sample_format == TINYDNG_SAMPLEFORMAT_IEEEFP && image->bits_per_sample == 32) ||
+          (image->sample_format == TINYDNG_SAMPLEFORMAT_UINT &&
+           (image->bits_per_sample == 8 || image->bits_per_sample == 16)))) {
+        return fail("TIFF must contain a 32-bit float or 8/16-bit RGB image");
+    }
+    const auto embeddedMetadata = TiffMetadata::read(filepath);
+    size_t binCount = 0;
+    uint32_t inferredChannels = 1;
+    if (!resolveImageLayout(image->height, embeddedMetadata.channels, binCount, inferredChannels) ||
+        (embeddedMetadata.channels > 0 && inferredChannels != embeddedMetadata.channels) ||
+        (embeddedMetadata.fftSize > 0 && static_cast<size_t>(embeddedMetadata.fftSize / 2u) + 1u != binCount) ||
+        embeddedMetadata.fftSize > static_cast<uint32_t>(std::numeric_limits<int>::max()) ||
+        embeddedMetadata.hopSize > static_cast<uint32_t>(std::numeric_limits<int>::max())) {
+        return fail("TIFF dimensions do not match its audio metadata");
+    }
+    ColourNativeImage colourImage;
+    if (image->width > colourImage.pixels.max_size() / image->height) {
+        return fail("TIFF image is too large to import");
+    }
+    colourImage.resize(image->width, image->height);
+    static_assert(sizeof(RGBAColour) == sizeof(float) * 4u);
+    tinydng_decode_options options{};
+    if (image->sample_format == TINYDNG_SAMPLEFORMAT_IEEEFP && image->samples_per_pixel == 4) {
+        options.dst = colourImage.pixels.data();
+        options.dst_capacity = colourImage.pixels.size() * sizeof(RGBAColour);
+    }
+    DecodedPixels pixels{context.get()};
+    if (tinydng_decode_image(context.get(), document.get(), 0, &options, &pixels.data, &error) != TINYDNG_OK) {
+        return fail(std::string("Could not decode TIFF: ") + error.message);
+    }
+    if (progress) {
+        progress(0.06f);
+    }
 
-	if (!tinydng::LoadDNG(filepath.c_str(), customFields, &images, &warn, &err)) {
-		return false;
-	}
-
-	if (images.empty()) {
-		return false;
-	}
-
-	const tinydng::DNGImage& image = images[0];
-	if (image.width <= 0 || image.height <= 0 || image.samples_per_pixel < 3) {
-		return false;
-	}
-	const EmbeddedTiffMetadata embeddedMetadata = readEmbeddedMetadata(image);
-
-	if (progress) {
-		progress(0.06f);
-	}
-
-	ColourNativeImage colourImage;
-	colourImage.resize(static_cast<size_t>(image.width),
-					   static_cast<size_t>(image.height));
-
-	const size_t pixelStride = static_cast<size_t>(image.samples_per_pixel);
-
-	if (image.sample_format == tinydng::SAMPLEFORMAT_IEEEFP) {
-		const float* imageData = reinterpret_cast<const float*>(image.data.data());
-
-		for (size_t row = 0; row < colourImage.height; ++row) {
-			const size_t invertedRow = colourImage.height - 1 - row;
-			for (size_t column = 0; column < colourImage.width; ++column) {
-				const size_t idx = (row * colourImage.width + column) * pixelStride;
-
-				const float r = sanitiseFloat(imageData[idx + 0]);
-				const float g = sanitiseFloat(imageData[idx + 1]);
-				const float b = sanitiseFloat(imageData[idx + 2]);
-				const float a = pixelStride > 3 ? sanitiseFloat(imageData[idx + 3]) : 0.5f;
-
-				colourImage.at(column, invertedRow) = {r, g, b, a};
-			}
-
-			if (progress) {
-				const float rowProgress = static_cast<float>(row + 1) / static_cast<float>(colourImage.height);
-				progress(0.08f + rowProgress * 0.48f);
-			}
-		}
-	} else if (image.sample_format == tinydng::SAMPLEFORMAT_UINT) {
-		if (image.bits_per_sample != 8 && image.bits_per_sample != 16) {
-			return false;
-		}
-
-		if (image.bits_per_sample == 8) {
-			const unsigned char* imageData = image.data.data();
-			for (size_t row = 0; row < colourImage.height; ++row) {
-				const size_t invertedRow = colourImage.height - 1 - row;
-				for (size_t column = 0; column < colourImage.width; ++column) {
-					const size_t idx = (row * colourImage.width + column) * pixelStride;
-
-					const float r = srgbToLinear(static_cast<float>(imageData[idx + 0]) / 255.0f);
-					const float g = srgbToLinear(static_cast<float>(imageData[idx + 1]) / 255.0f);
-					const float b = srgbToLinear(static_cast<float>(imageData[idx + 2]) / 255.0f);
-					const float a = pixelStride > 3
-						? static_cast<float>(imageData[idx + 3]) / 255.0f
-						: 0.5f;
-
-					colourImage.at(column, invertedRow) = {
-						std::clamp(r, 0.0f, 1.0f),
-						std::clamp(g, 0.0f, 1.0f),
-						std::clamp(b, 0.0f, 1.0f),
-						std::clamp(a, 0.0f, 1.0f)
-					};
-				}
-
-				if (progress) {
-					const float rowProgress = static_cast<float>(row + 1) / static_cast<float>(colourImage.height);
-					progress(0.08f + rowProgress * 0.48f);
-				}
-			}
-		} else {
-			const uint16_t* imageData = reinterpret_cast<const uint16_t*>(image.data.data());
-			for (size_t row = 0; row < colourImage.height; ++row) {
-				const size_t invertedRow = colourImage.height - 1 - row;
-				for (size_t column = 0; column < colourImage.width; ++column) {
-					const size_t idx = (row * colourImage.width + column) * pixelStride;
-
-					const float r = srgbToLinear(static_cast<float>(imageData[idx + 0]) / 65535.0f);
-					const float g = srgbToLinear(static_cast<float>(imageData[idx + 1]) / 65535.0f);
-					const float b = srgbToLinear(static_cast<float>(imageData[idx + 2]) / 65535.0f);
-					const float a = pixelStride > 3
-						? static_cast<float>(imageData[idx + 3]) / 65535.0f
-						: 0.5f;
-
-					colourImage.at(column, invertedRow) = {
-						std::clamp(r, 0.0f, 1.0f),
-						std::clamp(g, 0.0f, 1.0f),
-						std::clamp(b, 0.0f, 1.0f),
-						std::clamp(a, 0.0f, 1.0f)
-					};
-				}
-
-				if (progress) {
-					const float rowProgress = static_cast<float>(row + 1) / static_cast<float>(colourImage.height);
-					progress(0.08f + rowProgress * 0.48f);
-				}
-			}
-		}
-	} else {
-		return false;
-	}
-
-	size_t binCount = 0;
-	uint32_t inferredChannels = 1;
-	if (!resolveImageLayout(colourImage.height, embeddedMetadata.channels, binCount, inferredChannels)) {
-		return false;
-	}
-	if (embeddedMetadata.channels > 0 && inferredChannels != embeddedMetadata.channels) {
-		return false;
-	}
-	if (embeddedMetadata.fftSize > 0) {
-		const size_t storedBinCount = static_cast<size_t>(embeddedMetadata.fftSize / 2) + 1;
-		if (storedBinCount != binCount) {
-			return false;
-		}
-	}
+    const size_t bytesPerSample = pixels.data.bits_per_sample / 8u;
+    const size_t pixelStride = pixels.data.samples_per_pixel;
+    if (pixels.data.width != image->width || pixels.data.height != image->height || pixelStride < 3 ||
+        !((pixels.data.sample_format == TINYDNG_SAMPLEFORMAT_IEEEFP && pixels.data.bits_per_sample == 32) ||
+          (pixels.data.sample_format == TINYDNG_SAMPLEFORMAT_UINT &&
+           (pixels.data.bits_per_sample == 8 || pixels.data.bits_per_sample == 16))) ||
+        colourImage.pixels.size() > pixels.data.size / pixelStride / bytesPerSample) {
+        return fail("TIFF decoder returned an unsupported pixel layout");
+    }
+    const auto readSample = [&](size_t index) {
+        const uint8_t* data = pixels.data.data + index * bytesPerSample;
+        if (pixels.data.sample_format == TINYDNG_SAMPLEFORMAT_IEEEFP) {
+            float value;
+            std::memcpy(&value, data, sizeof(value));
+            return sanitiseFloat(value);
+        }
+        if (pixels.data.bits_per_sample == 8) {
+            return static_cast<float>(*data) / 255.0f;
+        }
+        uint16_t value;
+        std::memcpy(&value, data, sizeof(value));
+        return static_cast<float>(value) / 65535.0f;
+    };
+    for (size_t row = 0; row < colourImage.height; ++row) {
+        for (size_t column = 0; column < colourImage.width; ++column) {
+            const size_t index = (row * colourImage.width + column) * pixelStride;
+            RGBAColour pixel{
+                std::clamp(readSample(index), 0.0f, 1.0f),
+                std::max(readSample(index + 1u), 0.0f),
+                std::clamp(readSample(index + 2u), 0.0f, 1.0f),
+                pixelStride > 3 ? std::clamp(readSample(index + 3u), 0.0f, 1.0f) : 0.5f
+            };
+            if (pixels.data.sample_format == TINYDNG_SAMPLEFORMAT_UINT) {
+                pixel.r = std::clamp(srgbToLinear(pixel.r), 0.0f, 1.0f);
+                pixel.g = std::clamp(srgbToLinear(pixel.g), 0.0f, 1.0f);
+                pixel.b = std::clamp(srgbToLinear(pixel.b), 0.0f, 1.0f);
+            }
+            colourImage.at(column, row) = pixel;
+        }
+        if (progress) {
+            progress(0.08f + static_cast<float>(row + 1u) / static_cast<float>(colourImage.height) * 0.48f);
+        }
+    }
+    tinydng_pixels_free(context.get(), &pixels.data);
+    for (size_t row = 0; row < colourImage.height / 2u; ++row) {
+        const size_t invertedRow = colourImage.height - 1u - row;
+        for (size_t column = 0; column < colourImage.width; ++column) {
+            std::swap(colourImage.at(column, row), colourImage.at(column, invertedRow));
+        }
+    }
 
 	colourImage.metadata.channels = inferredChannels;
 
@@ -486,7 +430,7 @@ bool loadFromTIFF(const std::string& filepath,
 
 	samples = ColourNativeCodec::decode(colourImage, detectedSampleRate, hopSize, frameCallback, decodeProgress);
 	if (samples.empty()) {
-		return false;
+		return fail("TIFF contains no decodable audio frames");
 	}
 	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata);
 

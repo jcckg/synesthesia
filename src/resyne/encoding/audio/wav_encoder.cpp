@@ -90,6 +90,10 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 		result.errorMessage = "No spectral samples provided";
 		return result;
 	}
+	if (fftSize < 2 || (fftSize % 2) != 0 || hopSize <= 0) {
+		result.errorMessage = "Invalid FFT or hop size";
+		return result;
+	}
 
 	size_t numChannels = samples[0].magnitudes.size();
 
@@ -104,10 +108,14 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	for (size_t ch = 0; ch < numChannels; ++ch) {
 		std::vector<std::vector<float>> timeFrames;
 		timeFrames.reserve(samples.size());
+		std::vector<bool> frequencyShifted(samples.size(), false);
+		SpectralResampling::PhaseState phaseState;
 
-		for (const auto& sample : samples) {
+		for (size_t frame = 0; frame < samples.size(); ++frame) {
+			const auto& sample = samples[frame];
 			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
 				timeFrames.push_back(std::vector<float>(static_cast<size_t>(fftSize), 0.0f));
+				phaseState = {};
 				continue;
 			}
 
@@ -122,9 +130,14 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 					framePhases,
 					sample.frequencies[ch],
 					sampleRate,
-					static_cast<size_t>(fftSize));
+					static_cast<size_t>(fftSize),
+					hopSize,
+					phaseState);
 				frameMagnitudes = std::move(resampled.magnitudes);
 				framePhases = std::move(resampled.phases);
+				frequencyShifted[frame] = resampled.frequencyShifted;
+			} else {
+				phaseState = {};
 			}
 
 			std::vector<float> timeFrame = inverseFFT(frameMagnitudes, framePhases, fftSize);
@@ -132,7 +145,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 			timeFrames.push_back(std::move(timeFrame));
 		}
 
-		channelAudio[ch] = overlapAdd(timeFrames, hopSize);
+		channelAudio[ch] = overlapAdd(timeFrames, hopSize, frequencyShifted);
 	}
 
 	if (numChannels == 1) {
@@ -196,7 +209,8 @@ std::vector<float> WAVEncoder::inverseFFT(
 
 std::vector<float> WAVEncoder::overlapAdd(
 	const std::vector<std::vector<float>>& frames,
-	int hopSize
+	int hopSize,
+	const std::vector<bool>& frequencyShifted
 ) {
 	if (frames.empty()) {
 		return {};
@@ -231,6 +245,26 @@ std::vector<float> WAVEncoder::overlapAdd(
 			const size_t index = writePos + j;
 			output[index] += windowed;
 			normalisation[index] += hannWindow[j] * hannWindow[j];
+		}
+	}
+
+	if (std::any_of(frequencyShifted.begin(), frequencyShifted.end(),
+		[](bool shifted) { return shifted; })) {
+		const size_t hop = static_cast<size_t>(hopSize);
+		std::vector<float> completeNormalisation(std::min(hop, frameSize), 0.0f);
+		for (size_t j = 0; j < frameSize; ++j) {
+			completeNormalisation[j % hop] += hannWindow[j] * hannWindow[j];
+		}
+		for (size_t frame = 0; frame < frames.size(); ++frame) {
+			const size_t writePos = frame * hop;
+			if (!frequencyShifted[frame] ||
+				(writePos >= frameSize && writePos + frameSize <= totalSamples - frameSize)) {
+				continue;
+			}
+			for (size_t j = 0; j < frames[frame].size() && j < frameSize; ++j) {
+				const size_t index = writePos + j;
+				normalisation[index] = std::max(normalisation[index], completeNormalisation[j % hop]);
+			}
 		}
 	}
 

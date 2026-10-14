@@ -5,15 +5,19 @@
 #include <cctype>
 #include <cmath>
 #include <cstdint>
-#include <cstring>
+#include <deque>
+#include <fstream>
+#include <initializer_list>
 #include <filesystem>
 #include <iostream>
 #include <limits>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 #include "misc/presentation_export_utils.h"
-#include "tiny_gltf.h"
+#include <tiny_gltf_v3.h>
 
 namespace fs = std::filesystem;
 
@@ -60,23 +64,99 @@ struct BufferSpan {
     std::size_t byteLength = 0;
 };
 
-tinygltf::Value makeStringArrayValue(const std::initializer_list<std::string> values) {
-    tinygltf::Value::Array array;
-    array.reserve(values.size());
-    for (const auto& value : values) {
-        array.emplace_back(value);
+class GltfValues {
+public:
+    tg3_str string(std::string_view text) {
+        strings_.emplace_back(text);
+        const auto& stored = strings_.back();
+        return {stored.data(), static_cast<uint32_t>(stored.size())};
     }
-    return tinygltf::Value(std::move(array));
-}
 
-tinygltf::Value makeNumberArrayValue(const std::initializer_list<double> values) {
-    tinygltf::Value::Array array;
-    array.reserve(values.size());
-    for (const double value : values) {
-        array.emplace_back(value);
+    tg3_value value(std::string_view text) {
+        tg3_value result{};
+        result.type = TG3_VALUE_STRING;
+        result.string_val = string(text);
+        return result;
     }
-    return tinygltf::Value(std::move(array));
-}
+
+    tg3_value value(const char* text) { return value(std::string_view(text)); }
+
+    tg3_value value(bool flag) {
+        tg3_value result{};
+        result.type = TG3_VALUE_BOOL;
+        result.bool_val = flag;
+        return result;
+    }
+
+    tg3_value value(int64_t number) {
+        tg3_value result{};
+        result.type = TG3_VALUE_INT;
+        result.int_val = number;
+        return result;
+    }
+
+    tg3_value value(int number) { return value(static_cast<int64_t>(number)); }
+
+    tg3_value value(double number) {
+        tg3_value result{};
+        result.type = TG3_VALUE_REAL;
+        result.real_val = number;
+        return result;
+    }
+
+    tg3_value array(std::initializer_list<tg3_value> values) {
+        arrays_.emplace_back(values);
+        tg3_value result{};
+        result.type = TG3_VALUE_ARRAY;
+        result.array_data = arrays_.back().data();
+        result.array_count = static_cast<uint32_t>(arrays_.back().size());
+        return result;
+    }
+
+    tg3_value object(std::initializer_list<std::pair<std::string_view, tg3_value>> fields) {
+        auto& stored = objects_.emplace_back();
+        stored.reserve(fields.size());
+        for (const auto& [key, field] : fields) {
+            stored.push_back({string(key), field});
+        }
+        tg3_value result{};
+        result.type = TG3_VALUE_OBJECT;
+        result.object_data = stored.data();
+        result.object_count = static_cast<uint32_t>(stored.size());
+        return result;
+    }
+
+private:
+    std::deque<std::string> strings_;
+    std::deque<std::vector<tg3_value>> arrays_;
+    std::deque<std::vector<tg3_kv_pair>> objects_;
+};
+
+struct GradientModel {
+    GltfValues values;
+    tg3_model model{};
+    std::vector<uint8_t> bytes;
+    std::vector<tg3_buffer_view> views;
+    std::vector<tg3_accessor> accessors;
+    std::array<double, 3> minPosition{};
+    std::array<double, 3> maxPosition{};
+    std::array<tg3_str_int_pair, 5> attributes{};
+    tg3_value modelExtras{};
+    tg3_value primitiveExtras{};
+    tg3_str unlitName{};
+    tg3_extension unlitExtension{};
+    tg3_buffer buffer{};
+    tg3_material material{};
+    tg3_primitive primitive{};
+    tg3_mesh mesh{};
+    tg3_node node{};
+    tg3_scene scene{};
+    int32_t sceneNode = 0;
+
+    GradientModel() = default;
+    GradientModel(const GradientModel&) = delete;
+    GradientModel& operator=(const GradientModel&) = delete;
+};
 
 float absoluteLoudnessHeight(const float loudnessDb) {
     return std::clamp(loudnessDb, kMinimumLoudnessDb, kMaximumLoudnessDb) - kMinimumLoudnessDb;
@@ -311,246 +391,285 @@ BufferSpan appendBytes(std::vector<std::uint8_t>& buffer,
     return span;
 }
 
-int addBufferView(tinygltf::Model& model,
-                  const int bufferIndex,
-                  const BufferSpan& span,
-                  const int target) {
-    tinygltf::BufferView view;
-    view.buffer = bufferIndex;
-    view.byteOffset = span.byteOffset;
-    view.byteLength = span.byteLength;
-    view.target = target;
-    model.bufferViews.push_back(std::move(view));
-    return static_cast<int>(model.bufferViews.size() - 1);
-}
-
-int addAccessor(tinygltf::Model& model,
-                const int bufferViewIndex,
+int addAccessor(GradientModel& document,
+                const BufferSpan& span,
                 const int componentType,
                 const int type,
                 const std::size_t count,
-                const std::vector<double>& minValues = {},
-                const std::vector<double>& maxValues = {}) {
-    tinygltf::Accessor accessor;
-    accessor.bufferView = bufferViewIndex;
-    accessor.byteOffset = 0;
-    accessor.componentType = componentType;
+                const int target) {
+    tg3_buffer_view view{};
+    view.buffer = 0;
+    view.byte_offset = span.byteOffset;
+    view.byte_length = span.byteLength;
+    view.target = target;
+    document.views.push_back(view);
+
+    tg3_accessor accessor{};
+    accessor.buffer_view = static_cast<int32_t>(document.views.size() - 1u);
+    accessor.component_type = componentType;
     accessor.count = count;
     accessor.type = type;
-    accessor.minValues = minValues;
-    accessor.maxValues = maxValues;
-    model.accessors.push_back(std::move(accessor));
-    return static_cast<int>(model.accessors.size() - 1);
+    document.accessors.push_back(accessor);
+    return static_cast<int>(document.accessors.size() - 1u);
 }
 
-tinygltf::Value buildPrimitiveExtras(const LoadedPresentation& loaded,
-                                     const std::vector<PresentationSample>& samples,
-                                     const HeightProfile& heightProfile) {
-    tinygltf::Value::Object object;
-    object["schema"] = tinygltf::Value("synesthesia.gltf-gradient.v1");
-    object["track"] = tinygltf::Value(presentationTrackName(loaded.resolvedTrack));
-    object["frame_count"] = tinygltf::Value(static_cast<int>(samples.size()));
-    object["geometry"] = tinygltf::Value("continuous-solid-strip");
-    object["native_display_rgb_attribute"] = tinygltf::Value("_SYNESTHESIA_DISPLAY_RGB");
-    object["native_display_rgb_colour_space"] =
-        tinygltf::Value(colourSpaceName(loaded.metadata.presentationData->settings.colourSpace));
-    object["native_display_rgb_encoding"] = tinygltf::Value("display-encoded");
-    object["lab_attribute"] = tinygltf::Value("_SYNESTHESIA_LAB");
-    object["loudness_attribute"] = tinygltf::Value("_SYNESTHESIA_LOUDNESS");
-    object["height_mapping"] = tinygltf::Value(
-        tinygltf::Value::Object{
-            {"position_y", tinygltf::Value("_SYNESTHESIA_LOUDNESS.z")},
-            {"minimum_db", tinygltf::Value(static_cast<double>(kMinimumLoudnessDb))},
-            {"maximum_db", tinygltf::Value(static_cast<double>(kMaximumLoudnessDb))},
-            {"mode", tinygltf::Value(heightProfile.normaliseHeight ? "normalised-loudness" : "absolute-db-offset")},
-            {"exported_height_range", makeNumberArrayValue({
-                0.0,
-                heightProfile.normaliseHeight ? 1.0 : static_cast<double>(kMaximumLoudnessDb - kMinimumLoudnessDb)
+tg3_value buildPrimitiveExtras(GltfValues& values,
+                               const LoadedPresentation& loaded,
+                               const std::vector<PresentationSample>& samples,
+                               const HeightProfile& heightProfile) {
+    return values.object({
+        {"schema", values.value("synesthesia.gltf-gradient.v1")},
+        {"track", values.value(presentationTrackName(loaded.resolvedTrack))},
+        {"frame_count", values.value(static_cast<int64_t>(samples.size()))},
+        {"geometry", values.value("continuous-solid-strip")},
+        {"native_display_rgb_attribute", values.value("_SYNESTHESIA_DISPLAY_RGB")},
+        {"native_display_rgb_colour_space", values.value(
+            colourSpaceName(loaded.metadata.presentationData->settings.colourSpace))},
+        {"native_display_rgb_encoding", values.value("display-encoded")},
+        {"lab_attribute", values.value("_SYNESTHESIA_LAB")},
+        {"loudness_attribute", values.value("_SYNESTHESIA_LOUDNESS")},
+        {"height_mapping", values.object({
+            {"position_y", values.value("_SYNESTHESIA_LOUDNESS.z")},
+            {"minimum_db", values.value(static_cast<double>(kMinimumLoudnessDb))},
+            {"maximum_db", values.value(static_cast<double>(kMaximumLoudnessDb))},
+            {"mode", values.value(
+                heightProfile.normaliseHeight ? "normalised-loudness" : "absolute-db-offset")},
+            {"exported_height_range", values.array({
+                values.value(0.0),
+                values.value(heightProfile.normaliseHeight
+                    ? 1.0
+                    : static_cast<double>(kMaximumLoudnessDb - kMinimumLoudnessDb))
             })},
-            {"components", tinygltf::Value(
-                tinygltf::Value::Object{
-                    {"x", tinygltf::Value("frame loudness dB")},
-                    {"y", tinygltf::Value("normalised loudness")},
-                    {"z", tinygltf::Value("exported height")}
-                })}
-        });
-
-    // glTF core vertex colours are linear multipliers, so Synesthesia's native
-    // display-space colours are preserved separately in custom underscore-prefixed
-    // attributes as allowed by the core attribute semantic rules.
-    object["render_colour_attribute"] = tinygltf::Value(
-        tinygltf::Value::Object{
-            {"name", tinygltf::Value("COLOR_0")},
-            {"colour_space", tinygltf::Value("linear sRGB")},
-            {"purpose", tinygltf::Value("viewer-friendly render path")}
-        });
-    return tinygltf::Value(std::move(object));
+            {"components", values.object({
+                {"x", values.value("frame loudness dB")},
+                {"y", values.value("normalised loudness")},
+                {"z", values.value("exported height")}
+            })}
+        })},
+        {"render_colour_attribute", values.object({
+            {"name", values.value("COLOR_0")},
+            {"colour_space", values.value("linear sRGB")},
+            {"purpose", values.value("viewer-friendly render path")}
+        })}
+    });
 }
 
-tinygltf::Value buildModelExtras(const LoadedPresentation& loaded,
-                                 const std::vector<PresentationSample>& samples,
-                                 const HeightProfile& heightProfile) {
-    tinygltf::Value::Object object;
-    object["input_file"] = tinygltf::Value(loaded.inputPath.filename().string());
-    object["input_extension"] = tinygltf::Value(loaded.inputPath.extension().string());
-    object["track"] = tinygltf::Value(presentationTrackName(loaded.resolvedTrack));
-    object["normalised_height"] = tinygltf::Value(heightProfile.normaliseHeight);
-    object["normalised_length"] = tinygltf::Value(heightProfile.normaliseLength);
-    object["colour_space"] =
-        tinygltf::Value(colourSpaceName(loaded.metadata.presentationData->settings.colourSpace));
+tg3_value buildModelExtras(GltfValues& values,
+                           const LoadedPresentation& loaded,
+                           const std::vector<PresentationSample>& samples,
+                           const HeightProfile& heightProfile) {
     const double totalLength = resolvedTrackLengthSeconds(loaded.metadata, samples);
     const double lengthExtent = exportedLengthExtent(samples, totalLength, heightProfile);
-    object["duration_seconds"] = tinygltf::Value(totalLength);
-    object["sample_rate"] = tinygltf::Value(static_cast<double>(loaded.metadata.sampleRate));
-    object["hop_size"] = tinygltf::Value(loaded.metadata.hopSize);
-    object["frame_count"] = tinygltf::Value(static_cast<int>(samples.size()));
-    object["custom_attributes"] = makeStringArrayValue({
-        "_SYNESTHESIA_DISPLAY_RGB",
-        "_SYNESTHESIA_LAB",
-        "_SYNESTHESIA_LOUDNESS"
+    return values.object({
+        {"input_file", values.value(loaded.inputPath.filename().string())},
+        {"input_extension", values.value(loaded.inputPath.extension().string())},
+        {"track", values.value(presentationTrackName(loaded.resolvedTrack))},
+        {"normalised_height", values.value(heightProfile.normaliseHeight)},
+        {"normalised_length", values.value(heightProfile.normaliseLength)},
+        {"colour_space", values.value(
+            colourSpaceName(loaded.metadata.presentationData->settings.colourSpace))},
+        {"duration_seconds", values.value(totalLength)},
+        {"sample_rate", values.value(static_cast<double>(loaded.metadata.sampleRate))},
+        {"hop_size", values.value(loaded.metadata.hopSize)},
+        {"frame_count", values.value(static_cast<int64_t>(samples.size()))},
+        {"custom_attributes", values.array({
+            values.value("_SYNESTHESIA_DISPLAY_RGB"),
+            values.value("_SYNESTHESIA_LAB"),
+            values.value("_SYNESTHESIA_LOUDNESS")
+        })},
+        {"depth_range", values.array({
+            values.value(static_cast<double>(-kHalfRibbonDepth)),
+            values.value(static_cast<double>(kHalfRibbonDepth))
+        })},
+        {"length_mapping", values.object({
+            {"mode", values.value(
+                heightProfile.normaliseLength ? "duration-and-groove-normalised" : "seconds")},
+            {"groove_score", values.value(grooveScoreForLength(samples))},
+            {"target_extent", values.value(lengthExtent)}
+        })},
+        {"length_range", values.array({values.value(0.0), values.value(lengthExtent)})}
     });
-    object["depth_range"] = makeNumberArrayValue({
-        static_cast<double>(-kHalfRibbonDepth),
-        static_cast<double>(kHalfRibbonDepth)
-    });
-    object["length_mapping"] = tinygltf::Value(
-        tinygltf::Value::Object{
-            {"mode", tinygltf::Value(heightProfile.normaliseLength ? "duration-and-groove-normalised" : "seconds")},
-            {"groove_score", tinygltf::Value(grooveScoreForLength(samples))},
-            {"target_extent", tinygltf::Value(lengthExtent)}
-        });
-    object["length_range"] = makeNumberArrayValue({
-        0.0,
-        lengthExtent
-    });
-    return tinygltf::Value(std::move(object));
 }
 
 bool buildModel(const LoadedPresentation& loaded,
                 const std::vector<PresentationSample>& samples,
                 const HeightProfile& heightProfile,
-                tinygltf::Model& model) {
+                GradientModel& document) {
     MeshPayload payload;
     if (!buildMeshPayload(loaded, samples, heightProfile, payload)) {
         return false;
     }
 
-    model = tinygltf::Model{};
-    model.asset.version = "2.0";
-    model.asset.generator = "Synesthesia CLI gltf-gradient";
-    model.extras = buildModelExtras(loaded, samples, heightProfile);
-    model.extensionsUsed.push_back("KHR_materials_unlit");
+    auto& model = document.model;
+    auto& values = document.values;
+    model.asset.version = values.string("2.0");
+    model.asset.generator = values.string("Synesthesia CLI gltf-gradient");
+    document.modelExtras = buildModelExtras(values, loaded, samples, heightProfile);
+    model.ext.extras = &document.modelExtras;
+    document.unlitName = values.string("KHR_materials_unlit");
+    model.extensions_used = &document.unlitName;
+    model.extensions_used_count = 1;
 
-    std::vector<std::uint8_t> rawBuffer;
-    const BufferSpan indexSpan = appendBytes(rawBuffer, payload.indices);
-    const BufferSpan positionSpan = appendBytes(rawBuffer, payload.positions);
-    const BufferSpan colourSpan = appendBytes(rawBuffer, payload.renderColours);
-    const BufferSpan nativeDisplaySpan = appendBytes(rawBuffer, payload.nativeDisplayColours);
-    const BufferSpan labSpan = appendBytes(rawBuffer, payload.labValues);
-    const BufferSpan loudnessSpan = appendBytes(rawBuffer, payload.loudnessValues);
+    const int indexAccessor = addAccessor(document, appendBytes(document.bytes, payload.indices),
+        TG3_COMPONENT_TYPE_UNSIGNED_INT, TG3_TYPE_SCALAR, payload.indices.size(), TG3_TARGET_ELEMENT_ARRAY_BUFFER);
+    const int positionAccessor = addAccessor(document, appendBytes(document.bytes, payload.positions),
+        TG3_COMPONENT_TYPE_FLOAT, TG3_TYPE_VEC3, payload.positions.size() / 3u, TG3_TARGET_ARRAY_BUFFER);
+    const int colourAccessor = addAccessor(document, appendBytes(document.bytes, payload.renderColours),
+        TG3_COMPONENT_TYPE_FLOAT, TG3_TYPE_VEC3, payload.renderColours.size() / 3u, TG3_TARGET_ARRAY_BUFFER);
+    const int nativeDisplayAccessor = addAccessor(document, appendBytes(document.bytes, payload.nativeDisplayColours),
+        TG3_COMPONENT_TYPE_FLOAT, TG3_TYPE_VEC3, payload.nativeDisplayColours.size() / 3u, TG3_TARGET_ARRAY_BUFFER);
+    const int labAccessor = addAccessor(document, appendBytes(document.bytes, payload.labValues),
+        TG3_COMPONENT_TYPE_FLOAT, TG3_TYPE_VEC3, payload.labValues.size() / 3u, TG3_TARGET_ARRAY_BUFFER);
+    const int loudnessAccessor = addAccessor(document, appendBytes(document.bytes, payload.loudnessValues),
+        TG3_COMPONENT_TYPE_FLOAT, TG3_TYPE_VEC3, payload.loudnessValues.size() / 3u, TG3_TARGET_ARRAY_BUFFER);
+    document.minPosition = payload.minPosition;
+    document.maxPosition = payload.maxPosition;
+    auto& positions = document.accessors[static_cast<std::size_t>(positionAccessor)];
+    positions.min_values = document.minPosition.data();
+    positions.min_values_count = 3;
+    positions.max_values = document.maxPosition.data();
+    positions.max_values_count = 3;
+    model.accessors = document.accessors.data();
+    model.accessors_count = static_cast<uint32_t>(document.accessors.size());
+    model.buffer_views = document.views.data();
+    model.buffer_views_count = static_cast<uint32_t>(document.views.size());
+    document.buffer.byte_length = document.bytes.size();
+    document.buffer.data = {document.bytes.data(), document.bytes.size()};
+    model.buffers = &document.buffer;
+    model.buffers_count = 1;
 
-    tinygltf::Buffer buffer;
-    buffer.data = std::move(rawBuffer);
-    model.buffers.push_back(std::move(buffer));
+    auto& material = document.material;
+    material.name = values.string("GradientSolid");
+    material.double_sided = 1;
+    material.alpha_mode = values.string("OPAQUE");
+    material.alpha_cutoff = 0.5;
+    auto& pbr = material.pbr_metallic_roughness;
+    std::fill_n(pbr.base_color_factor, 4, 1.0);
+    pbr.metallic_factor = 0.0;
+    pbr.roughness_factor = 1.0;
+    pbr.base_color_texture.index = -1;
+    pbr.metallic_roughness_texture.index = -1;
+    material.normal_texture.index = -1;
+    material.occlusion_texture.index = -1;
+    material.emissive_texture.index = -1;
+    document.unlitExtension = {document.unlitName, values.object({})};
+    material.ext.extensions = &document.unlitExtension;
+    material.ext.extensions_count = 1;
+    model.materials = &material;
+    model.materials_count = 1;
 
-    const int indexView = addBufferView(model, 0, indexSpan, TINYGLTF_TARGET_ELEMENT_ARRAY_BUFFER);
-    const int positionView = addBufferView(model, 0, positionSpan, TINYGLTF_TARGET_ARRAY_BUFFER);
-    const int colourView = addBufferView(model, 0, colourSpan, TINYGLTF_TARGET_ARRAY_BUFFER);
-    const int nativeDisplayView = addBufferView(model, 0, nativeDisplaySpan, TINYGLTF_TARGET_ARRAY_BUFFER);
-    const int labView = addBufferView(model, 0, labSpan, TINYGLTF_TARGET_ARRAY_BUFFER);
-    const int loudnessView = addBufferView(model, 0, loudnessSpan, TINYGLTF_TARGET_ARRAY_BUFFER);
-
-    const int indexAccessor = addAccessor(
-        model,
-        indexView,
-        TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT,
-        TINYGLTF_TYPE_SCALAR,
-        payload.indices.size());
-    const int positionAccessor = addAccessor(
-        model,
-        positionView,
-        TINYGLTF_COMPONENT_TYPE_FLOAT,
-        TINYGLTF_TYPE_VEC3,
-        payload.positions.size() / 3U,
-        {payload.minPosition[0], payload.minPosition[1], payload.minPosition[2]},
-        {payload.maxPosition[0], payload.maxPosition[1], payload.maxPosition[2]});
-    const int colourAccessor = addAccessor(
-        model,
-        colourView,
-        TINYGLTF_COMPONENT_TYPE_FLOAT,
-        TINYGLTF_TYPE_VEC3,
-        payload.renderColours.size() / 3U);
-    const int nativeDisplayAccessor = addAccessor(
-        model,
-        nativeDisplayView,
-        TINYGLTF_COMPONENT_TYPE_FLOAT,
-        TINYGLTF_TYPE_VEC3,
-        payload.nativeDisplayColours.size() / 3U);
-    const int labAccessor = addAccessor(
-        model,
-        labView,
-        TINYGLTF_COMPONENT_TYPE_FLOAT,
-        TINYGLTF_TYPE_VEC3,
-        payload.labValues.size() / 3U);
-    const int loudnessAccessor = addAccessor(
-        model,
-        loudnessView,
-        TINYGLTF_COMPONENT_TYPE_FLOAT,
-        TINYGLTF_TYPE_VEC3,
-        payload.loudnessValues.size() / 3U);
-
-    tinygltf::Material material;
-    material.name = "GradientSolid";
-    material.doubleSided = true;
-    material.pbrMetallicRoughness.baseColorFactor = {1.0, 1.0, 1.0, 1.0};
-    material.pbrMetallicRoughness.metallicFactor = 0.0;
-    material.pbrMetallicRoughness.roughnessFactor = 1.0;
-    material.extensions["KHR_materials_unlit"] = tinygltf::Value(tinygltf::Value::Object{});
-    model.materials.push_back(std::move(material));
-
-    tinygltf::Primitive primitive;
+    document.attributes = {{
+        {values.string("POSITION"), positionAccessor},
+        {values.string("COLOR_0"), colourAccessor},
+        {values.string("_SYNESTHESIA_DISPLAY_RGB"), nativeDisplayAccessor},
+        {values.string("_SYNESTHESIA_LAB"), labAccessor},
+        {values.string("_SYNESTHESIA_LOUDNESS"), loudnessAccessor}
+    }};
+    auto& primitive = document.primitive;
     primitive.indices = indexAccessor;
     primitive.material = 0;
-    primitive.mode = TINYGLTF_MODE_TRIANGLES;
-    primitive.attributes["POSITION"] = positionAccessor;
-    primitive.attributes["COLOR_0"] = colourAccessor;
-    primitive.attributes["_SYNESTHESIA_DISPLAY_RGB"] = nativeDisplayAccessor;
-    primitive.attributes["_SYNESTHESIA_LAB"] = labAccessor;
-    primitive.attributes["_SYNESTHESIA_LOUDNESS"] = loudnessAccessor;
-    primitive.extras = buildPrimitiveExtras(loaded, samples, heightProfile);
+    primitive.mode = TG3_MODE_TRIANGLES;
+    primitive.attributes = document.attributes.data();
+    primitive.attributes_count = static_cast<uint32_t>(document.attributes.size());
+    document.primitiveExtras = buildPrimitiveExtras(values, loaded, samples, heightProfile);
+    primitive.ext.extras = &document.primitiveExtras;
+    document.mesh.name = values.string(loaded.inputPath.stem().string() + "_gradient");
+    document.mesh.primitives = &primitive;
+    document.mesh.primitives_count = 1;
+    model.meshes = &document.mesh;
+    model.meshes_count = 1;
 
-    tinygltf::Mesh mesh;
-    mesh.name = loaded.inputPath.stem().string() + "_gradient";
-    mesh.primitives.push_back(std::move(primitive));
-    model.meshes.push_back(std::move(mesh));
-
-    tinygltf::Node node;
-    node.name = loaded.inputPath.stem().string();
+    auto& node = document.node;
+    node.name = values.string(loaded.inputPath.stem().string());
+    node.camera = node.skin = node.light = node.emitter = -1;
     node.mesh = 0;
-    model.nodes.push_back(std::move(node));
-
-    tinygltf::Scene scene;
-    scene.name = "Scene";
-    scene.nodes.push_back(0);
-    model.scenes.push_back(std::move(scene));
-    model.defaultScene = 0;
-
+    node.rotation[3] = 1.0;
+    std::fill_n(node.scale, 3, 1.0);
+    model.nodes = &node;
+    model.nodes_count = 1;
+    document.scene.name = values.string("Scene");
+    document.scene.nodes = &document.sceneNode;
+    document.scene.nodes_count = 1;
+    model.scenes = &document.scene;
+    model.scenes_count = 1;
+    model.default_scene = 0;
     return true;
 }
 
-bool writeModel(const fs::path& outputPath,
-                const tinygltf::Model& model) {
-    if (outputPath.has_parent_path()) {
-        fs::create_directories(outputPath.parent_path());
+struct GltfOutput {
+    tg3_write_options options{};
+    tg3_error_stack errors{};
+    uint8_t* data = nullptr;
+    uint64_t size = 0;
+
+    GltfOutput() {
+        tg3_write_options_init(&options);
+        options.pretty_print = 1;
+        options.embed_buffers = 0;
+        tg3_error_stack_init(&errors);
     }
-    tinygltf::TinyGLTF gltf;
-    return gltf.WriteGltfSceneToFile(
-        &model,
-        outputPath.string(),
-        false,
-        false,
-        true,
-        false);
+
+    ~GltfOutput() {
+        tg3_write_free(data, &options);
+        tg3_error_stack_free(&errors);
+    }
+
+    GltfOutput(const GltfOutput&) = delete;
+    GltfOutput& operator=(const GltfOutput&) = delete;
+};
+
+std::string bufferUri(const fs::path& filename) {
+    const auto utf8 = filename.u8string();
+    constexpr char hex[] = "0123456789ABCDEF";
+    std::string result;
+    for (const unsigned char byte : utf8) {
+        if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
+            (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' || byte == '.' || byte == '~') {
+            result.push_back(static_cast<char>(byte));
+        } else {
+            result.push_back('%');
+            result.push_back(hex[byte >> 4u]);
+            result.push_back(hex[byte & 15u]);
+        }
+    }
+    return result;
+}
+
+bool writeBytes(const fs::path& filepath, const uint8_t* bytes, uint64_t size) {
+    if (size > static_cast<uint64_t>(std::numeric_limits<std::streamsize>::max())) {
+        return false;
+    }
+    std::ofstream output(filepath, std::ios::binary);
+    output.write(reinterpret_cast<const char*>(bytes), static_cast<std::streamsize>(size));
+    output.close();
+    return static_cast<bool>(output);
+}
+
+bool writeModel(const fs::path& outputPath, GradientModel& document) {
+    std::error_code error;
+    if (outputPath.has_parent_path()) {
+        fs::create_directories(outputPath.parent_path(), error);
+        if (error) {
+            return false;
+        }
+    }
+    fs::path binaryPath = outputPath;
+    binaryPath.replace_extension(".bin");
+    document.buffer.uri = document.values.string(bufferUri(binaryPath.filename()));
+    GltfOutput output;
+    const auto status = tg3_write_to_memory(
+        &document.model, &output.errors, &output.data, &output.size, &output.options);
+    if (status != TG3_OK) {
+        for (uint32_t i = 0; i < tg3_errors_count(&output.errors); ++i) {
+            const auto* entry = tg3_errors_get(&output.errors, i);
+            if (entry != nullptr && entry->message != nullptr) {
+                std::cerr << "Error: " << entry->message << '\n';
+            }
+        }
+        return false;
+    }
+    return writeBytes(binaryPath, document.bytes.data(), document.bytes.size()) &&
+           writeBytes(outputPath, output.data, output.size);
 }
 
 }
@@ -593,7 +712,7 @@ int runGltfGradientCommand(const Arguments& args) {
         .normaliseLength = args.normaliseLength
     };
 
-    tinygltf::Model model;
+    GradientModel model;
     if (!buildModel(loaded, samples, heightProfile, model)) {
         std::cerr << "Error: failed to build GLTF model\n";
         return 1;

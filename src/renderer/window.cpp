@@ -98,6 +98,18 @@ FramebufferSize Window::framebufferSize() const {
 bgfx::PlatformData Window::platformData() const {
     bgfx::PlatformData data{};
 
+#if !defined(_WIN32) && !defined(__APPLE__)
+    if (window_ != nullptr && glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
+        data.type = bgfx::NativeWindowHandleType::Wayland;
+    }
+#endif
+
+    return data;
+}
+
+bgfx::SwapChain Window::swapChain() const {
+    bgfx::SwapChain data{};
+
     if (window_ == nullptr) {
         return data;
     }
@@ -106,17 +118,22 @@ bgfx::PlatformData Window::platformData() const {
     data.nwh = glfwGetWin32Window(window_);
 #elif defined(__APPLE__)
     data.nwh = glfwGetCocoaWindow(window_);
+    data.flags = BGFX_SWAP_CHAIN_HIDPI;
 #else
     if (glfwGetPlatform() == GLFW_PLATFORM_WAYLAND) {
         data.ndt = glfwGetWaylandDisplay();
         data.nwh = glfwGetWaylandWindow(window_);
-        data.type = bgfx::NativeWindowHandleType::Wayland;
     } else {
         data.ndt = glfwGetX11Display();
         data.nwh = reinterpret_cast<void*>(static_cast<uintptr_t>(glfwGetX11Window(window_)));
-        data.type = bgfx::NativeWindowHandleType::Default;
     }
 #endif
+
+    const FramebufferSize size = framebufferSize();
+    data.width = static_cast<uint32_t>(size.width);
+    data.height = static_cast<uint32_t>(size.height);
+    data.formatDepthStencil = bgfx::TextureFormat::D24S8;
+    data.numBackBuffers = 2;
 
     return data;
 }

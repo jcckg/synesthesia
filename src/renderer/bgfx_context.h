@@ -28,6 +28,7 @@ public:
 
 private:
     uint32_t reset_flags_ = BGFX_RESET_VSYNC;
+    bgfx::SwapChain swap_chain_;
     bool initialised_ = false;
     bgfx::TextureFormat::Enum colour_format_ = bgfx::TextureFormat::BGRA8;
 };

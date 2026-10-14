@@ -8,8 +8,6 @@
 #include <optional>
 #include <string>
 
-#include <bgfx/platform.h>
-
 #include "renderer/window.h"
 
 #if defined(_WIN32)
@@ -84,7 +82,7 @@ public:
     void cacheWrite(uint64_t, const void*, uint32_t) override {
     }
 
-    void screenShot(const char*, uint32_t, uint32_t, uint32_t, const void*, uint32_t, bool) override {
+    void screenShot(const char*, uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum, const void*, uint32_t, bool) override {
     }
 
     void captureBegin(uint32_t, uint32_t, uint32_t, bgfx::TextureFormat::Enum, bool) override {
@@ -156,11 +154,7 @@ bgfx::RendererType::Enum preferredRendererType() {
 
 } // namespace
 
-BgfxContext::BgfxContext() {
-#if defined(__APPLE__)
-    reset_flags_ |= BGFX_RESET_HIDPI;
-#endif
-}
+BgfxContext::BgfxContext() = default;
 
 bool BgfxContext::initialise(const Window& window, uint32_t width, uint32_t height) {
     if (initialised_) {
@@ -178,10 +172,11 @@ bool BgfxContext::initialise(const Window& window, uint32_t width, uint32_t heig
         init.type = preferredRendererType();
         init.fallback = true;
         init.callback = &callback;
-        init.resolution.width = std::max(width, 1u);
-        init.resolution.height = std::max(height, 1u);
-        init.resolution.reset = reset_flags_;
-        init.resolution.formatColor = colourFormat;
+        init.swapChain = window.swapChain();
+        init.swapChain.width = std::max(width, 1u);
+        init.swapChain.height = std::max(height, 1u);
+        init.swapChain.formatColor = colourFormat;
+        init.reset = reset_flags_;
         init.platformData = window.platformData();
         init.limits.maxTransientVbSize = kTransientVertexBufferLimit;
         init.limits.maxTransientIbSize = kTransientIndexBufferLimit;
@@ -196,6 +191,7 @@ bool BgfxContext::initialise(const Window& window, uint32_t width, uint32_t heig
         }
 
         colour_format_ = colourFormat;
+        swap_chain_ = init.swapChain;
         initialised_ = true;
         setViewRects(static_cast<uint16_t>(std::max(width, 1u)), static_cast<uint16_t>(std::max(height, 1u)));
         return true;
@@ -218,7 +214,9 @@ void BgfxContext::reset(uint32_t width, uint32_t height) {
         return;
     }
 
-    bgfx::reset(std::max(width, 1u), std::max(height, 1u), reset_flags_, colour_format_);
+    swap_chain_.width = std::max(width, 1u);
+    swap_chain_.height = std::max(height, 1u);
+    bgfx::reset(reset_flags_, &swap_chain_);
 }
 
 void BgfxContext::setViewRects(uint16_t width, uint16_t height) const {

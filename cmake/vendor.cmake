@@ -70,10 +70,34 @@ add_vendor_library(
 add_vendor_library(
     TARGET vendor_tinygltf
     SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinygltf/tiny_gltf.cc
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinygltf/tiny_gltf_v3.c
     INCLUDE_DIRS
         ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinygltf
 )
+
+target_compile_features(vendor_tinygltf PRIVATE c_std_11)
+
+add_vendor_library(
+    TARGET vendor_tinydng
+    SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_api.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_io.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_tiff.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_dng.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_codec.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_write.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_psd.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_psd_write.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_miniz.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tinydng_stb_image.c
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/tiny_dng_ljpeg92_v2.c
+    INCLUDE_DIRS
+        ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng
+)
+
+target_compile_features(vendor_tinydng PRIVATE c_std_11)
+find_package(Threads REQUIRED)
+target_link_libraries(vendor_tinydng PRIVATE Threads::Threads)
 
 if(WIN32)
     set(OSCPACK_PLATFORM_SOURCES

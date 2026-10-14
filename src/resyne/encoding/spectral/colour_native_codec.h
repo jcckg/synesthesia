@@ -56,7 +56,6 @@ public:
 								const std::vector<float>& phases,
 								const std::vector<float>& frequencies,
 								float sampleRate,
-								float hopRatio,
 								std::vector<RGBAColour>& column);
 
 	static void decodeTimeFrame(const std::vector<RGBAColour>& column,

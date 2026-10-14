@@ -32,6 +32,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/encoding/formats/rsyn_presentation.cpp
     ${SRC_DIR}/resyne/encoding/formats/rsyn_serialisation.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_tiff.cpp
+    ${SRC_DIR}/resyne/encoding/formats/tiff_metadata.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_rsyn.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_wav.cpp
     ${SRC_DIR}/resyne/encoding/formats/format_mp4.cpp
@@ -58,7 +59,6 @@ set(SOURCES
     ${SRC_DIR}/utilities/midi/analysis/midi_analyser.cpp
     ${SRC_DIR}/utilities/midi/device_manager/midi_device_manager.cpp
     ${SRC_DIR}/utilities/video/ffmpeg_locator.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/vendor/tinydng/miniz.c
     ${SRC_DIR}/resyne/decoding/audio_decoder.cpp
     ${SRC_DIR}/resyne/decoding/decoder_wav.cpp
     ${SRC_DIR}/resyne/decoding/decoder_flac.cpp
