@@ -137,4 +137,4 @@ GestureFrame consume() {
 
 }
 
-#endif // __APPLE__
+#endif

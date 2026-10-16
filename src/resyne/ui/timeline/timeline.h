@@ -7,6 +7,7 @@
 
 #include "resyne/ui/toolbar/tool_state.h"
 #include "colour/colour_core.h"
+#include "colour/colour_track.h"
 
 namespace Renderer {
 class PresentationResources;
@@ -75,6 +76,8 @@ struct RenderContext {
     const UI::Utilities::ToolState* toolState = nullptr;
     const TrackpadGestureInput* trackpadInput = nullptr;
     Renderer::PresentationResources* presentationResources = nullptr;
+    const ColourPresentation::ColourTrack* colourTrack = nullptr;
+    std::optional<double> availableDurationSeconds = std::nullopt;
 };
 
 struct RenderResult {
@@ -84,10 +87,5 @@ struct RenderResult {
 };
 
 RenderResult renderTimeline(TimelineState& state, const RenderContext& context);
-
-ImVec4 getColourAt(const std::vector<TimelineSample>& samples,
-                   float normalisedPosition,
-                   ColourCore::ColourSpace colourSpace,
-                   bool applyGamutMapping = true);
 
 }

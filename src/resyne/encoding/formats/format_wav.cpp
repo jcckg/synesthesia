@@ -44,7 +44,8 @@ bool exportToWAV(const std::string& filepath,
 		spectralSamples,
 		metadata.sampleRate,
 		metadata.fftSize,
-		metadata.hopSize
+		metadata.hopSize,
+        metadata.analysisLeadingSamples, metadata.originalSampleCount
 	);
 
 	if (!result.success) {

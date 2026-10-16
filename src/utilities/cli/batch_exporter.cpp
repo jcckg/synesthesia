@@ -1,6 +1,7 @@
 #include "batch_exporter.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <cmath>
@@ -355,53 +356,31 @@ bool buildFrameColours(const std::vector<AudioColourSample>& samples,
     return !frameColours.empty();
 }
 
-bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
-                       const std::string& outputPath,
-                       int imageWidth,
-                       int imageHeight,
-                       const ColourCore::ColourSpace colourSpace) {
-    if (frameColours.empty()) {
-        return false;
-    }
-
-    const int numFrames = static_cast<int>(frameColours.size());
-
-    std::vector<unsigned char> pixels(static_cast<size_t>(imageWidth * imageHeight * 3 * 2));
-
+bool renderGradientPNG(const ColourPresentation::ColourTrack& track,
+                       const AudioMetadata& metadata,
+                       const std::string& outputPath, int imageWidth, int imageHeight,
+                       bool analyserColumns) {
+    if (track.size() == 0 || imageWidth <= 0 || imageHeight <= 0) return false;
+    const double duration = RSYNPresentation::durationSeconds(metadata, track.endTime());
+    std::vector<unsigned char> pixels(static_cast<std::size_t>(imageWidth) * imageHeight * 6);
     for (int px = 0; px < imageWidth; ++px) {
-        // Map output pixel to fractional frame index
-        const float t = (imageWidth > 1)
-            ? (static_cast<float>(px) / static_cast<float>(imageWidth - 1))
-              * static_cast<float>(numFrames - 1)
-            : 0.0f;
-
-        const auto i0   = static_cast<size_t>(t);
-        const auto i1   = std::min(i0 + 1, static_cast<size_t>(numFrames - 1));
-        const float frac = t - static_cast<float>(i0);
-
-        // Interpolate in Lab space
-        const float L    = std::lerp(frameColours[i0].L, frameColours[i1].L, frac);
-        const float labA = std::lerp(frameColours[i0].a, frameColours[i1].a, frac);
-        const float labB = std::lerp(frameColours[i0].b, frameColours[i1].b, frac);
-
-        // Convert Lab → RGB
-        float r = 0.0f, g = 0.0f, b = 0.0f;
-        ColourCore::LabtoRGB(L, labA, labB, r, g, b, colourSpace, true);
-        ColourPresentation::applyOutputPrecision(r, g, b);
-
-        const auto ru = static_cast<uint16_t>(std::clamp(r, 0.0f, 1.0f) * 65535.0f + 0.5f);
-        const auto gu = static_cast<uint16_t>(std::clamp(g, 0.0f, 1.0f) * 65535.0f + 0.5f);
-        const auto bu = static_cast<uint16_t>(std::clamp(b, 0.0f, 1.0f) * 65535.0f + 0.5f);
-
-        // Fill entire column
+        const double start = duration * px / imageWidth;
+        const double end = duration * (px + 1) / imageWidth;
+        auto rgb = analyserColumns
+            ? track.rgbAt(metadata.presentationData->frames[px].timestamp, ColourCore::ColourSpace::SRGB,
+                          metadata.presentationData->settings.applyGamutMapping)
+            : track.averageRGB(start, end, ColourCore::ColourSpace::SRGB, metadata.presentationData->settings.applyGamutMapping);
+        ColourPresentation::applyOutputPrecision(rgb.r, rgb.g, rgb.b);
+        const std::array<uint16_t, 3> colour{
+            static_cast<uint16_t>(rgb.r * 65535.0f + 0.5f),
+            static_cast<uint16_t>(rgb.g * 65535.0f + 0.5f),
+            static_cast<uint16_t>(rgb.b * 65535.0f + 0.5f)};
         for (int py = 0; py < imageHeight; ++py) {
-            const size_t idx = static_cast<size_t>((py * imageWidth + px) * 6);
-            pixels[idx + 0] = static_cast<unsigned char>((ru >> 8) & 0xff);
-            pixels[idx + 1] = static_cast<unsigned char>(ru & 0xff);
-            pixels[idx + 2] = static_cast<unsigned char>((gu >> 8) & 0xff);
-            pixels[idx + 3] = static_cast<unsigned char>(gu & 0xff);
-            pixels[idx + 4] = static_cast<unsigned char>((bu >> 8) & 0xff);
-            pixels[idx + 5] = static_cast<unsigned char>(bu & 0xff);
+            const auto offset = (static_cast<std::size_t>(py) * imageWidth + px) * 6;
+            for (std::size_t component = 0; component < 3; ++component) {
+                pixels[offset + component * 2] = static_cast<unsigned char>(colour[component] >> 8);
+                pixels[offset + component * 2 + 1] = static_cast<unsigned char>(colour[component] & 0xff);
+            }
         }
     }
 
@@ -411,8 +390,7 @@ bool renderGradientPNG(const std::vector<FrameLab>& frameColours,
     state.info_png.color.colortype = LCT_RGB;
     state.info_png.color.bitdepth = 16;
     state.encoder.auto_convert = 0;
-    // ReSyne's UI and SVG path present these RGB values directly on the display,
-    // so batch PNG previews are tagged as sRGB to match the app's visible output.
+    // https://www.w3.org/TR/png-3/#11sRGB
     const auto& pngProfile = ColourCore::pngProfileFor(ColourCore::ColourSpace::SRGB);
     if (pngProfile.useSrgbChunk) {
         state.info_png.srgb_defined = 1;
@@ -461,10 +439,7 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
 
     const bool imported = ReSyne::ImportHelpers::importAudioFile(
         audioPath.string(),
-        ColourCore::ColourSpace::Rec2020,
-        true,
         analysisHop,
-        1.0f, 1.0f, 1.0f,
         samples, metadata, errorMessage,
         nullptr,
         nullptr
@@ -498,12 +473,13 @@ ExportResult exportSingleAudioFile(const fs::path& audioPath,
     const int imageHeight = (height > 0) ? height : kDefaultHeight;
 
     const fs::path pngPath = gradientsDir / (stem + ".png");
+    const auto track = RSYNPresentation::colourTrack(*metadata.presentationData, !disableSmoothing);
     if (!renderGradientPNG(
-            frameColours,
+            *track, metadata,
             pngPath.string(),
             imageWidth,
             imageHeight,
-            metadata.presentationData->settings.colourSpace)) {
+            trueSize)) {
         result.detail = "failed (PNG write error)";
         return result;
     }
@@ -548,10 +524,7 @@ ExportResult exportSingleRsynFile(const fs::path& audioPath,
 
     const bool imported = ReSyne::ImportHelpers::importAudioFile(
         audioPath.string(),
-        ColourCore::ColourSpace::Rec2020,
-        true,
         analysisHop,
-        1.0f, 1.0f, 1.0f,
         samples, metadata, errorMessage,
         [progressDisplay, workerIndex, filename = result.filename](const float value) {
             if (progressDisplay != nullptr) {
@@ -601,7 +574,7 @@ ExportResult exportSingleRsynFile(const fs::path& audioPath,
     return result;
 }
 
-} // namespace
+}
 
 int BatchExporter::runGradients(const std::string& inputDir,
                                 const std::string& outputDir,
@@ -612,7 +585,6 @@ int BatchExporter::runGradients(const std::string& inputDir,
                                 int numWorkers,
                                 int analysisHop,
                                 bool disableSmoothing) {
-    // --- Validate input directory ---
     std::error_code ec;
     if (!fs::exists(inputDir, ec) || !fs::is_directory(inputDir, ec)) {
         std::cerr << "Error: Input directory does not exist or is not a directory: "
@@ -620,7 +592,6 @@ int BatchExporter::runGradients(const std::string& inputDir,
         return 1;
     }
 
-    // --- Collect audio files ---
     std::vector<fs::path> audioFiles;
     for (const auto& entry :
          fs::recursive_directory_iterator(inputDir,
@@ -979,4 +950,4 @@ int BatchExporter::runRsyn(const std::string& inputDir,
     return 0;
 }
 
-} // namespace CLI
+}

@@ -4,9 +4,11 @@
 
 namespace Renderer::Styling {
 
+void applyPresentationColourSpace(GLFWwindow*) {}
+
 void applyPlatformWindowStyling(GLFWwindow*) {
 }
 
-} // namespace Renderer::Styling
+}
 
 #endif

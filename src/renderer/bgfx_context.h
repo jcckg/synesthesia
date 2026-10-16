@@ -33,4 +33,4 @@ private:
     bgfx::TextureFormat::Enum colour_format_ = bgfx::TextureFormat::BGRA8;
 };
 
-} // namespace Renderer
+}

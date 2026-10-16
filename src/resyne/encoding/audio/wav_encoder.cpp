@@ -1,6 +1,6 @@
 #include "resyne/encoding/audio/wav_encoder.h"
 #include "resyne/encoding/reconstruction/spectral_resampling.h"
-#include <kiss_fftr.h>
+#include "audio/analysis/fft/real_fft.h"
 #include <fstream>
 #include <iostream>
 #include <algorithm>
@@ -8,42 +8,6 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
-
-class KissFFTRConfig {
-public:
-	explicit KissFFTRConfig(int fftSize, int inverse)
-		: cfg_(kiss_fftr_alloc(fftSize, inverse, nullptr, nullptr)) {}
-
-	~KissFFTRConfig() {
-		if (cfg_) {
-			kiss_fftr_free(cfg_);
-		}
-	}
-
-	KissFFTRConfig(const KissFFTRConfig&) = delete;
-	KissFFTRConfig& operator=(const KissFFTRConfig&) = delete;
-
-	KissFFTRConfig(KissFFTRConfig&& other) noexcept : cfg_(other.cfg_) {
-		other.cfg_ = nullptr;
-	}
-
-	KissFFTRConfig& operator=(KissFFTRConfig&& other) noexcept {
-		if (this != &other) {
-			if (cfg_) {
-				kiss_fftr_free(cfg_);
-			}
-			cfg_ = other.cfg_;
-			other.cfg_ = nullptr;
-		}
-		return *this;
-	}
-
-	kiss_fftr_cfg get() const { return cfg_; }
-	operator bool() const { return cfg_ != nullptr; }
-
-private:
-	kiss_fftr_cfg cfg_;
-};
 
 namespace {
 
@@ -79,7 +43,10 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	const std::vector<SpectralSample>& samples,
 	float sampleRate,
 	int fftSize,
-	int hopSize
+	int hopSize,
+    const std::uint32_t leadingSamples,
+    const std::uint64_t originalSampleCount,
+    const bool limitPeak
 ) {
 	EncodingResult result;
 	result.success = false;
@@ -146,6 +113,16 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 		}
 
 		channelAudio[ch] = overlapAdd(timeFrames, hopSize, frequencyShifted);
+        if (leadingSamples > 0 || originalSampleCount > 0) {
+            auto& audio = channelAudio[ch];
+            if (leadingSamples > audio.size() || originalSampleCount > audio.size() - leadingSamples) {
+                result.errorMessage = "Spectral frames do not cover the declared audio extent";
+                return result;
+            }
+            const size_t length = originalSampleCount > 0 ? static_cast<size_t>(originalSampleCount) : audio.size() - leadingSamples;
+            std::move(audio.begin() + leadingSamples, audio.begin() + leadingSamples + length, audio.begin());
+            audio.resize(length);
+        }
 	}
 
 	if (numChannels == 1) {
@@ -165,7 +142,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 		}
 	}
 
-	applyPeakGuard(result.audioSamples);
+	if (limitPeak) applyPeakGuard(result.audioSamples);
 
 	result.success = true;
 
@@ -192,13 +169,14 @@ std::vector<float> WAVEncoder::inverseFFT(
 		fftBins[i].i = magnitude * scale * std::sin(phase);
 	}
 
-	KissFFTRConfig cfg(fftSize, 1);
-	if (!cfg) {
-		return std::vector<float>(static_cast<size_t>(fftSize), 0.0f);
-	}
-
-	std::vector<float> timeDomain(static_cast<size_t>(fftSize));
-	kiss_fftri(cfg.get(), fftBins.data(), timeDomain.data());
+    thread_local std::unique_ptr<AudioAnalysis::RealFFT> transform;
+    thread_local int transformSize = 0;
+    if (!transform || transformSize != fftSize) {
+        transform = std::make_unique<AudioAnalysis::RealFFT>(static_cast<std::size_t>(fftSize),AudioAnalysis::FFTBackend::Automatic,true);
+        transformSize = fftSize;
+    }
+    std::vector<float> timeDomain(static_cast<size_t>(fftSize));
+    transform->inverse(fftBins,timeDomain);
 	const float inverseScale = 1.0f / static_cast<float>(fftSize);
 	for (float& value : timeDomain) {
 		value *= inverseScale;

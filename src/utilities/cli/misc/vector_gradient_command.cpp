@@ -12,6 +12,7 @@
 
 #include "colour/colour_core.h"
 #include "colour/colour_presentation.h"
+#include "resyne/encoding/formats/rsyn_presentation.h"
 #include "misc/presentation_export_utils.h"
 
 namespace fs = std::filesystem;
@@ -38,35 +39,6 @@ struct ExactBand {
     float b = 0.0f;
 };
 
-ExactBand convertLabToBand(const int x,
-                           const int width,
-                           const float labL,
-                           const float labA,
-                           const float labB,
-                           const RSYNPresentationSettings& settings) {
-    float r = 0.0f;
-    float g = 0.0f;
-    float b = 0.0f;
-    ColourCore::LabtoRGB(
-        labL,
-        labA,
-        labB,
-        r,
-        g,
-        b,
-        settings.colourSpace,
-        settings.applyGamutMapping);
-    ColourPresentation::applyOutputPrecision(r, g, b);
-
-    return ExactBand{
-        .x = x,
-        .width = width,
-        .r = r,
-        .g = g,
-        .b = b
-    };
-}
-
 bool sameBandColour(const ExactBand& left, const ExactBand& right) {
     return std::abs(left.r - right.r) <= 1e-7f &&
         std::abs(left.g - right.g) <= 1e-7f &&
@@ -74,36 +46,36 @@ bool sameBandColour(const ExactBand& left, const ExactBand& right) {
 }
 
 void buildExactBands(const std::vector<PresentationSample>& samples,
-                     const RSYNPresentationSettings& settings,
-                     const int width,
-                     std::vector<ExactBand>& bands) {
+                     const LoadedPresentation& loaded, int width,
+                     std::vector<ExactBand>& bands, bool analyserColumns) {
     bands.clear();
-    if (samples.empty() || width <= 0) {
-        return;
+    if (samples.empty() || width <= 0) return;
+    const auto& presentation = *loaded.metadata.presentationData;
+    const auto track = RSYNPresentation::colourTrack(presentation, loaded.resolvedTrack == PresentationTrack::Smoothed);
+    const double duration = RSYNPresentation::durationSeconds(loaded.metadata, track->endTime());
+    for (int x = 0; x < width; ++x) {
+        auto rgb = analyserColumns
+            ? track->rgbAt(samples[x].timestamp, ColourCore::ColourSpace::SRGB, presentation.settings.applyGamutMapping)
+            : track->averageRGB(duration * x / width, duration * (x + 1) / width,
+                                ColourCore::ColourSpace::SRGB, presentation.settings.applyGamutMapping);
+        ColourPresentation::applyOutputPrecision(rgb.r, rgb.g, rgb.b);
+        const ExactBand nextBand{x, 1, rgb.r, rgb.g, rgb.b};
+        if (!bands.empty() && sameBandColour(bands.back(), nextBand) && bands.back().x + bands.back().width == x)
+            ++bands.back().width;
+        else bands.push_back(nextBand);
     }
+}
 
-    const std::size_t lastIndex = samples.size() - 1;
-    for (int pixelIndex = 0; pixelIndex < width; ++pixelIndex) {
-        const float pixelNormalised = width > 1
-            ? static_cast<float>(pixelIndex) / static_cast<float>(width - 1)
-            : 0.0f;
-        const float samplePosition = pixelNormalised * static_cast<float>(lastIndex);
-        const std::size_t sampleIndex0 = std::min(static_cast<std::size_t>(samplePosition), lastIndex);
-        const std::size_t sampleIndex1 = std::min(sampleIndex0 + 1, lastIndex);
-        const float fraction = samplePosition - static_cast<float>(sampleIndex0);
-
-        const float labL = std::lerp(samples[sampleIndex0].labL, samples[sampleIndex1].labL, fraction);
-        const float labA = std::lerp(samples[sampleIndex0].labA, samples[sampleIndex1].labA, fraction);
-        const float labB = std::lerp(samples[sampleIndex0].labB, samples[sampleIndex1].labB, fraction);
-
-        const ExactBand nextBand = convertLabToBand(pixelIndex, 1, labL, labA, labB, settings);
-        if (!bands.empty() && sameBandColour(bands.back(), nextBand) &&
-            bands.back().x + bands.back().width == nextBand.x) {
-            bands.back().width += 1;
-        } else {
-            bands.push_back(nextBand);
-        }
+// https://www.w3.org/TR/xml/#syntax
+std::string xmlText(const std::string& input) {
+    std::string escaped;
+    for (char value : input) {
+        if (value == '&') escaped += "&amp;";
+        else if (value == '<') escaped += "&lt;";
+        else if (value == '>') escaped += "&gt;";
+        else escaped += value;
     }
+    return escaped;
 }
 
 bool writeSvgGradient(const fs::path& outputPath,
@@ -121,7 +93,7 @@ bool writeSvgGradient(const fs::path& outputPath,
            << "\" height=\"" << height
            << "\" viewBox=\"0 0 " << width << ' ' << height
            << "\" shape-rendering=\"crispEdges\">\n";
-    stream << "  <title>" << title << "</title>\n";
+    stream << "  <title>" << xmlText(title) << "</title>\n";
     for (const auto& band : bands) {
         stream << "  <rect x=\"" << band.x << "\" y=\"0\" width=\"" << band.width
                << "\" height=\"" << height
@@ -165,7 +137,7 @@ int runVectorGradientCommand(const Arguments& args) {
     const int height = args.gradientHeight > 0 ? args.gradientHeight : 800;
 
     std::vector<ExactBand> bands;
-    buildExactBands(samples, loaded.metadata.presentationData->settings, width, bands);
+    buildExactBands(samples, loaded, width, bands, args.gradientWidth <= 0);
     if (bands.empty()) {
         std::cerr << "Error: no exact vector bands generated\n";
         return 1;

@@ -25,6 +25,7 @@
 #include "colour/colour_presentation.h"
 #include "resyne/recorder/colour_cache_utils.h"
 #include "ui/smoothing/smoothing.h"
+#include "resyne/encoding/formats/rsyn_presentation.h"
 #include "utilities/video/ffmpeg_locator.h"
 
 namespace ReSyne::Encoding::Video {
@@ -32,7 +33,6 @@ namespace ReSyne::Encoding::Video {
 namespace {
 namespace fs = std::filesystem;
 
-constexpr double kSmoothUpdateFactor = 1.2;
 constexpr int kDefaultResolution = 1080;
 constexpr int kDefaultFps = 60;
 constexpr int kMinResolution = 320;
@@ -95,83 +95,51 @@ inline uint16_t toWord(float value) {
 
 class ColourTimelineSampler {
 public:
-    ColourTimelineSampler(const std::vector<AudioColourSample>& source,
-                          ColourCore::ColourSpace colourSpace,
-                          bool gamut,
-                          float smoothingAmount,
-                          double frameInterval)
-        : samples_(source),
-          colourSpace_(colourSpace),
-          gamut_(gamut),
-          smoother_(8.0f, 1.0f, 0.3f),
-          frameInterval_(frameInterval) {
-        smoother_.setSmoothingAmount(std::clamp(smoothingAmount, 0.0f, 1.0f));
-        timestamps_.reserve(samples_.size());
-        for (const auto& sample : samples_) {
-            timestamps_.push_back(sample.timestamp);
-        }
-        if (!timestamps_.empty() && timestamps_.front() > 0.0) {
-            startTime_ = timestamps_.front();
-        }
+    ColourTimelineSampler(const ColourPresentation::ColourTrack& track,
+                          ColourCore::ColourSpace space, bool gamut)
+        : track_(track), space_(space), gamut_(gamut) {}
+    RGB colourAt(double timeSeconds) const {
+        const auto rgb = track_.rgbAt(timeSeconds, space_, gamut_);
+        return {rgb.r, rgb.g, rgb.b};
     }
-
-    RGB colourAt(double timeSeconds) {
-        timeSeconds = std::max(timeSeconds, 0.0);
-        const size_t sampleIndex = sampleIndexForTime(timeSeconds);
-        const AudioColourSample& sample = samples_[sampleIndex];
-        ReSyne::RecorderColourCache::CacheSettings settings{};
-        settings.colourSpace = colourSpace_;
-        settings.gamutMapping = gamut_;
-        settings.smoothingEnabled = false;
-        settings.smoothingAmount = 0.0f;
-        const auto entry = ReSyne::RecorderColourCache::computeSampleColour(
-            sample,
-            settings,
-            sampleIndex > 0 ? &samples_[sampleIndex - 1] : nullptr);
-
-        RGB rgb{std::clamp(entry.rgb.x, 0.0f, 1.0f),
-                std::clamp(entry.rgb.y, 0.0f, 1.0f),
-                std::clamp(entry.rgb.z, 0.0f, 1.0f)};
-
-        if (!initialised_) {
-            smoother_.reset(rgb.r, rgb.g, rgb.b);
-            initialised_ = true;
-            return rgb;
-        }
-
-        smoother_.setTargetColour(rgb.r, rgb.g, rgb.b);
-        smoother_.update(static_cast<float>(static_cast<float>(frameInterval_) * static_cast<float>(kSmoothUpdateFactor)));
-        float outR, outG, outB;
-        smoother_.getCurrentColour(outR, outG, outB);
-        return RGB{outR, outG, outB};
-    }
-
-    size_t sampleIndexForTime(double timeSeconds) const {
-        if (samples_.empty()) {
-            return 0;
-        }
-        if (timestamps_.empty()) {
-            return 0;
-        }
-
-        const double targetTime = timeSeconds + startTime_;
-        auto it = std::lower_bound(timestamps_.begin(), timestamps_.end(), targetTime);
-        if (it == timestamps_.end()) {
-            return samples_.size() - 1;
-        }
-        return static_cast<size_t>(std::distance(timestamps_.begin(), it));
-    }
-
 private:
-    const std::vector<AudioColourSample>& samples_;
-    std::vector<double> timestamps_;
-    ColourCore::ColourSpace colourSpace_;
+    const ColourPresentation::ColourTrack& track_;
+    ColourCore::ColourSpace space_;
     bool gamut_;
-    SpringSmoother smoother_;
-    double frameInterval_;
-    bool initialised_ = false;
-    double startTime_ = 0.0;
 };
+
+std::shared_ptr<const ColourPresentation::ColourTrack> prepareColourTrack(
+    const std::vector<AudioColourSample>& samples, const AudioMetadata& metadata, const ExportOptions& options) {
+    RSYNPresentationSettings settings;
+    settings.colourSpace = options.colourSpace;
+    settings.applyGamutMapping = options.applyGamutMapping;
+    settings.smoothingEnabled = options.smoothingEnabled;
+    settings.manualSmoothing = options.manualSmoothing;
+    settings.smoothingAmount = options.smoothingAmount;
+    settings.lowGain = options.lowGain;
+    settings.midGain = options.midGain;
+    settings.highGain = options.highGain;
+    if (const auto& stored = metadata.presentationData; stored && !stored->frames.empty() &&
+        stored->settings.pipelineId == RSYN_PRESENTATION_PIPELINE_ID &&
+        stored->settings.lowGain == settings.lowGain && stored->settings.midGain == settings.midGain &&
+        stored->settings.highGain == settings.highGain) {
+        const auto& previous = stored->settings;
+        if (previous.smoothingEnabled == settings.smoothingEnabled && previous.manualSmoothing == settings.manualSmoothing &&
+            (!settings.manualSmoothing ||
+             previous.smoothingAmount == settings.smoothingAmount))
+            return RSYNPresentation::colourTrack(*stored, settings.smoothingEnabled);
+        {
+            RSYNPresentationData rebuilt;
+            rebuilt.settings = settings;
+            RSYNPresentation::ReplayState replay(settings);
+            rebuilt.frames.reserve(stored->frames.size());
+            for (const auto& frame : stored->frames) rebuilt.frames.push_back(replay.processAnalysed(frame));
+            return RSYNPresentation::colourTrack(rebuilt, settings.smoothingEnabled);
+        }
+    }
+    const auto presentation = RSYNPresentation::buildPresentationData(samples, settings);
+    return RSYNPresentation::colourTrack(*presentation, settings.smoothingEnabled);
+}
 
 void paintColourFrame(std::vector<uint16_t>& buffer,
                       int width,
@@ -194,68 +162,23 @@ void paintColourFrame(std::vector<uint16_t>& buffer,
     }
 }
 
-void paintGradientFrame(std::vector<uint16_t>& buffer,
-                        int width,
-                        int height,
-                        const std::vector<RGB>& history,
-                        const RGB& backgroundColour) {
-    const int lineStride = width * 3;
-    const bool hasHistory = !history.empty();
-    const size_t historySize = history.size();
-
+void paintGradientFrame(std::vector<uint16_t>& buffer, int width, int height,
+                        const ColourPresentation::ColourTrack& track, double elapsed,
+                        ColourCore::ColourSpace space, bool gamut) {
+    const double step = std::max(0.0, elapsed) / width;
     for (int x = 0; x < width; ++x) {
-        RGB colour = backgroundColour;
-
-        if (hasHistory && historySize > 0) {
-            const float t = historySize > 1
-                ? static_cast<float>(x) / static_cast<float>(width - 1)
-                : 0.0f;
-            const float historyPos = t * static_cast<float>(historySize - 1);
-
-            if (historySize == 1) {
-                colour = history[0];
-            } else {
-                const size_t idx0 = std::min(static_cast<size_t>(historyPos), historySize - 1);
-                const size_t idx1 = std::min(idx0 + 1, historySize - 1);
-                const float frac = historyPos - static_cast<float>(idx0);
-
-                const RGB& c0 = history[idx0];
-                const RGB& c1 = history[idx1];
-                colour.r = c0.r * (1.0f - frac) + c1.r * frac;
-                colour.g = c0.g * (1.0f - frac) + c1.g * frac;
-                colour.b = c0.b * (1.0f - frac) + c1.b * frac;
-            }
-        }
-
-        ColourPresentation::applyOutputPrecision(colour.r, colour.g, colour.b);
-        const uint16_t r = toWord(colour.r);
-        const uint16_t g = toWord(colour.g);
-        const uint16_t b = toWord(colour.b);
-
+        auto rgb = track.averageRGB(x * step, (x + 1) * step, space, gamut);
+        ColourPresentation::applyOutputPrecision(rgb.r, rgb.g, rgb.b);
+        const std::array<uint16_t, 3> pixel{toWord(rgb.r), toWord(rgb.g), toWord(rgb.b)};
         for (int y = 0; y < height; ++y) {
-            uint16_t* row = buffer.data() + static_cast<size_t>(y) * static_cast<size_t>(lineStride);
-            uint16_t* pixel = row + static_cast<size_t>(x) * 3;
-            pixel[0] = r;
-            pixel[1] = g;
-            pixel[2] = b;
+            const auto offset = (static_cast<std::size_t>(y) * width + x) * 3;
+            std::copy(pixel.begin(), pixel.end(), buffer.begin() + offset);
         }
     }
 }
 
-double computeDuration(const std::vector<AudioColourSample>& samples,
-                       const AudioMetadata& metadata) {
-    if (!samples.empty()) {
-        const double lastTimestamp = samples.back().timestamp;
-        if (lastTimestamp > 0.0) {
-            return lastTimestamp;
-        }
-    }
-    if (metadata.sampleRate > 0.0f && metadata.hopSize > 0 && !samples.empty()) {
-        const double frames = static_cast<double>(samples.size());
-        return frames * static_cast<double>(metadata.hopSize) /
-               static_cast<double>(metadata.sampleRate);
-    }
-    return std::max(0.1, static_cast<double>(samples.size()));
+double computeDuration(const std::vector<AudioColourSample>& samples, const AudioMetadata& metadata) {
+    return RSYNPresentation::durationSeconds(metadata, samples.empty() ? 0.0 : samples.back().timestamp);
 }
 
 std::string compatiblePixelFormatForEncoder(const std::string& encoder,
@@ -362,16 +285,19 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
         << " -i -"
         << " -i " << '"' << audioPath.string() << '"'
         << " -map 0:v:0 -map 1:a:0"
-        << " -vf \"" << colourProfile.filter << ",format=" << encoderSettings.pixelFormat << '"'
+        << " -vf \"" << colourProfile.filter << ",format=" << encoderSettings.pixelFormat
+        << ",setparams=range=limited:color_primaries=" << colourProfile.primaries
+        << ":color_trc=" << colourProfile.transfer << ":colorspace=" << colourProfile.colourSpace << '"'
         << " -c:v " << encoderSettings.name;
 
     appendEncoderParameters(oss, encoderSettings.name, encoderSettings.pixelFormat);
 
+    // https://ffmpeg.org/ffmpeg-formats.html#Format-Options
     oss << " -color_primaries " << colourProfile.primaries
         << " -color_trc " << colourProfile.transfer
         << " -colorspace " << colourProfile.colourSpace
         << " -color_range tv"
-        << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts make_zero"
+        << " -c:a aac -b:a 192k -movflags +faststart -avoid_negative_ts disabled"
         << " \"" << outputPath << "\"";
 
 #ifdef _WIN32
@@ -388,7 +314,7 @@ bool renderVideo(const std::string& ffmpegCommand,
                  int width,
                  int height,
                  int fps,
-                 const std::vector<AudioColourSample>& samples,
+                 const ColourPresentation::ColourTrack& track,
                  const ExportOptions& options,
                  const std::function<void(float)>& progress,
                  double duration,
@@ -398,11 +324,7 @@ bool renderVideo(const std::string& ffmpegCommand,
     const int lineStride = width * 3;
     std::vector<uint16_t> frame(static_cast<size_t>(lineStride) * static_cast<size_t>(height), 0);
 
-    ColourTimelineSampler sampler(samples,
-                                  options.colourSpace,
-                                  options.applyGamutMapping,
-                                  options.smoothingAmount,
-                                  1.0 / static_cast<double>(fps));
+    ColourTimelineSampler sampler(track, options.colourSpace, options.applyGamutMapping);
 
     if (gradientHistory) {
         gradientHistory->reserve(static_cast<size_t>(totalFrames));
@@ -440,7 +362,7 @@ bool renderVideo(const std::string& ffmpegCommand,
         }
 
 #ifdef _WIN32
-        // Flush more frequently on Windows to prevent pipe buffer overflow
+        // Release buffered frames to the Windows pipe periodically during long exports.
         if (frameIndex % 5 == 0) {
             fflush(pipe);
         }
@@ -551,6 +473,7 @@ bool exportToMP4(const std::string& outputPath,
     }
 
     const double duration = computeDuration(samples, metadata);
+    const auto track = prepareColourTrack(samples, metadata, options);
 
     const std::string command = buildFFmpegCommand(options.ffmpegExecutable,
                                                    audioTemp.path,
@@ -567,7 +490,7 @@ bool exportToMP4(const std::string& outputPath,
                                      width,
                                      height,
                                      fps,
-                                     samples,
+                                     *track,
                                      options,
                                      progress,
                                      duration,
@@ -607,13 +530,9 @@ bool exportToMP4(const std::string& outputPath,
         std::vector<char> pipeBuffer(kPipeBufferSize);
         setvbuf(pipe, pipeBuffer.data(), _IOFBF, kPipeBufferSize);
 
-        RGB backgroundColour = gradientHistory.empty() ? RGB{0.0f, 0.0f, 0.0f} : gradientHistory.front();
-
         for (int frameIndex = 0; frameIndex < totalFrames; ++frameIndex) {
-            std::vector<RGB> currentHistory(gradientHistory.begin(),
-                                          gradientHistory.begin() + frameIndex + 1);
-
-            paintGradientFrame(frame, width, height, currentHistory, backgroundColour);
+            paintGradientFrame(frame, width, height, *track,
+                std::min(duration, static_cast<double>(frameIndex) / fps), options.colourSpace, options.applyGamutMapping);
 
             const size_t frameBytes = frame.size() * sizeof(uint16_t);
             if (fwrite(frame.data(), 1, frameBytes, pipe) != frameBytes) {

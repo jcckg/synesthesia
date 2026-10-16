@@ -22,6 +22,8 @@ struct OSCFrameSignalData {
 };
 
 struct OSCFrameColourData {
+    ColourCore::XYZ measurementXYZ{};
+    bool measurementAvailable = false;
     float displayR = 0.0f;
     float displayG = 0.0f;
     float displayB = 0.0f;
@@ -44,6 +46,7 @@ struct OSCFrameSpectralData {
 };
 
 struct OSCFrameLoudnessData {
+    bool loudnessIsLufs = false;
     float loudnessDb = 0.0f;
     float loudnessNormalised = 0.0f;
     float frameLoudnessDb = 0.0f;
@@ -104,10 +107,6 @@ struct SetColourSmoothingSpeedCommand {
     float speed;
 };
 
-struct SetSpectrumSmoothingCommand {
-    float amount;
-};
-
 struct SetColourSpaceCommand {
     ColourCore::ColourSpace colourSpace;
 };
@@ -119,7 +118,6 @@ struct SetGamutMappingCommand {
 using OSCCommand = std::variant<
     SetSmoothingEnabledCommand,
     SetColourSmoothingSpeedCommand,
-    SetSpectrumSmoothingCommand,
     SetColourSpaceCommand,
     SetGamutMappingCommand
 >;
@@ -127,7 +125,6 @@ using OSCCommand = std::variant<
 struct PendingOSCSettings {
     std::optional<bool> smoothingEnabled;
     std::optional<float> colourSmoothingSpeed;
-    std::optional<float> spectrumSmoothingAmount;
     std::optional<ColourCore::ColourSpace> colourSpace;
     std::optional<bool> gamutMappingEnabled;
 };

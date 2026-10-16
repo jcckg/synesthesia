@@ -13,6 +13,7 @@
 #include "colour/colour_core.h"
 #include "ui.h"
 #include "resyne/recorder/recorder.h"
+#include "resyne/recorder/presentation_worker.h"
 #ifdef ENABLE_OSC
 #include "synesthesia_osc_integration.h"
 #endif
@@ -21,8 +22,6 @@
 #endif
 
 namespace {
-
-AudioProcessor::SpectralData liveSpectralScratch;
 
 void renderWrappedStatusText(const char* text, const ImVec4* colour = nullptr) {
     ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
@@ -34,36 +33,6 @@ void renderWrappedStatusText(const char* text, const ImVec4* colour = nullptr) {
         ImGui::PopStyleColor();
     }
     ImGui::PopTextWrapPos();
-}
-
-SpectralPresentation::Settings buildPresentationSettings(const UIState& state,
-                                                         const float lowGain,
-                                                         const float midGain,
-                                                         const float highGain) {
-    SpectralPresentation::Settings settings{};
-    settings.lowGain = lowGain;
-    settings.midGain = midGain;
-    settings.highGain = highGain;
-    settings.colourSpace = state.visualSettings.colourSpace;
-    settings.applyGamutMapping = state.visualSettings.gamutMappingEnabled;
-    return settings;
-}
-
-SpectralPresentation::Settings buildLivePresentationSettings(const UIState& state) {
-    return buildPresentationSettings(
-        state,
-        state.audioSettings.lowGain,
-        state.audioSettings.midGain,
-        state.audioSettings.highGain);
-}
-
-SpectralPresentation::Settings buildPlaybackPresentationSettings(const UIState& state,
-                                                                 const ReSyne::RecorderState& recorderState) {
-    return buildPresentationSettings(
-        state,
-        recorderState.importLowGain,
-        recorderState.importMidGain,
-        recorderState.importHighGain);
 }
 
 const char* displaySurfacePrecisionLabel(const PresentationDiagnostics::DisplaySurfacePrecision precision) {
@@ -80,7 +49,7 @@ const char* displaySurfacePrecisionLabel(const PresentationDiagnostics::DisplayS
 
 const char* texturePrecisionLabel(const PresentationDiagnostics& diagnostics) {
     if (!diagnostics.presentationResourcesAvailable) {
-        return "legacy widgets";
+        return "standard widgets";
     }
 
     return diagnostics.highPrecisionTexturesAvailable
@@ -90,7 +59,7 @@ const char* texturePrecisionLabel(const PresentationDiagnostics& diagnostics) {
 
 const char* backgroundPresentationLabel(const PresentationDiagnostics& diagnostics) {
     if (!diagnostics.presentationResourcesAvailable) {
-        return "legacy";
+        return "standard";
     }
 
     return diagnostics.backgroundPresentationAvailable
@@ -102,147 +71,124 @@ const char* backgroundPresentationLabel(const PresentationDiagnostics& diagnosti
 
 namespace Controls {
 
-void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const UIState& state, ReSyne::RecorderState& recorderState) {
-    if (ImGui::CollapsingHeader("Output Stats", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent(10);
-
-        const bool hasPlaybackSession =
-            recorderState.audioOutput != nullptr &&
-            recorderState.audioOutput->getTotalFrames() > 0 &&
-            !recorderState.samples.empty();
-        const auto settings = hasPlaybackSession
-            ? buildPlaybackPresentationSettings(state, recorderState)
-            : buildLivePresentationSettings(state);
-
-        SpectralPresentation::Frame frame{};
-		float loudnessOverride = ColourCore::LOUDNESS_DB_UNSPECIFIED;
-        if (hasPlaybackSession) {
-            std::lock_guard<std::mutex> lock(recorderState.samplesMutex);
-            const float position = std::clamp(recorderState.timeline.scrubberNormalisedPosition, 0.0f, 1.0f) *
-                                   (static_cast<float>(recorderState.samples.size()) - 1.0f);
-            const size_t sampleIndex = static_cast<size_t>(position);
-            const size_t clampedIndex = std::min(sampleIndex, recorderState.samples.size() - 1);
-
-            const auto& currentSample = recorderState.samples[clampedIndex];
-            frame = SpectralPresentation::SampleSequence::buildFrame(currentSample);
-            const AudioColourSample* previousSample =
-                clampedIndex > 0 ? &recorderState.samples[clampedIndex - 1] : nullptr;
-            const auto currentColourResult = SpectralPresentation::SampleSequence::buildSampleColourResult(
-                currentSample,
-                settings,
-                previousSample);
-            const bool hasFiniteLoudness = std::isfinite(currentColourResult.loudnessDb);
-            if (currentColourResult.dominantFrequency > 0.0f) {
-                ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(currentColourResult.dominantFrequency));
-                ImGui::Text("Wavelength: %.1f nm", static_cast<double>(currentColourResult.dominantWavelength));
-                ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]), static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
-                if (hasFiniteLoudness) {
-                    ImGui::Text("Loudness: %.1f LUFS", static_cast<double>(currentColourResult.loudnessDb));
-                } else {
-                    ImGui::TextDisabled("Loudness: -- LUFS");
-                }
-            } else {
-                ImGui::TextDisabled("No significant frequencies");
-            }
-
-            ImGui::Unindent(10);
-            ImGui::Spacing();
-            return;
-        } else {
-            audioInput.copySpectralData(liveSpectralScratch);
-            const auto& spectralData = liveSpectralScratch;
-            frame = SpectralPresentation::mixChannels(
-                spectralData.magnitudes,
-                spectralData.phases,
-                {},
-                static_cast<std::uint32_t>(spectralData.magnitudes.size()),
-                spectralData.sampleRate > 0.0f ? spectralData.sampleRate : audioInput.getSampleRate());
-			loudnessOverride = spectralData.momentaryLoudnessLUFS;
+void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyne::RecorderState& recorderState) {
+    if (!ImGui::CollapsingHeader("Audio and output", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    ImGui::Indent(10);
+    ColourCore::FrameResult result{};
+    const bool playback = recorderState.audioOutput && recorderState.audioOutput->getTotalFrames() > 0;
+    if (playback) {
+        const auto presentation = ReSyne::recorderPresentation(recorderState);
+        if (presentation && presentation->analysis && !presentation->analysis->empty()) {
+            const double time = recorderState.metadata.sampleRate > 0.0f ?
+                static_cast<double>(recorderState.audioOutput->getPresentationPosition()) / static_cast<double>(recorderState.metadata.sampleRate) :
+                static_cast<double>(recorderState.timeline.scrubberNormalisedPosition) * presentation->duration;
+            result = (*presentation->analysis)[presentation->analysis->indexAt(time)].analysis;
         }
-
-		auto currentColourResult = SpectralPresentation::buildColourResult(
-            frame,
-            settings,
-            loudnessOverride);
-
-		const bool hasFiniteLoudness = std::isfinite(currentColourResult.loudnessDb);
-		if (currentColourResult.dominantFrequency > 0.0f) {
-			ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(currentColourResult.dominantFrequency));
-			ImGui::Text("Wavelength: %.1f nm", static_cast<double>(currentColourResult.dominantWavelength));
-			ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]), static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
-			if (hasFiniteLoudness) {
-				ImGui::Text("Loudness: %.1f LUFS", static_cast<double>(currentColourResult.loudnessDb));
-			} else {
-				ImGui::TextDisabled("Loudness: -- LUFS");
-			}
-		} else {
-			ImGui::TextDisabled("No significant frequencies");
-		}
-
-        ImGui::Unindent(10);
-        ImGui::Spacing();
-    }
+    } else if (const auto live = audioInput.getAudioProcessor().getPresentation()) result = live->frame.analysis;
+    if (result.dominantFrequency > 0.0f) {
+        ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(result.spectralCentroid));
+        ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]),
+            static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
+        if (std::isfinite(result.loudnessDb)) ImGui::Text(result.loudnessIsLufs ? "Loudness: %.1f LUFS" : "Frame level: %.1f dBFS",
+            static_cast<double>(result.loudnessDb));
+        else ImGui::TextDisabled("Loudness: unavailable");
+    } else ImGui::TextDisabled("No significant frequencies");
+    ImGui::Unindent(10);
+    ImGui::Spacing();
 }
 
-void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother, 
-                                 float& smoothingAmount,
-                                 bool& manualSmoothing,
-                                 bool& showSpectrumAnalyser,
-                                 float sidebarWidth,
-                                 float sidebarPadding,
-                                 float labelWidth,
-                                 float controlWidth,
-                                 float buttonHeight) {
-    if (ImGui::CollapsingHeader("Smoothing")) {
-        ImGui::Indent(10);
-        const float contentWidth = sidebarWidth - sidebarPadding * 2.0f;
-        const float buttonWidth = (contentWidth - ImGui::GetStyle().ItemSpacing.x) / 2.0f;
-
-        ImGui::AlignTextToFramePadding();
-        ImGui::Text("Manual Smoothing");
-        ImGui::SameLine();
-        ImGui::SetCursorPosX(sidebarPadding + contentWidth - ImGui::GetFrameHeight());
-        const bool previousManualSmoothing = manualSmoothing;
-        ImGui::Checkbox("##ManualSmoothing", &manualSmoothing);
-        if (manualSmoothing != previousManualSmoothing) {
-            if (!manualSmoothing) {
-                smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
-                colourSmoother.setSmoothingAmount(smoothingAmount);
-            }
-            float r, g, b;
-            colourSmoother.getCurrentColour(r, g, b);
-            colourSmoother.reset(r, g, b);
+void renderVisualiserSettingsPanel(float& smoothingAmount, bool& manualSmoothing,
+                                 bool& showSpectrumAnalyser, float sidebarWidth,
+                                 float sidebarPadding, float labelWidth,
+                                 float controlWidth, float buttonHeight,
+                                 ReSyne::RecorderState* recorder, float effectiveResponseSeconds, ColourPresentation::ResponseRange responseRange) {
+    (void)labelWidth;
+    (void)controlWidth;
+    if (!ImGui::CollapsingHeader("Colour smoothing")) return;
+    ImGui::Indent(10.0f);
+    const float contentWidth = std::max(40.0f, sidebarWidth - sidebarPadding * 2.0f - 10.0f);
+    int mode = manualSmoothing ? 1 : 0;
+    ImGui::SetNextItemWidth(contentWidth);
+    if (ImGui::Combo("##ColourResponseMode", &mode, "Automatic\0Manual\0")) manualSmoothing = mode == 1;
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+        "Automatic follows local frequency contributions, attacks, decay and texture.\n"
+        "Manual lets you choose the base response and follows local colour contribution changes.");
+    if (manualSmoothing) {
+        float responseMs = manualResponseTime(smoothingAmount) * 1000.0f;
+        ImGui::TextUnformatted("Base response time");
+        ImGui::SetNextItemWidth(contentWidth);
+        if (ImGui::SliderFloat("##ColourResponseTime", &responseMs, 40.0f, 1500.0f, "%.0f ms", ImGuiSliderFlags_Logarithmic)) {
+            smoothingAmount = manualSmoothingAmount(responseMs / 1000.0f);
         }
-
-        if (manualSmoothing) {
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("Smoothing");
-            ImGui::SameLine(sidebarPadding + labelWidth);
-            ImGui::SetCursorPosX(sidebarWidth - sidebarPadding - controlWidth);
-            ImGui::SetNextItemWidth(controlWidth);
-            if (ImGui::SliderFloat("##Smoothing", &smoothingAmount, 0.0f, 1.0f, "%.2f")) {
-                colourSmoother.setSmoothingAmount(smoothingAmount);
-            }
-
-            ImGui::SetCursorPosX(sidebarPadding);
-            if (ImGui::Button("Reset Smoothing", ImVec2(buttonWidth, buttonHeight))) {
-                smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
-                colourSmoother.setSmoothingAmount(smoothingAmount);
-            }
-            ImGui::SameLine();
-            ImGui::SetCursorPosX(sidebarPadding + buttonWidth + ImGui::GetStyle().ItemSpacing.x);
-        } else {
-            ImGui::SetCursorPosX(sidebarPadding);
-        }
-
-        if (ImGui::Button(showSpectrumAnalyser ? "Hide Spectrum" : "Show Spectrum",
-                          ImVec2(manualSmoothing ? buttonWidth : contentWidth, buttonHeight))) {
-            showSpectrumAnalyser = !showSpectrumAnalyser;
-        }
-
-        ImGui::Unindent(10);
-        ImGui::Spacing();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+            "Base settling response; faster colour motion shortens the effective response.\n"
+            "This control is used only in manual mode.");
+    } else {
+        ImGui::TextWrapped("Audio-driven attack and release");
     }
+    float effectiveMs = effectiveResponseSeconds * 1000.0f;
+    const auto presentation = recorder ? ReSyne::recorderPresentation(*recorder) : nullptr;
+    if (presentation && presentation->colours->size() > 0 &&
+        (recorder->isRecording || (recorder->audioOutput && recorder->audioOutput->getTotalFrames() > 0))) {
+        const double time = recorder->isRecording ? presentation->colours->endTime()
+            : recorder->audioOutput && recorder->metadata.sampleRate > 0.0f
+                ? recorder->audioOutput->getPresentationPosition() / static_cast<double>(recorder->metadata.sampleRate)
+                : static_cast<double>(recorder->timeline.scrubberNormalisedPosition) * presentation->duration;
+        const auto point = presentation->colours->pointAt(time);
+        effectiveMs = point.responseSeconds * 1000.0f;
+        if (presentation->analysis) responseRange = ColourPresentation::responseRange(presentation->analysis->contributionsAt(time));
+        const auto target = presentation->targets->rgbAt(time, ColourCore::ColourSpace::SRGB,
+                                                       presentation->settings.applyGamutMapping);
+        const auto output = presentation->colours->rgbAt(time, ColourCore::ColourSpace::SRGB,
+                                                       presentation->settings.applyGamutMapping);
+        ImGui::ColorButton("Target colour", {target.r, target.g, target.b, 1.0f}, ImGuiColorEditFlags_NoTooltip, {24, 18});
+        ImGui::SameLine(); ImGui::TextUnformatted("Target");
+        ImGui::SameLine();
+        ImGui::ColorButton("Displayed colour", {output.r, output.g, output.b, 1.0f}, ImGuiColorEditFlags_NoTooltip, {24, 18});
+        ImGui::SameLine(); ImGui::TextUnformatted("Output");
+        ImGui::TextUnformatted("Lightness response");
+        const auto origin = ImGui::GetCursorScreenPos();
+        const ImVec2 extent{contentWidth, 60.0f};
+        auto* draw = ImGui::GetWindowDrawList();
+        draw->AddRectFilled(origin, {origin.x + extent.x, origin.y + extent.y}, IM_COL32(25, 25, 25, 255));
+        const double end = std::clamp(time, 0.0, presentation->colours->endTime());
+        const double start = std::max(0.0, end - 1.5);
+        ImVec2 previousTarget{}, previousOutput{};
+        for (int i = 0; i < 64; ++i) {
+            const double sampleTime = std::lerp(start, end, static_cast<double>(i) / 63.0);
+            const auto raw = presentation->targets->xyzAt(sampleTime);
+            const auto smooth = presentation->colours->xyzAt(sampleTime);
+            float rawL, rawA, rawB, smoothL, smoothA, smoothB;
+            ColourCore::XYZtoLab(static_cast<float>(raw[0]), static_cast<float>(raw[1]), static_cast<float>(raw[2]), rawL, rawA, rawB);
+            ColourCore::XYZtoLab(static_cast<float>(smooth[0]), static_cast<float>(smooth[1]), static_cast<float>(smooth[2]), smoothL, smoothA, smoothB);
+            const float x = origin.x + extent.x * static_cast<float>(i) / 63.0f;
+            const ImVec2 targetPoint{x, origin.y + extent.y * (1.0f - std::clamp(rawL / 100.0f, 0.0f, 1.0f))};
+            const ImVec2 outputPoint{x, origin.y + extent.y * (1.0f - std::clamp(smoothL / 100.0f, 0.0f, 1.0f))};
+            if (i > 0) {
+                draw->AddLine(previousTarget, targetPoint, IM_COL32(140, 140, 140, 255));
+                draw->AddLine(previousOutput, outputPoint, IM_COL32(100, 210, 240, 255), 1.5f);
+            }
+            previousTarget = targetPoint; previousOutput = outputPoint;
+        }
+        ImGui::Dummy(extent);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Last 1.5 seconds up to the playhead.\nGrey: target lightness. Blue: computed output lightness.");
+        if (!presentation->message.empty()) ImGui::TextWrapped("%s", presentation->message.c_str());
+        if (presentation->message.empty() && ((manualSmoothing && presentation->settings.smoothingAmount != smoothingAmount) || presentation->settings.manualSmoothing != manualSmoothing))
+            ImGui::TextDisabled("Updating colour response...");
+    }
+    if (recorder && !recorder->presentationSmoothingEnabled) ImGui::TextDisabled("Smoothing off");
+    else if (responseRange.maximum > 0.0f)
+        ImGui::Text("Local responses: %.0f–%.0f ms", static_cast<double>(responseRange.minimum * 1000.0f),
+            static_cast<double>(responseRange.maximum * 1000.0f));
+    else if (effectiveMs > 0.0f) ImGui::Text("Average response: %.0f ms", static_cast<double>(effectiveMs));
+    else ImGui::TextDisabled("Stored response");
+    if (manualSmoothing && ImGui::Button("Reset response", {contentWidth, buttonHeight})) {
+        smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
+    }
+    if (ImGui::Button(showSpectrumAnalyser ? "Hide spectrum" : "Show spectrum", {contentWidth, buttonHeight}))
+        showSpectrumAnalyser = !showSpectrumAnalyser;
+    ImGui::Unindent(10.0f);
+    ImGui::Spacing();
 }
 
 void renderEQControlsPanel(float& lowGain,
@@ -305,7 +251,7 @@ void renderAdvancedSettingsPanel(UIState& state
 #endif
                                   ) {
     static bool previousSmoothingState = state.visualSettings.smoothingEnabled;
-    
+
     if (ImGui::CollapsingHeader("Advanced Settings")) {
         if (ImGui::CollapsingHeader("Appearance")) {
 			ImGui::Indent(10);
@@ -313,7 +259,7 @@ void renderAdvancedSettingsPanel(UIState& state
             if (ImGui::Button("Swap Sides")) {
                 state.visibility.sidebarOnLeft = !state.visibility.sidebarOnLeft;
             }
-            
+
             ImGui::Spacing();
             bool currentSmoothingState = state.visualSettings.smoothingEnabled;
             if (ImGui::Checkbox("Enable Smoothing", &currentSmoothingState)) {
@@ -329,7 +275,7 @@ void renderAdvancedSettingsPanel(UIState& state
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("Smoothing reduces rapid colour changes.\nDisabling will cause rapid flashing.");
             }
-            
+
             if (ImGui::BeginPopupModal("Photosensitivity Warning", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
                 ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
                 ImGui::TextWrapped("Warning: Disabling smoothing will cause rapidly flashing colours which can trigger photosensitive epilepsy in sensitive individuals.");
@@ -337,7 +283,7 @@ void renderAdvancedSettingsPanel(UIState& state
                 ImGui::TextWrapped("Are you sure you want to disable smoothing?");
                 ImGui::PopTextWrapPos();
                 ImGui::Spacing();
-                
+
                 if (ImGui::Button("(Yes) Disable Smoothing")) {
                     state.visualSettings.smoothingEnabled = false;
                     ImGui::CloseCurrentPopup();
@@ -405,7 +351,7 @@ void renderAdvancedSettingsPanel(UIState& state
 
 			ImGui::Unindent(10);
         }
-        
+
 #ifdef ENABLE_OSC
         if (ImGui::CollapsingHeader("OSC")) {
 			ImGui::Indent(10);
@@ -446,13 +392,13 @@ void renderAdvancedSettingsPanel(UIState& state
             if (!lastError.empty()) {
                 ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s", lastError.c_str());
             }
-            
+
             if (transportRunning) {
                 ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Text("Performance");
                 ImGui::Spacing();
-                
+
                 ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
 
                 ImGui::Text("FPS: %u", stats.currentFps);
@@ -462,7 +408,7 @@ void renderAdvancedSettingsPanel(UIState& state
                 ImGui::PopTextWrapPos();
                 ImGui::Separator();
             }
-            
+
             ImGui::Spacing();
             const std::string desiredDestination = destinationValidation.valid
                 ? destinationValidation.canonicalHost

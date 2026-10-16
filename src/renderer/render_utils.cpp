@@ -29,4 +29,4 @@ float uiDpiScale(const Window& window) {
 #endif
 }
 
-} // namespace Renderer
+}

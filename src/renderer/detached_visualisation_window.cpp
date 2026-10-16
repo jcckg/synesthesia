@@ -83,7 +83,7 @@ void DetachedVisualisationWindow::close(ReSyne::RecorderState& recorderState) {
     recorderState.detachedVisualisation.openRequested = false;
 }
 
-void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& audioInput) {
+void DetachedVisualisationWindow::renderFrame(UIState& state) {
     auto& recorderState = state.resyneState.recorderState;
     if (!isOpen()) {
         recorderState.detachedVisualisation.isOpen = false;
@@ -111,7 +111,6 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
 
     UI::AudioVisualisation::renderSpectrumOverlay(
         state,
-        audioInput,
         layout,
         UI::AudioVisualisation::hasPlaybackSession(recorderState)
     );
@@ -203,4 +202,4 @@ void DetachedVisualisationWindow::destroyFrameBuffer(const bool flushSwapChain) 
     bgfx::frame();
 }
 
-} // namespace Renderer
+}

@@ -156,7 +156,6 @@ ResampledSpectrum resampleSpectrum(
 	}
 	size_t peakIndex = 0;
 
-	std::vector<float> accumulatedMag(numBins, 0.0f);
 	std::vector<float> accumulatedPhaseX(numBins, 0.0f);
 	std::vector<float> accumulatedPhaseY(numBins, 0.0f);
 	std::vector<float> accumulatedWeight(numBins, 0.0f);
@@ -230,7 +229,6 @@ ResampledSpectrum resampleSpectrum(
 				(static_cast<float>(fftSize) - 1.0f) / static_cast<float>(fftSize) *
 				(static_cast<float>(srcBin) - static_cast<float>(targetBin));
 			const float weight = mag * fraction;
-			accumulatedMag[targetBin] += weight;
 			accumulatedPhaseX[targetBin] += std::cos(phase + centrePhase) * weight;
 			accumulatedPhaseY[targetBin] += std::sin(phase + centrePhase) * weight;
 			accumulatedWeight[targetBin] += fraction;
@@ -246,13 +244,12 @@ ResampledSpectrum resampleSpectrum(
 		if (shiftedContribution[bin]) {
 			auto value = shiftedSpectrum[bin] * std::polar(1.0f, -centreStep * static_cast<float>(bin));
 			if (accumulatedWeight[bin] > EPSILON) {
-				value += std::polar(accumulatedMag[bin],
-					std::atan2(accumulatedPhaseY[bin], accumulatedPhaseX[bin]));
+				value += std::complex<float>(accumulatedPhaseX[bin], accumulatedPhaseY[bin]);
 			}
 			result.magnitudes[bin] = std::abs(value);
 			result.phases[bin] = std::arg(value);
 		} else if (accumulatedWeight[bin] > EPSILON) {
-			result.magnitudes[bin] = accumulatedMag[bin];
+			result.magnitudes[bin] = std::hypot(accumulatedPhaseX[bin], accumulatedPhaseY[bin]);
 
 			const float avgPhaseX = accumulatedPhaseX[bin];
 			const float avgPhaseY = accumulatedPhaseY[bin];

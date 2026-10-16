@@ -24,6 +24,8 @@ class PresentationResources;
 
 namespace ReSyne {
 
+class PresentationWorker;
+
 struct SampleColourEntry {
 	ImVec4 rgb = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
 	float labL = 0.0f;
@@ -47,6 +49,7 @@ struct DetachedVisualisationState {
 struct RecorderState {
     ~RecorderState();
     bool isRecording = false;
+    AudioProcessor* recordingProcessor = nullptr;
     bool windowOpen = false;
     std::vector<AudioColourSample> samples;
     uint64_t firstFrameCounter = 0;
@@ -87,8 +90,10 @@ struct RecorderState {
     std::string importErrorMessage;  // Protected by samplesMutex
     std::vector<AudioColourSample> importedSamples;  // Protected by samplesMutex
     AudioMetadata importedMetadata;  // Protected by samplesMutex
+    std::vector<float> importedPlaybackAudio;
 
     std::vector<AudioColourSample> previewSamples;  // Protected by samplesMutex
+    AudioMetadata previewMetadata;
     std::atomic<bool> previewReady{false};
     std::mutex operationStatusMutex;
     std::string loadingOperationStatus;
@@ -122,28 +127,19 @@ struct RecorderState {
     int videoFrameRate = 60;
     ColourCore::ColourSpace videoColourSpace = ColourCore::ColourSpace::Rec2020;
     bool videoGamutMapping = true;
-    float videoSmoothingAmount = 0.6f;
     bool exportGradient = false;
 
     bool presentationSmoothingEnabled = true;
     bool presentationManualSmoothing = false;
     float presentationSmoothingAmount = 0.6f;
     Renderer::PresentationResources* presentationResources = nullptr;
+    std::shared_ptr<PresentationWorker> presentationWorker;
+    std::uint64_t presentationSourceGeneration = 1;
+    std::uint64_t presentationPreviewGeneration = 1;
+    std::uint64_t presentationSourceRevision = 0;
+    std::uint64_t presentationPreviewRevision = 0;
 
-    std::vector<Timeline::TimelineSample> timelinePreviewCache;
-    bool timelinePreviewCacheDirty = true;
-    uint64_t timelinePreviewCacheRevision = 0;
-    size_t timelinePreviewCacheMaxSamples = 0;
-    size_t timelinePreviewCacheSourceCount = 0;
-    bool timelinePreviewCacheUsesPreviewSamples = false;
-    ColourCore::ColourSpace timelinePreviewCacheColourSpace = ColourCore::ColourSpace::Rec2020;
-    bool timelinePreviewCacheGamutMapping = true;
-    float timelinePreviewCacheLowGain = 1.0f;
-    float timelinePreviewCacheMidGain = 1.0f;
-    float timelinePreviewCacheHighGain = 1.0f;
-    bool timelinePreviewCacheSmoothingEnabled = true;
-    bool timelinePreviewCacheManualSmoothing = false;
-    float timelinePreviewCacheSmoothingAmount = 0.6f;
+
 };
 
 class Recorder {

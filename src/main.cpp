@@ -32,7 +32,7 @@ int reportStartupFailure(const std::string& message) {
     return 1;
 }
 
-} // namespace
+}
 
 int main(int argc, char* argv[]) {
     try {

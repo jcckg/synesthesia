@@ -55,8 +55,10 @@ add_vendor_library(
         ${KISSFFT_DIR}
 )
 
-if(NOT MSVC)
-    target_compile_options(vendor_kissfft PRIVATE -fno-fast-math)
+if(MSVC)
+    target_compile_options(vendor_kissfft PRIVATE $<$<NOT:$<CONFIG:Debug>>:/O2> /fp:precise)
+else()
+    target_compile_options(vendor_kissfft PRIVATE -O3 -fno-fast-math)
 endif()
 
 add_vendor_library(

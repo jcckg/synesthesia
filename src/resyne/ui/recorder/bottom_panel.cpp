@@ -10,6 +10,8 @@
 #include "resyne/ui/recorder/utils.h"
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
+#include "resyne/recorder/presentation_worker.h"
+#include "resyne/encoding/formats/rsyn_presentation.h"
 #include "resyne/ui/recorder/timeline_actions.h"
 #include "resyne/ui/toolbar/toolbar.h"
 
@@ -37,6 +39,8 @@ void Recorder::drawBottomPanel(RecorderState& state,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
+    ImGui::BeginDisabled(state.importPhase != 0);
+
     if (state.focusRequested) {
         ImGui::SetWindowFocus();
         state.focusRequested = false;
@@ -54,54 +58,36 @@ void Recorder::drawBottomPanel(RecorderState& state,
     bool hasData = false;
     std::vector<ReSyne::Timeline::TimelineSample> previewData;
 
-    {
-        std::lock_guard<std::mutex> lock(state.samplesMutex);
-
-        const bool usePreview = state.importPhase == 3 && state.previewReady.load(std::memory_order_acquire);
-        const auto& sourceSamples = usePreview ? state.previewSamples : state.samples;
-
-        sampleCount = sourceSamples.size();
-        if (sampleCount == 0 && !usePreview && state.metadata.presentationData != nullptr) {
-            sampleCount = state.metadata.presentationData->frames.size();
-        }
-        hasData = sampleCount > 0;
-
-        if (hasData) {
-            if (!state.playbackAudio.empty() && state.metadata.sampleRate > 0.0f) {
-                const uint32_t numChannels = state.metadata.channels > 0 ? state.metadata.channels : 1;
-                const size_t totalFrames = state.playbackAudio.size() / numChannels;
-                duration = static_cast<double>(totalFrames) / static_cast<double>(state.metadata.sampleRate);
-            } else if (!sourceSamples.empty()) {
-                duration = sourceSamples.back().timestamp;
-            } else if (state.metadata.presentationData != nullptr && !state.metadata.presentationData->frames.empty()) {
-                duration = state.metadata.presentationData->frames.back().timestamp;
-            } else {
-                duration = state.metadata.durationSeconds;
-            }
-            previewData = ReSyne::UI::samplePreviewData(state, ReSyne::UI::MAX_PREVIEW_SAMPLES_BOTTOM_PANEL, lock);
-        }
+    const auto presentation = recorderPresentation(state);
+    if (presentation) {
+        sampleCount = presentation->sourceFrames;
+        hasData = presentation->colours->size() > 0;
+        duration = presentation->duration;
     }
 
     if (hasData) {
         ReSyne::Timeline::RenderContext timelineContext{
             previewData,
-            state.timelinePreviewCacheRevision,
+            presentation->revision,
             duration,
             gradientSize,
             state.dropFlashAlpha,
             ImGui::GetIO().DeltaTime,
             state.importColourSpace,
-            state.importGamutMapping,
-            RecorderUI::computePlaybackNormalisedPosition(state),
-            true,
+            presentation->settings.applyGamutMapping,
+            state.importPhase == 0 ? RecorderUI::computePlaybackNormalisedPosition(state) : std::nullopt,
+            state.importPhase == 0,
             false,
-            true,
-            !state.timeline.trackScrubber,
-            !state.timeline.trackScrubber,
+            state.importPhase == 0,
+            state.importPhase == 0 && !state.timeline.trackScrubber,
+            state.importPhase == 0 && !state.timeline.trackScrubber,
             &state.toolState,
             &state.trackpadInput,
-            state.presentationResources
+            state.presentationResources,
+            presentation->colours.get()
         };
+
+        if (presentation->preview) timelineContext.availableDurationSeconds = presentation->colours->endTime();
 
         if (!state.timeline.isScrubberDragging && timelineContext.playbackNormalisedPosition.has_value()) {
             state.timeline.scrubberNormalisedPosition = *timelineContext.playbackNormalisedPosition;
@@ -118,6 +104,18 @@ void Recorder::drawBottomPanel(RecorderState& state,
         state.timeline.gradientRegionValid = gradientSize.x > 1.0f && gradientSize.y > 1.0f;
         drawList->AddRectFilled(cursorPos, regionMax, IM_COL32(30, 30, 30, 255));
         ImGui::Dummy(gradientSize);
+        bool preparing = state.importPhase != 0;
+        {
+            std::lock_guard lock(state.samplesMutex);
+            preparing = preparing || !state.samples.empty() || state.metadata.presentationData != nullptr;
+        }
+        if (preparing) {
+            const char* message = "Preparing track…";
+            const auto textSize = ImGui::CalcTextSize(message);
+            drawList->AddText(ImVec2(cursorPos.x + (gradientSize.x - textSize.x) * 0.5f,
+                                    cursorPos.y + (gradientSize.y - textSize.y) * 0.5f),
+                              IM_COL32(180, 180, 180, 255), message);
+        }
 
         ImGuiIO& ioLocal = ImGui::GetIO();
         const bool hovered = ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly);
@@ -141,7 +139,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
     ImGui::Spacing();
 
     const bool panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    Recorder::handleKeyboardShortcuts(state, panelFocused, hasData && !state.isRecording);
+    if (state.importPhase == 0) Recorder::handleKeyboardShortcuts(state, panelFocused, hasData && !state.isRecording);
     if (!canStartRecording && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
@@ -357,11 +355,12 @@ void Recorder::drawBottomPanel(RecorderState& state,
 
     ReSyne::UI::renderStatusMessage(state);
 
+    ImGui::EndDisabled();
+    drawLoadingDialog(state);
     ImGui::End();
     ImGui::PopStyleVar();
 
     drawExportDialog(state);
-    drawLoadingDialog(state);
     drawExportingDialog(state);
     RecorderUI::drawClearTimelineDialog(state);
 }

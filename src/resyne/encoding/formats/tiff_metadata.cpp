@@ -130,8 +130,9 @@ AudioFields read(const std::string& filepath) {
     if (!readDirectory(input, directory)) {
         return metadata;
     }
-    const std::array<std::uint32_t*, 4> fields{
-        &metadata.sampleRate, &metadata.fftSize, &metadata.hopSize, &metadata.channels
+    const std::array<std::uint32_t*, 7> fields{
+        &metadata.sampleRate, &metadata.fftSize, &metadata.hopSize, &metadata.channels,
+        &metadata.analysisLeadingSamples, &metadata.originalSampleCountLow, &metadata.originalSampleCountHigh
     };
     for (const auto& entry : directory.entries) {
         const auto bytes = std::span(entry);
@@ -155,10 +156,11 @@ bool write(const std::string& filepath, const AudioFields& metadata) {
     }
     std::erase_if(directory.entries, [&](const Entry& entry) {
         const auto tag = tagFor(entry, directory.bigEndian);
-        return tag >= kFirstAudioTag && tag < kFirstAudioTag + 4u;
+        return tag >= kFirstAudioTag && tag < kFirstAudioTag + 7u;
     });
-    const std::array<std::uint32_t, 4> fields{
-        metadata.sampleRate, metadata.fftSize, metadata.hopSize, metadata.channels
+    const std::array<std::uint32_t, 7> fields{
+        metadata.sampleRate, metadata.fftSize, metadata.hopSize, metadata.channels,
+        metadata.analysisLeadingSamples, metadata.originalSampleCountLow, metadata.originalSampleCountHigh
     };
     for (std::size_t i = 0; i < fields.size(); ++i) {
         Entry entry{};

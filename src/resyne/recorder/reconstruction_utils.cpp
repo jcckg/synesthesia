@@ -49,7 +49,7 @@ bool buildPlaybackAudio(const std::vector<AudioColourSample>& samples,
             spectralSamples,
             metadata.sampleRate,
             metadata.fftSize,
-            metadata.hopSize);
+            metadata.hopSize, metadata.analysisLeadingSamples, metadata.originalSampleCount);
 
         if (!result.success || result.audioSamples.empty()) {
             playbackAudio.clear();

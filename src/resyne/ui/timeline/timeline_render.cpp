@@ -1,11 +1,13 @@
 #include "timeline_render.h"
 
 #include <algorithm>
+#include "imgui_internal.h"
 #include <cmath>
 
 #include "renderer/presentation_resources.h"
 #include "timeline_labels.h"
 #include "timeline_gradient.h"
+#include "timeline_rasteriser.h"
 #include "timeline_viewport.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 
@@ -287,9 +289,15 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     drawList->AddRectFilled(gradientMin, gradientMax, gradientBgColour);
     drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f);
 
+    if (context.availableDurationSeconds.has_value()) {
+        const double loaded = context.durationSeconds > 0.0
+            ? *context.availableDurationSeconds / context.durationSeconds : 0.0;
+        const float loadedEnd = static_cast<float>(std::clamp((loaded - static_cast<double>(viewStart)) / static_cast<double>(viewSpan), 0.0, 1.0));
+        drawList->PushClipRect(gradientMin, ImVec2(gradientMin.x + size.x * loadedEnd, gradientMax.y), true);
+    }
     bool usedHighPrecisionGradient = false;
     if (context.presentationResources != nullptr) {
-        const int rasterWidth = std::max(1, static_cast<int>(std::ceil(size.x)));
+        const int rasterWidth = static_cast<int>(gradientPixelWidth(size.x, ImGui::GetWindowViewport()->FramebufferScale.x));
         const ImTextureID textureId = context.presentationResources->updateTimelineTexture(
             context.samples,
             context.sampleRevision,
@@ -297,7 +305,9 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
             viewEnd,
             rasterWidth,
             context.colourSpace,
-            context.applyGamutMapping);
+            context.applyGamutMapping,
+            context.colourTrack,
+            context.durationSeconds);
         if (textureId != ImTextureID_Invalid) {
             drawList->AddImage(textureId, gradientMin, gradientMax);
             usedHighPrecisionGradient = true;
@@ -312,8 +322,12 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                                viewStart,
                                viewEnd,
                                context.colourSpace,
-                               context.applyGamutMapping);
+                               context.applyGamutMapping,
+                               context.colourTrack,
+                               context.durationSeconds);
     }
+
+    if (context.availableDurationSeconds.has_value()) drawList->PopClipRect();
 
     drawList->AddLine(ImVec2(gradientMin.x, gradientMin.y),
                       ImVec2(gradientMax.x, gradientMin.y),

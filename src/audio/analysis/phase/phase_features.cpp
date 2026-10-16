@@ -13,7 +13,6 @@ namespace {
 
 constexpr float kMinimumMagnitude = 1e-5f;
 constexpr float kRelativeMagnitudeFloor = 0.025f;
-constexpr float kMinimumDeltaTime = 1e-4f;
 constexpr float kMaximumDeltaTime = 0.25f;
 constexpr float kMinimumAudibleFrequency = 20.0f;
 constexpr float kMaximumAudibleFrequency = 20000.0f;
@@ -52,7 +51,7 @@ SpectralPresentation::Frame mixSampleFrame(const AudioColourSample& sample) {
         sample.sampleRate);
 }
 
-} // namespace
+}
 
 bool PhaseFeatureMetrics::isNeutral() const {
     return instabilityNorm <= 1e-6f &&
@@ -79,8 +78,8 @@ PhaseFeatureMetrics analyseTransition(std::span<const float> previousMagnitudes,
         return metrics;
     }
 
-    const float clampedDeltaTime = std::clamp(deltaTimeSeconds, kMinimumDeltaTime, kMaximumDeltaTime);
-    if (!std::isfinite(clampedDeltaTime) || sampleRate <= 0.0f) {
+    if (!std::isfinite(deltaTimeSeconds) || deltaTimeSeconds <= 0.0f ||
+        deltaTimeSeconds > kMaximumDeltaTime || !std::isfinite(sampleRate) || sampleRate <= 0.0f) {
         return metrics;
     }
 
@@ -136,7 +135,7 @@ PhaseFeatureMetrics analyseTransition(std::span<const float> previousMagnitudes,
             continue;
         }
 
-        const float expectedAdvance = 2.0f * std::numbers::pi_v<float> * frequency * clampedDeltaTime;
+        const float expectedAdvance = 2.0f * std::numbers::pi_v<float> * frequency * deltaTimeSeconds;
         const float residual = wrapPhase(currentPhase - previousPhase - expectedAdvance);
         const float absoluteResidual = std::abs(residual);
         const float frequencyNorm = std::clamp(frequency / std::max(sampleRate * 0.5f, 1.0f), 0.0f, 1.0f);
@@ -200,4 +199,24 @@ PhaseFeatureMetrics analyseTransition(const AudioColourSample* previousSample,
     return analyseTransition(&previousFrame, currentFrame, static_cast<float>(deltaTime));
 }
 
-} // namespace PhaseAnalysis
+void LiveFrameTracker::reset() {
+    magnitudes.clear(); phases.clear(); available = false; cached = {};
+}
+
+PhaseFeatureMetrics LiveFrameTracker::update(const SpectralPresentation::Frame& frame,
+                                             const std::uint64_t counter, const int hopSize) {
+    const bool sameLayout = available && frame.sampleRate == previousRate && hopSize == previousHop &&
+        magnitudes.size() == frame.magnitudes.size();
+    if (sameLayout && counter == previousCounter) return cached;
+    const float delta = sameLayout && counter > previousCounter && frame.sampleRate > 0.0f
+        ? static_cast<float>((counter - previousCounter) * static_cast<double>(hopSize) / frame.sampleRate)
+        : 0.0f;
+    cached = analyseTransition(magnitudes, phases, frame.magnitudes, frame.phases,
+        frame.frequencies, frame.sampleRate, delta);
+    magnitudes = frame.magnitudes;
+    phases = frame.phases;
+    previousRate = frame.sampleRate; previousHop = hopSize; previousCounter = counter; available = true;
+    return cached;
+}
+
+}

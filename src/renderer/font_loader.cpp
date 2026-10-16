@@ -56,7 +56,7 @@ std::string getBundleResourcesPath() {
 }
 #endif
 
-} // namespace
+}
 
 bool loadFonts(ImGuiIO& io, float dpiScale) {
     ImFont* mainFont = nullptr;
@@ -181,4 +181,4 @@ bool loadFonts(ImGuiIO& io, float dpiScale) {
     return io.FontDefault != nullptr;
 }
 
-} // namespace Renderer
+}

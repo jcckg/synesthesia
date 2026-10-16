@@ -33,7 +33,7 @@ HeadlessInterface::~HeadlessInterface() {
     instance = nullptr;
 }
 
-void HeadlessInterface::signalHandler(int /* signal */) {
+void HeadlessInterface::signalHandler(int) {
     if (instance) {
         instance->running = false;
     }
@@ -163,109 +163,55 @@ void HeadlessInterface::displayDeviceSelection() {
 }
 
 void HeadlessInterface::displayFrequencyInfo() {
-	const auto& magnitudes = audioInput.getFFTProcessor().getMagnitudesBuffer();
-	const auto& phases = audioInput.getFFTProcessor().getPhaseBuffer();
-	const float loudnessDb = audioInput.getFFTProcessor().getMomentaryLoudnessLUFS();
-    std::vector<float> visualiserMagnitudes;
-
-    float currentDominantFreq = 0.0f;
-    float currentR = 0.0f, currentG = 0.0f, currentB = 0.0f;
-
-	float currentLoudnessDb = loudnessDb;
-	if (!magnitudes.empty() && !phases.empty()) {
-        SpectralPresentation::Settings settings{};
-        settings.colourSpace = oscColourSpace;
-        settings.applyGamutMapping = oscGamutMappingEnabled;
-
-        SpectralPresentation::Frame frame{};
-        frame.magnitudes = magnitudes;
-        frame.phases = phases;
-        frame.sampleRate = audioInput.getSampleRate();
-
-        const uint64_t frameCounter = audioInput.getFFTProcessor().getFrameCounter();
-        const bool hasNewFrame = !hasPreviousFrame || frameCounter != previousFrameCounter;
-        const auto preparedFrame = SpectralPresentation::prepareFrame(
-            frame,
-            settings,
-            loudnessDb,
-            hasNewFrame && hasPreviousFrame ? &previousFrame : nullptr,
-            frame.sampleRate > 0.0f
-                ? static_cast<float>(audioInput.getFFTProcessor().getHopSize()) / frame.sampleRate
-                : (1.0f / 60.0f));
-        visualiserMagnitudes = preparedFrame.visualiserMagnitudes;
-        if (hasNewFrame) {
-            previousFrame = frame;
-            previousFrameCounter = frameCounter;
-            hasPreviousFrame = true;
-        }
-		auto colourResult = preparedFrame.colourResult;
-
-		currentDominantFreq = colourResult.dominantFrequency;
-		currentR = colourResult.r;
-		currentG = colourResult.g;
-        currentB = colourResult.b;
-		currentLoudnessDb = colourResult.loudnessDb;
-        auto features = ::UI::Smoothing::buildSignalFeatures(colourResult);
-        features.onsetDetected = audioInput.getFFTProcessor().getOnsetDetected();
-        features.spectralFlux = audioInput.getFFTProcessor().getSpectralFlux();
-
 #ifdef ENABLE_OSC
-        if (oscEnabled) {
-            auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
-            const auto pendingSettings = osc.consumePendingSettings();
-            if (pendingSettings.colourSpace.has_value()) {
-                oscColourSpace = *pendingSettings.colourSpace;
-            }
-            if (pendingSettings.gamutMappingEnabled.has_value()) {
-                oscGamutMappingEnabled = *pendingSettings.gamutMappingEnabled;
-            }
-            if (pendingSettings.smoothingEnabled.has_value()) {
-                smoothingEnabled = *pendingSettings.smoothingEnabled;
-            }
-            if (pendingSettings.colourSmoothingSpeed.has_value()) {
-                colourSmoothingSpeed = *pendingSettings.colourSmoothingSpeed;
-                colourSmoother.setSmoothingAmount(colourSmoothingSpeed);
-            }
-            if (pendingSettings.spectrumSmoothingAmount.has_value()) {
-                spectrumSmoothingAmount = *pendingSettings.spectrumSmoothingAmount;
-            }
-            
-            static auto lastTime = std::chrono::steady_clock::now();
-            auto currentTime = std::chrono::steady_clock::now();
-            float deltaTime = std::chrono::duration_cast<std::chrono::duration<float>>(currentTime - lastTime).count();
-            lastTime = currentTime;
-
-            if (smoothingEnabled) {
-                colourSmoother.setTargetColour(currentR, currentG, currentB);
-
-                if (!manualSmoothing) {
-                    colourSmoother.update(deltaTime * 1.2f, features);
-                } else {
-                    colourSmoother.update(deltaTime * 1.2f);
-                }
-
-                colourSmoother.getCurrentColour(currentR, currentG, currentB);
-            }
-
-            ColourPresentation::applyOutputPrecision(currentR, currentG, currentB);
-
-            Synesthesia::OSC::OSCFrameUpdate update{};
-            update.magnitudes = std::span<const float>(visualiserMagnitudes.data(), visualiserMagnitudes.size());
-            update.phases = std::span<const float>(frame.phases.data(), frame.phases.size());
-            update.sampleRate = frame.sampleRate;
-            update.colourResult = colourResult;
-            update.displayColour = ColourCore::RGB{currentR, currentG, currentB};
-            update.analysisSignals = Synesthesia::OSC::buildAnalysisSignals(
-                loudnessDb,
-                audioInput.getFFTProcessor().getSpectralFlux(),
-                audioInput.getFFTProcessor().getOnsetDetected());
-            update.smoothingSignals = Synesthesia::OSC::buildSmoothingSignals(features);
-            osc.updateFrameData(update);
-        }
+    if (oscEnabled) {
+        auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
+        const auto pending = osc.consumePendingSettings();
+        if (pending.colourSpace) oscColourSpace = *pending.colourSpace;
+        if (pending.gamutMappingEnabled) oscGamutMappingEnabled = *pending.gamutMappingEnabled;
+        if (pending.smoothingEnabled) smoothingEnabled = *pending.smoothingEnabled;
+        if (pending.colourSmoothingSpeed) colourSmoothingSpeed = *pending.colourSmoothingSpeed;
+    }
 #endif
-	}
-
+    RSYNPresentationSettings settings;
+    settings.colourSpace = oscColourSpace;
+    settings.applyGamutMapping = oscGamutMappingEnabled;
+    settings.smoothingEnabled = smoothingEnabled;
+    settings.manualSmoothing = manualSmoothing;
+    settings.smoothingAmount = colourSmoothingSpeed;
+    audioInput.getAudioProcessor().setPresentationSettings(settings);
+    AudioProcessor::SpectralData spectralData;
+    audioInput.copySpectralData(spectralData);
+    const auto& live = spectralData.presentation;
+    if (!live) return;
+    const auto& colourResult = live->frame.analysis;
+    const bool colourResultLufs = colourResult.loudnessIsLufs;
+    const float currentDominantFreq = colourResult.dominantFrequency;
+    float currentR = 0.0f, currentG = 0.0f, currentB = 0.0f;
+    const float currentLoudnessDb = colourResult.loudnessDb;
+    const auto& xyz = live->frame.presentedXYZ;
+    const auto rgb = ColourPresentation::projectXYZ(ColourPresentation::toColourTriple(xyz), oscColourSpace, oscGamutMappingEnabled);
+    currentR = rgb.r; currentG = rgb.g; currentB = rgb.b;
     ColourPresentation::applyOutputPrecision(currentR, currentG, currentB);
+#ifdef ENABLE_OSC
+    if (oscEnabled) {
+        const auto frame = SpectralPresentation::mixChannels(spectralData.magnitudes, spectralData.phases, {},
+            static_cast<std::uint32_t>(spectralData.magnitudes.size()), spectralData.sampleRate);
+        auto features = ::UI::Smoothing::buildSignalFeatures(colourResult);
+        features.onsetDetected = live->frame.smoothingSignals.onsetDetected;
+        features.spectralFlux = live->frame.smoothingSignals.spectralFlux;
+        Synesthesia::OSC::OSCFrameUpdate update{};
+        update.magnitudes = live->prepared.analysisMagnitudes;
+        update.phases = frame.phases;
+        update.sampleRate = spectralData.sampleRate;
+        update.colourResult = colourResult;
+        update.displayColour = {currentR, currentG, currentB};
+        update.analysisSignals = Synesthesia::OSC::buildAnalysisSignals(spectralData.momentaryLoudnessLUFS,
+            features.spectralFlux, features.onsetDetected);
+        update.smoothingSignals = Synesthesia::OSC::buildSmoothingSignals(features);
+        Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance().updateFrameData(update);
+    }
+#endif
 
 	bool needsRedraw = (abs(currentDominantFreq - lastDominantFreq) > 0.1f) ||
 					   (abs(currentR - lastR) > 0.001f) ||
@@ -281,13 +227,13 @@ void HeadlessInterface::displayFrequencyInfo() {
 
 		if (currentDominantFreq > 0.0f) {
 			std::cout << std::fixed << std::setprecision(1);
-			std::cout << "Spectral Centroid: " << currentDominantFreq << " Hz\n";
+			std::cout << "Dominant frequency: " << currentDominantFreq << " Hz\n";
 			std::cout << std::setprecision(3);
 			std::cout << "RGB: (" << currentR << ", " << currentG << ", " << currentB << ")\n";
 			std::cout << std::setprecision(1);
-			std::cout << "Loudness: " << currentLoudnessDb << " LUFS\n";
+			std::cout << "Loudness: " << currentLoudnessDb << (colourResultLufs ? " LUFS\n" : " dBFS\n");
 		} else {
-            std::cout << "Spectral Centroid: -- Hz\n";
+            std::cout << "Dominant frequency: -- Hz\n";
             std::cout << "RGB: (0.000, 0.000, 0.000)\n";
             std::cout << "\n(No significant frequencies detected)\n";
         }

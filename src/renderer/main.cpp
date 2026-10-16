@@ -74,7 +74,7 @@ void initialiseMidiState(UIState& uiState, MIDIInput& midiInput, std::vector<MID
 }
 #endif
 
-} // namespace
+}
 
 int app_main(int, char**) {
     if (!Renderer::initialiseWindowing()) {
@@ -142,7 +142,7 @@ int app_main(int, char**) {
         displaySurfacePrecisionFromFormat(bgfxContext.colourFormat());
     Renderer::PresentationResources presentationResources;
     if (!presentationResources.initialise()) {
-        std::fprintf(stderr, "[renderer] Failed to initialise presentation resources, falling back to legacy colour widgets\n");
+        std::fprintf(stderr, "[renderer] Failed to initialise presentation resources, using standard colour widgets\n");
     } else {
         uiState.presentationResources = &presentationResources;
         uiState.presentationDiagnostics.presentationResourcesAvailable = true;
@@ -232,7 +232,7 @@ int app_main(int, char**) {
         }
 
         if (recorderState.detachedVisualisation.isOpen) {
-            detachedVisualisationWindow.renderFrame(uiState, audioInput);
+            detachedVisualisationWindow.renderFrame(uiState);
             mainWindowContext.makeCurrent();
         }
 

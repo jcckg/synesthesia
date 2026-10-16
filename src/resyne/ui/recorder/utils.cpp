@@ -8,7 +8,7 @@ std::optional<float> computePlaybackNormalisedPosition(const RecorderState& stat
     if (state.audioOutput && !state.playbackAudio.empty()) {
         size_t total = state.audioOutput->getTotalFrames();
         if (total > 0) {
-            size_t position = state.audioOutput->getPlaybackPosition();
+            const double position = state.audioOutput->getPresentationPosition();
             float normalised = static_cast<float>(position) / static_cast<float>(total);
             return std::clamp(normalised, 0.0f, 1.0f);
         }

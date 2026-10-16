@@ -58,20 +58,12 @@ int validSelectionIndex(const int selectedIndex, std::span<const Item> items) {
 
 ImVec4 levelColour(const float normalisedPosition) {
     const float t = std::clamp(normalisedPosition, 0.0f, 1.0f);
-    const ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-    const bool lightMode = textColour.x + textColour.y + textColour.z < 1.5f;
     if (t < 0.5f) {
         const float mix = t * 2.0f;
-        if (lightMode) {
-            return ImVec4(0.92f, 0.34f + mix * 0.34f, 0.16f, 1.0f);
-        }
         return ImVec4(1.0f, 0.20f + mix * 0.70f, 0.12f, 1.0f);
     }
 
     const float mix = (t - 0.5f) * 2.0f;
-    if (lightMode) {
-        return ImVec4(0.92f - mix * 0.62f, 0.68f - mix * 0.10f, 0.16f + mix * 0.12f, 1.0f);
-    }
     return ImVec4(1.0f - mix * 0.72f, 0.90f - mix * 0.08f, 0.12f + mix * 0.16f, 1.0f);
 }
 

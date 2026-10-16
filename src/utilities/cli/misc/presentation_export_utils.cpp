@@ -61,16 +61,17 @@ bool buildPresentationFromSamples(const std::vector<AudioColourSample>& spectral
     return metadata.presentationData != nullptr && !metadata.presentationData->frames.empty();
 }
 
-void buildLinearRenderColour(const float labL,
-                             const float labA,
-                             const float labB,
+void buildLinearRenderColour(const float displayR,
+                             const float displayG,
+                             const float displayB,
+                             const ColourCore::ColourSpace colourSpace,
                              float& linearR,
                              float& linearG,
                              float& linearB) {
     float X = 0.0f;
     float Y = 0.0f;
     float Z = 0.0f;
-    ColourCore::LabtoXYZ(labL, labA, labB, X, Y, Z);
+    ColourCore::RGBtoXYZ(displayR, displayG, displayB, X, Y, Z, colourSpace);
     ColourCore::XYZtoRGB(
         X,
         Y,
@@ -162,12 +163,7 @@ bool loadPresentationForInput(const Arguments& args,
         std::vector<AudioColourSample> spectralSamples;
         if (!ReSyne::ImportHelpers::importAudioFile(
                 loaded.inputPath.string(),
-                ColourCore::ColourSpace::Rec2020,
-                true,
                 std::clamp(args.analysisHop, 1, FFTProcessor::FFT_SIZE),
-                kNeutralEqGain,
-                kNeutralEqGain,
-                kNeutralEqGain,
                 spectralSamples,
                 loaded.metadata,
                 errorMessage,
@@ -237,9 +233,10 @@ bool collectPresentationSamples(const LoadedPresentation& loaded,
             sample.displayG,
             sample.displayB);
         buildLinearRenderColour(
-            sample.labL,
-            sample.labA,
-            sample.labB,
+            sample.displayR,
+            sample.displayG,
+            sample.displayB,
+            presentation.settings.colourSpace,
             sample.linearRenderR,
             sample.linearRenderG,
             sample.linearRenderB);

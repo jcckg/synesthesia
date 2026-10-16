@@ -19,8 +19,7 @@ struct SurfaceLayout {
 std::array<float, 4> currentVisualisationClearColour(const UIState& state);
 
 void renderSpectrumOverlay(UIState& state,
-                           const AudioInput& audioInput,
                            const SurfaceLayout& layout,
                            bool hasPlaybackSession);
 
-} // namespace UI::AudioVisualisation
+}

@@ -13,6 +13,7 @@
 #include "audio_input.h"
 #include "controls.h"
 #include "colour/colour_presentation.h"
+#include "colour/colour_track.h"
 #include "colour/colour_core.h"
 #include "fft_processor.h"
 #include "smoothing.h"
@@ -87,7 +88,7 @@ void processIdleState(float* clearColour, float deltaTime) {
 
 void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dropEvents,
 						  ReSyne::RecorderState& recorderState) {
-	if (dropEvents.empty()) {
+	if (dropEvents.empty() || recorderState.importPhase != 0 || recorderState.isRecording) {
 		return;
 	}
 
@@ -197,9 +198,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
         }
         if (pendingSettings.colourSmoothingSpeed.has_value()) {
             state.visualSettings.colourSmoothingSpeed = *pendingSettings.colourSmoothingSpeed;
-        }
-        if (pendingSettings.spectrumSmoothingAmount.has_value()) {
-            state.audioSettings.spectrumSmoothingFactor = *pendingSettings.spectrumSmoothingAmount;
         }
         if (pendingSettings.colourSpace.has_value()) {
             state.visualSettings.colourSpace = *pendingSettings.colourSpace;
@@ -342,7 +340,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     const bool outputDeviceChanged = requestedOutputDeviceIndex != previousOutputDeviceIndex;
     if (outputDeviceChanged && recorderState.audioOutput) {
         const bool wasPlaying = recorderState.audioOutput->isPlaying();
-        const size_t playbackPosition = recorderState.audioOutput->getPlaybackPosition();
+        const size_t playbackPosition = static_cast<size_t>(recorderState.audioOutput->getPresentationPosition());
 
         recorderState.audioOutput->pause();
 
@@ -369,9 +367,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     }
 
 	float deltaTime = io.DeltaTime;
-	static SpringSmoother colourSmoother(8.0f, 1.0f, 0.3f);
-	colourSmoother.setSmoothingAmount(state.visualSettings.colourSmoothingSpeed);
-	state.audioSettings.spectrumSmoothingFactor = state.visualSettings.colourSmoothingSpeed;
 	UI::AudioVisualisation::syncRecorderPresentationSettings(state);
 
 	constexpr float SIDEBAR_WIDTH = 280.0f;
@@ -388,11 +383,9 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
 	UI::AudioVisualisation::ColourUpdateContext colourCtx{
 		deltaTime,
-		state.visualSettings.smoothingEnabled,
-		state.visualSettings.manualSmoothing,
-		colourSmoother,
 		clear_colour,
-		state.visualSettings.activeView
+        state.displayXYZ,
+        state.displayXYZValid
 	};
 
 	if (hasPlaybackSession) {
@@ -426,6 +419,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 
 	if (!hasPlaybackSession && !hasMicInput) {
+        state.displayXYZValid = false;
 		processIdleState(clear_colour, deltaTime);
 		currentDisplayR = clear_colour[0];
 		currentDisplayG = clear_colour[1];
@@ -439,9 +433,20 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
         clear_colour[2] = currentDisplayB;
 	}
 
-    state.resyneState.displayColour[0] = currentDisplayR;
-    state.resyneState.displayColour[1] = currentDisplayG;
-    state.resyneState.displayColour[2] = currentDisplayB;
+    float surfaceR = currentDisplayR, surfaceG = currentDisplayG, surfaceB = currentDisplayB;
+    if (hasPlaybackSession || hasMicInput) {
+        if (state.displayXYZValid) {
+            const auto rgb = ColourPresentation::projectXYZ({state.displayXYZ.X, state.displayXYZ.Y, state.displayXYZ.Z},
+                ColourCore::ColourSpace::SRGB, state.visualSettings.gamutMappingEnabled);
+            surfaceR = rgb.r; surfaceG = rgb.g; surfaceB = rgb.b;
+        } else ColourPresentation::convertToSRGB(surfaceR, surfaceG, surfaceB, state.visualSettings.colourSpace);
+        clear_colour[0] = surfaceR;
+        clear_colour[1] = surfaceG;
+        clear_colour[2] = surfaceB;
+    }
+    state.resyneState.displayColour[0] = surfaceR;
+    state.resyneState.displayColour[1] = surfaceG;
+    state.resyneState.displayColour[2] = surfaceB;
 
 	if (state.visibility.showUI) {
 		ImGuiStyle& style = ImGui::GetStyle();
@@ -479,7 +484,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			clear_colour,
 			state,
 			recorderState,
-			colourSmoother,
 			sidebarLayout,
 			displaySize,
 			hasPlaybackSession
@@ -499,7 +503,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			layout.bottomPanelHeight = bottomPanelHeight;
 			UI::AudioVisualisation::renderSpectrumOverlay(
 				state,
-				audioInput,
 				layout,
 				hasPlaybackSession
 			);

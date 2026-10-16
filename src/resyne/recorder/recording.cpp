@@ -1,6 +1,7 @@
 #include "resyne/recorder/recorder.h"
 
 #include <algorithm>
+#include <limits>
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/processing/audio_processor.h"
@@ -28,6 +29,7 @@ RecorderState::~RecorderState() {
     if (importThread.joinable()) {
         importThread.join();
     }
+    presentationWorker.reset();
     if (exportThread.joinable()) {
         exportThread.join();
     }
@@ -63,6 +65,8 @@ bool Recorder::hasLoadedAudio(RecorderState& state) {
 }
 
 void Recorder::clearLoadedAudio(RecorderState& state) {
+    if (state.isRecording && state.recordingProcessor != nullptr) state.recordingProcessor->cancelRecordingAnalysis();
+    state.recordingProcessor = nullptr;
     state.isRecording = false;
     state.recordingCountdownActive = false;
     state.recordingCountdownRemaining = 0.0f;
@@ -73,13 +77,17 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     }
 
     std::lock_guard<std::mutex> lock(state.samplesMutex);
+    ++state.presentationSourceGeneration;
+    ++state.presentationPreviewGeneration;
+    state.presentationSourceRevision = 0;
+    state.presentationPreviewRevision = 0;
     state.samples.clear();
     state.previewSamples.clear();
     state.importedSamples.clear();
     state.importedMetadata = {};
+    state.importedPlaybackAudio.clear();
+    state.previewMetadata = {};
     state.importErrorMessage.clear();
-    state.timelinePreviewCache.clear();
-    state.timelinePreviewCacheDirty = true;
     state.playbackAudio.clear();
     state.metadata = {};
     state.firstFrameCounter = 0;
@@ -98,20 +106,8 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     resetTimelineState(state);
 }
 
-void Recorder::updateFromFFTProcessor(RecorderState& state,
-                                                AudioProcessor& audioProcessor,
-                                                float r,
-                                                float g,
-                                                float b) {
-    if (!state.isRecording) {
-        return;
-    }
-
-    (void)r;
-    (void)g;
-    (void)b;
-
-    auto channelFrames = audioProcessor.consumeBufferedFrames();
+namespace {
+void appendRecordingFrames(RecorderState& state, AudioProcessor::BufferedFrames channelFrames) {
     if (channelFrames.empty() || channelFrames.front().empty()) {
         return;
     }
@@ -144,10 +140,11 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
 	        AudioColourSample sample;
 	        sample.magnitudes.resize(numChannels);
 	        sample.phases.resize(numChannels);
+            sample.bass.resize(numChannels);
 	        sample.channels = static_cast<uint32_t>(numChannels);
 	        sample.sampleRate = frame.sampleRate;
         sample.loudnessLUFS = frame.loudnessLUFS;
-        sample.splDb = frame.loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
+        sample.splDb = std::numeric_limits<float>::quiet_NaN();
 
         bool channelsAligned = true;
         for (size_t ch = 0; ch < numChannels; ++ch) {
@@ -159,30 +156,51 @@ void Recorder::updateFromFFTProcessor(RecorderState& state,
 
 	            sample.magnitudes[ch] = channelFrame.magnitudes;
 	            sample.phases[ch] = channelFrame.phases;
+                sample.bass[ch] = channelFrame.bass;
 	        }
 
         if (!channelsAligned) {
             continue;
         }
 
+        std::vector<float> channelLoudness(numChannels);
+        for (size_t ch = 0; ch < numChannels; ++ch) {
+            channelLoudness[ch] = channelFrames[ch][frameIndex].loudnessLUFS;
+        }
+        sample.loudnessLUFS = LoudnessMeter::combineChannelLoudness(channelLoudness);
+        sample.splDb = std::numeric_limits<float>::quiet_NaN();
+
         uint64_t relativeFrame = frame.frameCounter - state.firstFrameCounter;
-        sample.timestamp = static_cast<double>(relativeFrame * static_cast<uint64_t>(state.metadata.hopSize)) /
+        sample.timestamp = (static_cast<double>(relativeFrame) * state.metadata.hopSize
+                            + state.metadata.fftSize * 0.5 - state.metadata.analysisLeadingSamples) /
                            static_cast<double>(state.metadata.sampleRate);
 
         state.samples.push_back(sample);
-        state.timelinePreviewCacheDirty = true;
     }
+}
+
+}
+
+void Recorder::updateFromFFTProcessor(RecorderState& state, AudioProcessor& audioProcessor,
+                                      float r, float g, float b) {
+    (void)r; (void)g; (void)b;
+    if (state.isRecording) appendRecordingFrames(state, audioProcessor.consumeRecordingFrames());
 }
 
 void Recorder::startRecording(RecorderState& state,
                                          AudioProcessor& audioProcessor,
                                          int fftSize,
                                          int hopSize) {
+    fftSize = FFTProcessor::FFT_SIZE;
+    hopSize = std::clamp(hopSize, 1, fftSize / 2);
     audioProcessor.discardBufferedFrames();
     clearLoadedAudio(state);
 
     std::lock_guard<std::mutex> lock(state.samplesMutex);
+    audioProcessor.beginRecordingAnalysis(hopSize);
+    state.recordingProcessor = &audioProcessor;
     state.isRecording = true;
+    state.metadata.analysisLeadingSamples = fftSize - hopSize;
     state.metadata.version = "3.0.0";
     state.metadata.sampleRate = 0.0f;
     state.metadata.fftSize = fftSize;
@@ -192,6 +210,15 @@ void Recorder::startRecording(RecorderState& state,
 }
 
 void Recorder::stopRecording(RecorderState& state) {
+    if (state.recordingProcessor != nullptr) {
+        std::uint64_t sampleCount = 0;
+        float rate = 0.0f;
+        auto frames = state.recordingProcessor->finishRecordingAnalysis(sampleCount, rate);
+        appendRecordingFrames(state, std::move(frames));
+        state.metadata.originalSampleCount = sampleCount;
+        state.metadata.durationSeconds = rate > 0.0f ? sampleCount / static_cast<double>(rate) : 0.0;
+        state.recordingProcessor = nullptr;
+    }
     state.isRecording = false;
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);

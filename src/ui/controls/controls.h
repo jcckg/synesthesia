@@ -16,17 +16,17 @@ namespace ReSyne {
 }
 
 namespace Controls {
-    void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, const UIState& state, ReSyne::RecorderState& recorderState);
+    void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyne::RecorderState& recorderState);
     
-    void renderVisualiserSettingsPanel(SpringSmoother& colourSmoother, 
-                                     float& smoothingAmount,
+    void renderVisualiserSettingsPanel(float& smoothingAmount,
                                      bool& manualSmoothing,
                                      bool& showSpectrumAnalyser,
                                      float sidebarWidth,
                                      float sidebarPadding,
                                      float labelWidth,
                                      float controlWidth,
-                                     float buttonHeight);
+                                     float buttonHeight,
+                                     ReSyne::RecorderState* recorder = nullptr, float effectiveResponseSeconds = 0.0f, ColourPresentation::ResponseRange responseRange = {});
 
     void renderEQControlsPanel(float& lowGain,
                               float& midGain,

@@ -35,6 +35,7 @@ public:
 
 	void seek(size_t framePosition);
 	size_t getPlaybackPosition() const { return playbackPosition_.load(); }
+    double getPresentationPosition() const;
 	size_t getTotalSamples() const { return totalSamples_.load(); }
 	size_t getTotalFrames() const {
 		const size_t channelCount = channelCount_.load();
@@ -54,9 +55,38 @@ public:
 	void clearAudioData();
 
 private:
+    static_assert(std::atomic<double>::is_always_lock_free);
+    static_assert(std::atomic<std::uint64_t>::is_always_lock_free);
+    static_assert(std::atomic<void*>::is_always_lock_free);
 	PaStream* stream_;
-	std::shared_ptr<std::vector<float>> audioBuffer_;
-	std::mutex bufferMutex_;
+    struct AudioStorage {
+        std::vector<float> samples;
+        std::size_t channels = 1;
+        std::uint64_t generation = 0;
+    };
+    std::unique_ptr<AudioStorage> audioBuffer_;
+    std::vector<std::unique_ptr<AudioStorage>> retiredBuffers_;
+    std::atomic<const AudioStorage*> publishedBuffer_{nullptr};
+    std::atomic<std::uint32_t> callbackReaders_{0};
+    std::atomic<std::uint64_t> presentationGeneration_{0};
+    std::uint64_t nextGeneration_ = 0;
+    std::uint64_t activeGeneration_ = 0;
+	mutable std::mutex bufferMutex_;
+    struct OutputInterval {
+        std::atomic<std::uint64_t> version{0};
+        std::atomic<double> dacTime{0.0};
+        std::atomic<double> position{0.0};
+        std::atomic<double> duration{0.0};
+        std::atomic<double> framesPerSecond{0.0};
+        std::atomic<double> totalFrames{0.0};
+        std::atomic<bool> loop{false};
+        std::atomic<std::uint64_t> session{0};
+        std::atomic<std::uint64_t> generation{0};
+    };
+    std::array<OutputInterval, 256> outputIntervals_{};
+    std::atomic<std::uint64_t> writtenIntervals_{0};
+    std::atomic<std::uint64_t> clockSession_{1};
+    std::atomic<bool> clockAvailable_{false};
 
 	std::atomic<size_t> playbackPosition_;
 	std::atomic<size_t> totalSamples_;
@@ -66,17 +96,22 @@ private:
 	std::atomic<float> actualSampleRate_;
 	std::atomic<float> playbackStep_;
 	std::atomic<size_t> channelCount_;
+	std::atomic<size_t> outputChannelCount_{0};
 	double playbackCursor_;
 
-	std::atomic<bool> seekCrossfadeActive_;
-	std::atomic<size_t> pendingSeekPosition_;
-	std::atomic<size_t> seekFadeRemaining_;
+    std::atomic<std::uint64_t> seekVersion_{0};
+    std::atomic<std::uint64_t> seekGeneration_{0};
+    std::atomic<size_t> pendingSeekPosition_{0};
+    std::atomic<bool> pendingSeekFade_{false};
+    std::uint64_t appliedSeekVersion_ = 0;
+    size_t seekFadeRemaining_ = 0;
+    void publishSeek(size_t position, bool fade);
 	double oldSeekCursor_;
 	PlaybackEqualiser playbackEqualiser_;
 	std::atomic<float> leftLevel_;
 	std::atomic<float> rightLevel_;
 
-	void updateStereoLevels(float left, float right);
+	void updateStereoLevels(float left, float right, double elapsed);
 	void resetStereoLevels();
 	static int audioCallback(const void* input, void* output,
 						 unsigned long frameCount,

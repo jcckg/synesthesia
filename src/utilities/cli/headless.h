@@ -8,6 +8,7 @@
 
 #include "audio_input.h"
 #include "audio/analysis/presentation/spectral_presentation.h"
+#include "audio/analysis/phase/phase_features.h"
 #include "colour/colour_core.h"
 #include "fft_processor.h"
 #include "ui/smoothing/smoothing.h"
@@ -42,15 +43,10 @@ private:
 	float lastR = -1.0f, lastG = -1.0f, lastB = -1.0f;
 	float lastLoudnessDb = -200.0f;
     
-    SpringSmoother colourSmoother{8.0f, 1.0f, 0.3f};
     bool smoothingEnabled = true;
     bool manualSmoothing = false;
     float colourSmoothingSpeed = 0.6f;
-    float spectrumSmoothingAmount = 0.2f;
-    SpectralPresentation::Frame previousFrame;
-    uint64_t previousFrameCounter = 0;
-    bool hasPreviousFrame = false;
-    
+
     void setupTerminal();
     void restoreTerminal();
     void displayDeviceSelection();

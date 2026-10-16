@@ -1,4 +1,5 @@
 #include "renderer/window.h"
+#include "renderer/styling/platform_styling.h"
 
 #include <chrono>
 #include <cstdio>
@@ -25,7 +26,7 @@ void glfwErrorCallback(int error, const char* description) {
     std::fprintf(stderr, "GLFW Error %d: %s\n", error, description ? description : "unknown");
 }
 
-} // namespace
+}
 
 bool initialiseWindowing() {
     glfwSetErrorCallback(glfwErrorCallback);
@@ -77,6 +78,7 @@ void Window::realiseForRenderer() const {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
 #endif
+    Styling::applyPresentationColourSpace(window_);
 }
 
 bool Window::shouldClose() const {
@@ -138,4 +140,4 @@ bgfx::SwapChain Window::swapChain() const {
     return data;
 }
 
-} // namespace Renderer
+}

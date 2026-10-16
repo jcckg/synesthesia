@@ -267,7 +267,10 @@ bool exportToTIFF(const std::string& filepath,
         resolveStoredSampleRate(samples, metadata),
         storedFftSize,
         resolveStoredHopSize(metadata, storedFftSize),
-        resolveStoredChannels(samples, metadata)
+        resolveStoredChannels(samples, metadata),
+        metadata.analysisLeadingSamples,
+        static_cast<std::uint32_t>(metadata.originalSampleCount),
+        static_cast<std::uint32_t>(metadata.originalSampleCount >> 32u)
     };
     const bool ok = pixelsWritten && TiffMetadata::write(filepath, storedMetadata);
     emitProgress(ok ? 1.0f : 0.92f);
@@ -406,6 +409,9 @@ bool loadFromTIFF(const std::string& filepath,
 		? static_cast<int>(embeddedMetadata.hopSize)
 		: std::max(1, fftSize / 2);
 
+    colourImage.metadata.analysisLeadingSamples = embeddedMetadata.analysisLeadingSamples;
+    colourImage.metadata.originalSampleCount = static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountLow) |
+        (static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountHigh) << 32u);
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.fftSize = fftSize;
 	colourImage.metadata.hopSize = hopSize;
@@ -415,6 +421,7 @@ bool loadFromTIFF(const std::string& filepath,
 	colourImage.metadata.windowType = "hann";
 	colourImage.metadata.version = "3.0.0";
 
+    metadata = colourImage.metadata;
 	auto decodeProgress = [&](float value) {
 		if (!progress) {
 			return;
@@ -434,6 +441,9 @@ bool loadFromTIFF(const std::string& filepath,
 	}
 	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata);
 
+    colourImage.metadata.analysisLeadingSamples = embeddedMetadata.analysisLeadingSamples;
+    colourImage.metadata.originalSampleCount = static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountLow) |
+        (static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountHigh) << 32u);
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.hopSize = hopSize;
 
@@ -445,6 +455,9 @@ bool loadFromTIFF(const std::string& filepath,
 		? detectedSampleRate
 		: samples.front().sampleRate;
 
+	metadata.analysisLeadingSamples = colourImage.metadata.analysisLeadingSamples;
+    metadata.originalSampleCount = colourImage.metadata.originalSampleCount;
+    metadata.durationSeconds = finalSampleRate > 0.0f ? metadata.originalSampleCount / static_cast<double>(finalSampleRate) : 0.0;
 	metadata.sampleRate = finalSampleRate;
 	metadata.fftSize = fftSize;
 	metadata.hopSize = hopSize;

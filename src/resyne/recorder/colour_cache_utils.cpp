@@ -50,14 +50,10 @@ CacheSettings currentSettings(const RecorderState& state) {
 
 SampleColourEntry computeSampleColour(const AudioColourSample& sample,
                                       const CacheSettings& settings,
-                                      const AudioColourSample*) {
-    const float loudnessOverride = std::isfinite(sample.loudnessLUFS)
-        ? sample.loudnessLUFS
-        : ColourCore::LOUDNESS_DB_UNSPECIFIED;
-    const auto colourResult = SpectralPresentation::buildColourResult(
-        SpectralPresentation::SampleSequence::buildFrame(sample),
-        buildPresentationSettings(settings),
-        loudnessOverride);
+                                      const AudioColourSample* previousSample) {
+    const auto prepared = SpectralPresentation::SampleSequence::prepareSampleFrame(
+        sample, buildPresentationSettings(settings), previousSample);
+    const auto& colourResult = prepared.colourResult;
     return entryFromColourResult(colourResult);
 }
 

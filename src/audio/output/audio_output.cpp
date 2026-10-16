@@ -1,19 +1,13 @@
 #include "audio_output.h"
+#include "audio/analysis/meter_response.h"
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-
-namespace {
-
-float smoothedLevel(const float current, const float target) {
-	return std::max(target, current * 0.84f);
-}
-
-}
+#include <numbers>
 
 AudioOutput::AudioOutput()
 	: stream_(nullptr),
-	  audioBuffer_(std::make_shared<std::vector<float>>()),
+	  audioBuffer_(std::make_unique<AudioStorage>()),
 	  playbackPosition_(0),
 	  totalSamples_(0),
 	  isPlaying_(false),
@@ -23,9 +17,7 @@ AudioOutput::AudioOutput()
 	  playbackStep_(1.0f),
 	  channelCount_(1),
 	  playbackCursor_(0.0),
-	  seekCrossfadeActive_(false),
-	  pendingSeekPosition_(0),
-	  seekFadeRemaining_(0),
+
 	  oldSeekCursor_(0.0),
 	  leftLevel_(0.0f),
 	  rightLevel_(0.0f) {
@@ -67,10 +59,13 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 		Pa_CloseStream(stream_);
 		stream_ = nullptr;
 	}
+	isPlaying_.store(false);
+	clockSession_.fetch_add(1);
+    clockAvailable_.store(false);
+	outputChannelCount_.store(0);
 	requestedSampleRate_.store(sampleRate);
 	actualSampleRate_.store(sampleRate);
 	playbackStep_.store(1.0f);
-	channelCount_.store(static_cast<size_t>(std::max(1, channelCount)));
 
 	PaStreamParameters outputParameters{};
 	if (deviceIndex >= 0) {
@@ -88,7 +83,12 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 	}
 
 	const int requestedChannels = std::max(1, channelCount);
-	const int clampedChannels = std::min(requestedChannels, deviceInfo->maxOutputChannels);
+	// https://portaudio.com/docs/v19-doxydocs/structPaStreamParameters.html
+	if (requestedChannels > deviceInfo->maxOutputChannels || !std::isfinite(sampleRate) || sampleRate <= 0.0f) {
+		return false;
+	}
+	const int clampedChannels = requestedChannels;
+	outputChannelCount_.store(static_cast<size_t>(clampedChannels));
 	outputParameters.channelCount = clampedChannels;
 	outputParameters.sampleFormat = paFloat32;
 	outputParameters.suggestedLatency = deviceInfo->defaultLowOutputLatency;
@@ -123,23 +123,34 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 	return true;
 }
 
-void AudioOutput::setAudioData(const std::vector<float>& audioSamples, size_t channelCount) {
-	if (audioSamples.empty()) {
-		clearAudioData();
-		return;
-	}
+// https://eel.is/c++draft/atomics.order
+void AudioOutput::setAudioData(const std::vector<float>& audioSamples, size_t channels) {
+    if (audioSamples.empty()) { clearAudioData(); return; }
+    auto storage = std::make_unique<AudioStorage>();
+    storage->samples = audioSamples;
+    for (auto& sample : storage->samples) if (!std::isfinite(sample)) sample = 0.0f;
+    storage->channels = std::max<size_t>(1, channels);
+    std::lock_guard lock(bufferMutex_);
+    storage->generation = ++nextGeneration_;
+    retiredBuffers_.push_back(std::move(audioBuffer_));
+    audioBuffer_ = std::move(storage);
+    channelCount_.store(audioBuffer_->channels);
+    totalSamples_.store(audioBuffer_->samples.size());
+    presentationGeneration_.store(audioBuffer_->generation);
+    publishedBuffer_.store(audioBuffer_.get());
+    if (callbackReaders_.load() == 0) retiredBuffers_.clear();
+    publishSeek(0, false);
+    clockSession_.fetch_add(1);
+    playbackPosition_.store(0);
+    playbackEqualiser_.requestReset();
+}
 
-	channelCount_.store(std::max<size_t>(1, channelCount));
-
-	auto newBuffer = std::make_shared<std::vector<float>>(audioSamples);
-	{
-		std::lock_guard<std::mutex> lock(bufferMutex_);
-		audioBuffer_ = std::move(newBuffer);
-		playbackCursor_ = 0.0;
-	}
-	playbackEqualiser_.requestReset();
-	totalSamples_.store(audioSamples.size());
-	playbackPosition_.store(0);
+void AudioOutput::publishSeek(size_t position, bool fade) {
+    seekVersion_.fetch_add(1);
+    pendingSeekPosition_.store(position);
+    pendingSeekFade_.store(fade);
+    seekGeneration_.store(audioBuffer_ ? audioBuffer_->generation : 0);
+    seekVersion_.fetch_add(1);
 }
 
 void AudioOutput::setPlaybackEQEnabled(const bool enabled) {
@@ -171,6 +182,7 @@ void AudioOutput::pause() {
 	}
 
 	isPlaying_.store(false);
+    clockSession_.fetch_add(1);
 	resetStereoLevels();
 }
 
@@ -186,45 +198,77 @@ void AudioOutput::stop() {
 	playbackPosition_.store(0);
 	{
 		std::lock_guard<std::mutex> lock(bufferMutex_);
-		playbackCursor_ = 0.0;
+        publishSeek(0, false);
+        clockSession_.fetch_add(1);
 	}
 	playbackEqualiser_.requestReset();
 	resetStereoLevels();
 }
 
 void AudioOutput::seek(size_t framePosition) {
-	const size_t channelCount = channelCount_.load();
-	const size_t totalSamples = totalSamples_.load();
-	const size_t totalFrames = channelCount > 0 ? totalSamples / channelCount : totalSamples;
-	const size_t clamped = std::min(framePosition, totalFrames);
-	const size_t oldPos = playbackPosition_.load();
-
-	constexpr size_t SEEK_THRESHOLD = 2205;
-	constexpr size_t CROSSFADE_SAMPLES = 256;
-
-	if (std::abs(static_cast<long>(clamped) - static_cast<long>(oldPos)) > static_cast<long>(SEEK_THRESHOLD)) {
-		std::lock_guard<std::mutex> lock(bufferMutex_);
-		oldSeekCursor_ = playbackCursor_;
-		pendingSeekPosition_.store(clamped);
-		seekFadeRemaining_.store(CROSSFADE_SAMPLES);
-		seekCrossfadeActive_.store(true);
-	} else {
-		std::lock_guard<std::mutex> lock(bufferMutex_);
-		playbackCursor_ = static_cast<double>(clamped);
-	}
-	playbackEqualiser_.requestReset();
-	playbackPosition_.store(clamped);
+    std::lock_guard lock(bufferMutex_);
+    const auto count = audioBuffer_ && audioBuffer_->channels > 0 ?
+        audioBuffer_->samples.size() / audioBuffer_->channels : 0;
+    const auto position = std::min(framePosition, count);
+    const auto previous = playbackPosition_.load();
+    const bool fade = position > previous ? position - previous > 2205 : previous - position > 2205;
+    publishSeek(position, fade);
+    playbackEqualiser_.requestReset();
+    playbackPosition_.store(position);
 }
 
 void AudioOutput::clearAudioData() {
-	stop();
-	std::lock_guard<std::mutex> lock(bufferMutex_);
-	audioBuffer_ = std::make_shared<std::vector<float>>();
-	totalSamples_.store(0);
-	playbackPosition_.store(0);
-	playbackCursor_ = 0.0;
-	playbackEqualiser_.requestReset();
-	resetStereoLevels();
+    stop();
+    std::lock_guard lock(bufferMutex_);
+    publishedBuffer_.store(nullptr);
+    if (callbackReaders_.load() == 0) {
+        retiredBuffers_.clear();
+        audioBuffer_.reset();
+    } else retiredBuffers_.push_back(std::move(audioBuffer_));
+    totalSamples_.store(0);
+    playbackPosition_.store(0);
+    clockSession_.fetch_add(1);
+    playbackEqualiser_.requestReset();
+    resetStereoLevels();
+}
+
+// https://portaudio.com/docs/v19-doxydocs/structPaStreamCallbackTimeInfo.html
+// https://eel.is/c++draft/atomics.order
+double AudioOutput::getPresentationPosition() const {
+    const double fallback = static_cast<double>(playbackPosition_.load());
+    if (!stream_ || !clockAvailable_.load()) return fallback;
+    const double time = Pa_GetStreamTime(stream_);
+    if (!std::isfinite(time)) return fallback;
+    const auto session = clockSession_.load();
+    const auto generation = presentationGeneration_.load();
+    const auto written = writtenIntervals_.load();
+    const auto count = std::min<std::uint64_t>(written, outputIntervals_.size());
+    bool found = false;
+    double selectedTime = 0, position = fallback;
+    for (std::uint64_t i = 0; i < count; ++i) {
+        const auto& interval = outputIntervals_[(written - count + i) % outputIntervals_.size()];
+        const auto version = interval.version.load();
+        if (version == 0 || (version & 1u)) continue;
+        const double dacTime = interval.dacTime.load();
+        const double start = interval.position.load();
+        const double duration = interval.duration.load();
+        const double speed = interval.framesPerSecond.load();
+        const double total = interval.totalFrames.load();
+        const bool loop = interval.loop.load();
+        const auto intervalSession = interval.session.load();
+        const auto intervalGeneration = interval.generation.load();
+        if (interval.version.load() != version || intervalSession != session ||
+            intervalGeneration != generation ||
+            (found && dacTime > time)) continue;
+        double candidate = start + std::clamp(time - dacTime, 0.0, duration) * speed;
+        if (loop && total > 0.0) candidate = std::fmod(candidate, total);
+        if (!found || dacTime >= selectedTime) {
+            found = true;
+            selectedTime = dacTime;
+            position = std::clamp(candidate, 0.0, total);
+        }
+    }
+    return position;
 }
 
 float AudioOutput::getPlaybackRateRatio() const {
@@ -236,9 +280,9 @@ float AudioOutput::getPlaybackRateRatio() const {
 	return requested / actual;
 }
 
-void AudioOutput::updateStereoLevels(const float left, const float right) {
-	leftLevel_.store(smoothedLevel(leftLevel_.load(), std::clamp(left, 0.0f, 1.0f)));
-	rightLevel_.store(smoothedLevel(rightLevel_.load(), std::clamp(right, 0.0f, 1.0f)));
+void AudioOutput::updateStereoLevels(const float left, const float right, const double elapsed) {
+	leftLevel_.store(AudioMeter::peakResponse(leftLevel_.load(), std::clamp(left, 0.0f, 1.0f), elapsed));
+	rightLevel_.store(AudioMeter::peakResponse(rightLevel_.load(), std::clamp(right, 0.0f, 1.0f), elapsed));
 }
 
 void AudioOutput::resetStereoLevels() {
@@ -252,12 +296,11 @@ int AudioOutput::audioCallback(const void* input, void* output,
 								PaStreamCallbackFlags statusFlags,
 								void* userData) {
 	(void)input;
-	(void)timeInfo;
 	(void)statusFlags;
 
 	auto* audioOutput = static_cast<AudioOutput*>(userData);
 	auto* out = static_cast<float*>(output);
-	const size_t outputChannels = audioOutput->channelCount_.load();
+	const size_t outputChannels = audioOutput->outputChannelCount_.load();
 
 	if (!audioOutput->isPlaying_.load()) {
 		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
@@ -265,34 +308,44 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		return paContinue;
 	}
 
-	std::shared_ptr<std::vector<float>> bufferSnapshot;
-	double cursorSnapshot = 0.0;
-	double oldSeekCursorSnapshot = 0.0;
-	bool seekFading = false;
-	{
-		std::lock_guard<std::mutex> lock(audioOutput->bufferMutex_);
-		bufferSnapshot = audioOutput->audioBuffer_;
-		cursorSnapshot = audioOutput->playbackCursor_;
-
-		if (audioOutput->seekCrossfadeActive_.load()) {
-			oldSeekCursorSnapshot = audioOutput->oldSeekCursor_;
-			audioOutput->playbackCursor_ = static_cast<double>(audioOutput->pendingSeekPosition_.load());
-			cursorSnapshot = audioOutput->playbackCursor_;
-			seekFading = true;
-			audioOutput->seekCrossfadeActive_.store(false);
-		}
-	}
-
-	const size_t totalSamples = audioOutput->totalSamples_.load();
-	const bool loopEnabled = audioOutput->loopEnabled_.load();
-	const size_t totalFrames = outputChannels > 0 ? totalSamples / outputChannels : totalSamples;
-	const double totalFramesDouble = static_cast<double>(totalFrames);
-
-	if (!bufferSnapshot || bufferSnapshot->empty() || totalFrames == 0) {
-		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
-		audioOutput->resetStereoLevels();
-		return paContinue;
-	}
+    // https://portaudio.com/docs/v19-doxydocs/writing_a_callback.html
+    // https://eel.is/c++draft/atomics.order
+    struct ReadGuard {
+        std::atomic<std::uint32_t>& readers;
+        explicit ReadGuard(std::atomic<std::uint32_t>& value) : readers(value) { readers.fetch_add(1); }
+        ~ReadGuard() { readers.fetch_sub(1); }
+    } guard(audioOutput->callbackReaders_);
+    const auto* snapshot = audioOutput->publishedBuffer_.load();
+    if (!snapshot || snapshot->channels != outputChannels || snapshot->samples.empty()) {
+        std::fill_n(out, frameCount * outputChannels, 0.0f);
+        audioOutput->resetStereoLevels();
+        return paContinue;
+    }
+    if (snapshot->generation != audioOutput->activeGeneration_) {
+        audioOutput->activeGeneration_ = snapshot->generation;
+        audioOutput->playbackCursor_ = 0.0;
+        audioOutput->seekFadeRemaining_ = 0;
+    }
+    const auto version = audioOutput->seekVersion_.load();
+    if ((version & 1u) == 0 && version != audioOutput->appliedSeekVersion_) {
+        const auto position = audioOutput->pendingSeekPosition_.load();
+        const auto fade = audioOutput->pendingSeekFade_.load();
+        const auto generation = audioOutput->seekGeneration_.load();
+        if (audioOutput->seekVersion_.load() == version && generation == snapshot->generation) {
+            audioOutput->oldSeekCursor_ = audioOutput->playbackCursor_;
+            audioOutput->playbackCursor_ = static_cast<double>(position);
+            audioOutput->seekFadeRemaining_ = fade ? 256 : 0;
+            audioOutput->appliedSeekVersion_ = version;
+        }
+    }
+    const double cursorSnapshot = audioOutput->playbackCursor_;
+    const double oldSeekCursorSnapshot = audioOutput->oldSeekCursor_;
+    const auto session = audioOutput->clockSession_.load();
+    const size_t totalSamples = snapshot->samples.size();
+    const bool loopEnabled = audioOutput->loopEnabled_.load();
+    const size_t totalFrames = totalSamples / outputChannels;
+    const double totalFramesDouble = static_cast<double>(totalFrames);
+    if (totalFrames == 0) { std::fill_n(out, frameCount * outputChannels, 0.0f); return paContinue; }
 
 	double cursor = cursorSnapshot;
 	double step = static_cast<double>(audioOutput->playbackStep_.load());
@@ -301,9 +354,9 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	}
 
 	bool stopPlayback = false;
-	const auto& buffer = *bufferSnapshot;
+	const auto& buffer = snapshot->samples;
 	double oldSeekCursor = oldSeekCursorSnapshot;
-	size_t seekFadeRemaining = seekFading ? audioOutput->seekFadeRemaining_.load() : 0;
+	size_t seekFadeRemaining = audioOutput->seekFadeRemaining_;
 
 	for (unsigned long i = 0; i < frameCount; ++i) {
 		if (!loopEnabled && cursor >= totalFramesDouble) {
@@ -337,8 +390,8 @@ int AudioOutput::audioCallback(const void* input, void* output,
 
 		const double frac = std::clamp(workingCursor - static_cast<double>(clampedFrameIndex), 0.0, 1.0);
 
-		const size_t loopCrossfadeSamples = 128;
-		const bool nearLoopBoundary = loopEnabled && totalFrames >= loopCrossfadeSamples * 2;
+		const size_t loopFadeFrames = 128;
+		const bool nearLoopBoundary = loopEnabled && totalFrames >= loopFadeFrames * 2;
 
 		for (size_t ch = 0; ch < outputChannels; ++ch) {
 			const size_t currentSampleIndex = clampedFrameIndex * outputChannels + ch;
@@ -347,17 +400,13 @@ int AudioOutput::audioCallback(const void* input, void* output,
 			const float current = buffer[std::min(currentSampleIndex, totalSamples - 1)];
 			const float next = buffer[std::min(nextSampleIndex, totalSamples - 1)];
 
-			float sample;
-			if (nearLoopBoundary && clampedFrameIndex >= totalFrames - loopCrossfadeSamples &&
-				nextFrameIndex < loopCrossfadeSamples) {
-				const size_t distanceFromEnd = totalFrames - 1 - clampedFrameIndex;
-				const float fadeOut = static_cast<float>(distanceFromEnd + 1) / static_cast<float>(loopCrossfadeSamples);
-				const float fadeIn = 1.0f - fadeOut;
-				sample = (current + static_cast<float>(frac) * (next - current)) * fadeOut +
-						 buffer[std::min(nextFrameIndex * outputChannels + ch, totalSamples - 1)] * fadeIn;
-			} else {
-				sample = current + static_cast<float>(frac) * (next - current);
-			}
+            float sample = current + static_cast<float>(frac) * (next - current);
+            // https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.windows.hann.html
+            if (nearLoopBoundary) {
+                const double distance = std::min(workingCursor, totalFramesDouble - 1.0 - workingCursor);
+                const double fraction = std::clamp(distance / static_cast<double>(loopFadeFrames - 1), 0.0, 1.0);
+                sample *= static_cast<float>(.5 - .5 * std::cos(std::numbers::pi * fraction));
+            }
 
 			out[i * outputChannels + ch] = sample;
 		}
@@ -416,14 +465,26 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		finalCursor = std::clamp(finalCursor, 0.0, totalFramesDouble);
 	}
 
-	{
-		std::lock_guard<std::mutex> lock(audioOutput->bufferMutex_);
-		audioOutput->playbackCursor_ = finalCursor;
-	}
-
-	if (seekFading) {
-		audioOutput->seekFadeRemaining_.store(seekFadeRemaining);
-	}
+    audioOutput->playbackCursor_ = finalCursor;
+    audioOutput->seekFadeRemaining_ = seekFadeRemaining;
+    audioOutput->oldSeekCursor_ = oldSeekCursor;
+    if (timeInfo && std::isfinite(timeInfo->outputBufferDacTime) && std::isfinite(timeInfo->currentTime)) {
+        const auto serial = audioOutput->writtenIntervals_.load(std::memory_order_relaxed);
+        auto& interval = audioOutput->outputIntervals_[serial % audioOutput->outputIntervals_.size()];
+        interval.version.store(serial * 2 + 1);
+        const double rate = std::max(1.0f, audioOutput->actualSampleRate_.load());
+        interval.dacTime.store(timeInfo->outputBufferDacTime);
+        interval.position.store(cursorSnapshot);
+        interval.duration.store(static_cast<double>(frameCount) / rate);
+        interval.framesPerSecond.store(rate * step);
+        interval.totalFrames.store(totalFramesDouble);
+        interval.loop.store(loopEnabled);
+        interval.session.store(session);
+        interval.generation.store(snapshot->generation);
+        interval.version.store(serial * 2 + 2);
+        audioOutput->writtenIntervals_.store(serial + 1);
+        audioOutput->clockAvailable_.store(true);
+    } else audioOutput->clockAvailable_.store(false);
 
 	if (loopEnabled) {
 		size_t stored = static_cast<size_t>(std::floor(finalCursor));
@@ -445,7 +506,6 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	}
 
 	audioOutput->playbackEqualiser_.processInterleaved(out, frameCount, outputChannels);
-
 
 	constexpr float THRESHOLD = 0.85f;
 	constexpr float KNEE = 0.1f;
@@ -480,7 +540,8 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		leftPeak = std::max(leftPeak, left);
 		rightPeak = std::max(rightPeak, right);
 	}
-	audioOutput->updateStereoLevels(leftPeak, rightPeak);
+	audioOutput->updateStereoLevels(leftPeak, rightPeak,
+        static_cast<double>(frameCount) / static_cast<double>(std::max(1.0f, audioOutput->actualSampleRate_.load())));
 
 	return paContinue;
 }

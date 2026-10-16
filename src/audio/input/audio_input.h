@@ -42,7 +42,6 @@ public:
 	AudioProcessor& getAudioProcessor() { return processor; }
 	const AudioProcessor& getAudioProcessor() const { return processor; }
 
-	void setEQGains(float low, float mid, float high) { processor.setEQGains(low, mid, high); }
 	void discardBufferedFrames() { processor.discardBufferedFrames(); }
 
 	int getChannelCount() const { return channelCount; }
@@ -63,7 +62,7 @@ private:
 	std::atomic<float> rightLevel;
 
 	void stopStream();
-	void updateStereoLevels(float left, float right);
+	void updateStereoLevels(float left, float right, double elapsed);
 	void resetStereoLevels();
 	static int audioCallback(const void* input, void* output, unsigned long frameCount,
 							 const PaStreamCallbackTimeInfo* timeInfo,

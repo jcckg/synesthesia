@@ -106,21 +106,6 @@ void OSCPacketListener::ProcessMessage(const osc::ReceivedMessage& message, cons
             return;
         }
 
-        if (std::strcmp(message.AddressPattern(), kControlSpectrumSmoothingAddress) == 0) {
-            osc::ReceivedMessage::const_iterator argument = message.ArgumentsBegin();
-            if (argument == message.ArgumentsEnd()) {
-                throw osc::MissingArgumentException();
-            }
-
-            const float amount = std::clamp(parseFloat(*argument++), 0.0f, 1.0f);
-            if (argument != message.ArgumentsEnd()) {
-                throw osc::ExcessArgumentException();
-            }
-
-            commandQueue_.push(SetSpectrumSmoothingCommand{amount});
-            return;
-        }
-
         if (std::strcmp(message.AddressPattern(), kControlColourSpaceAddress) == 0) {
             osc::ReceivedMessage::const_iterator argument = message.ArgumentsBegin();
             if (argument == message.ArgumentsEnd()) {

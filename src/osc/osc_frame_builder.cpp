@@ -12,16 +12,17 @@ namespace {
 float interpolateMagnitude(const std::span<const float> magnitudes,
                            const float dominantFrequency,
                            const float sampleRate) {
-    if (magnitudes.size() < 2 || dominantFrequency <= 0.0f || sampleRate <= 0.0f) {
+    if (magnitudes.size() < 2 || !std::isfinite(dominantFrequency) || !std::isfinite(sampleRate) || dominantFrequency <= 0.0f || sampleRate <= 0.0f) {
         return 0.0f;
     }
 
     const float fftSize = 2.0f * static_cast<float>(magnitudes.size() - 1);
     const float binFrequency = sampleRate / fftSize;
     const float floatingIndex = dominantFrequency / binFrequency;
+    if (!std::isfinite(floatingIndex) || floatingIndex > static_cast<float>(magnitudes.size() - 1)) return 0.0f;
     const auto indexFloor = static_cast<std::size_t>(floatingIndex);
-    const auto indexCeil = indexFloor + 1;
-    if (indexCeil >= magnitudes.size()) {
+    const auto indexCeil = std::min(indexFloor + 1, magnitudes.size() - 1);
+    if (indexFloor >= magnitudes.size()) {
         return 0.0f;
     }
 
@@ -34,16 +35,17 @@ float interpolatePhase(const std::span<const float> magnitudes,
                        const float dominantFrequency,
                        const float sampleRate) {
     if (magnitudes.size() < 2 || phases.size() != magnitudes.size() ||
-        dominantFrequency <= 0.0f || sampleRate <= 0.0f) {
+        !std::isfinite(dominantFrequency) || !std::isfinite(sampleRate) || dominantFrequency <= 0.0f || sampleRate <= 0.0f) {
         return 0.0f;
     }
 
     const float fftSize = 2.0f * static_cast<float>(magnitudes.size() - 1);
     const float binFrequency = sampleRate / fftSize;
     const float floatingIndex = dominantFrequency / binFrequency;
+    if (!std::isfinite(floatingIndex) || floatingIndex > static_cast<float>(phases.size() - 1)) return 0.0f;
     const auto indexFloor = static_cast<std::size_t>(floatingIndex);
-    const auto indexCeil = indexFloor + 1;
-    if (indexCeil >= phases.size()) {
+    const auto indexCeil = std::min(indexFloor + 1, phases.size() - 1);
+    if (indexFloor >= phases.size()) {
         return 0.0f;
     }
 
@@ -60,7 +62,7 @@ float interpolatePhase(const std::span<const float> magnitudes,
     }
 
     const float interpolatedPhase = phaseA + fraction * phaseDifference;
-    return std::fmod(interpolatedPhase + std::numbers::pi_v<float>, twoPi) - std::numbers::pi_v<float>;
+    return std::remainder(interpolatedPhase, twoPi);
 }
 
 int64_t currentTimestampMicros() {
@@ -138,9 +140,10 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.colour.cieX = update.colourResult.X;
     frame.colour.cieY = update.colourResult.Y;
     frame.colour.cieZ = update.colourResult.Z;
-    frame.colour.oklabL = update.colourResult.L;
-    frame.colour.oklabA = update.colourResult.a;
-    frame.colour.oklabB = update.colourResult.b_comp;
+    ColourCore::XYZtoOklab(frame.colour.cieX, frame.colour.cieY, frame.colour.cieZ,
+        frame.colour.oklabL, frame.colour.oklabA, frame.colour.oklabB);
+    frame.colour.measurementXYZ = update.colourResult.spectral.xyz;
+    frame.colour.measurementAvailable = update.colourResult.spectral.available;
 
     frame.spectral.flatness = update.colourResult.spectralFlatness;
     frame.spectral.centroidHz = update.colourResult.spectralCentroid;
@@ -151,9 +154,11 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.spectral.spectralFlux = update.analysisSignals.spectralFlux;
 
     frame.loudness.loudnessDb = update.colourResult.loudnessDb;
+    frame.loudness.loudnessIsLufs = update.colourResult.loudnessIsLufs;
     frame.loudness.loudnessNormalised = update.colourResult.loudnessNormalised;
     frame.loudness.frameLoudnessDb = update.colourResult.frameLoudnessDb;
-    frame.loudness.momentaryLoudnessLUFS = update.analysisSignals.momentaryLoudnessLUFS;
+    frame.loudness.momentaryLoudnessLUFS = update.colourResult.loudnessIsLufs
+        ? update.analysisSignals.momentaryLoudnessLUFS : ColourCore::LOUDNESS_DB_UNSPECIFIED;
     frame.loudness.estimatedSPL = update.colourResult.estimatedSPL;
     frame.loudness.luminanceCdM2 = update.colourResult.luminanceCdM2;
     frame.loudness.brightnessNormalised = update.colourResult.brightnessNormalised;

@@ -17,6 +17,7 @@ constexpr float kCrestLogScale = 4.0f;
 
 SmoothingSignalFeatures buildSignalFeatures(const ColourCore::FrameResult& result) {
     SmoothingSignalFeatures features{};
+    features.frameLevelDb = result.frameLoudnessDb;
     features.spectralFlatness = result.spectralFlatness;
     features.loudnessNormalised = std::clamp(result.loudnessNormalised, 0.0f, 1.0f);
     features.brightnessNormalised = std::clamp(result.brightnessNormalised, 0.0f, 1.0f);
@@ -38,42 +39,6 @@ SmoothingSignalFeatures buildSignalFeatures(const ColourCore::FrameResult& resul
     features.phaseCoherenceNorm = std::clamp(result.phaseCoherenceNorm, 0.0f, 1.0f);
     features.phaseTransientNorm = std::clamp(result.phaseTransientNorm, 0.0f, 1.0f);
     return features;
-}
-
-void updateFluxHistory(const std::vector<float>& visualiserMagnitudes,
-                       MagnitudeHistory& history,
-                       SmoothingSignalFeatures& features) {
-    float spectralFlux = 0.0f;
-    bool fluxComputed = false;
-
-    if (history.previousMagnitudes.size() == visualiserMagnitudes.size() &&
-        !visualiserMagnitudes.empty()) {
-        for (std::size_t index = 0; index < visualiserMagnitudes.size(); ++index) {
-            const float diff = visualiserMagnitudes[index] - history.previousMagnitudes[index];
-            spectralFlux += std::max(diff, 0.0f);
-        }
-        spectralFlux /= static_cast<float>(visualiserMagnitudes.size());
-        fluxComputed = true;
-    }
-
-    history.previousMagnitudes = visualiserMagnitudes;
-
-    float maxFlux = 0.0f;
-    for (const float flux : history.fluxHistory) {
-        maxFlux = std::max(maxFlux, flux);
-    }
-
-    features.spectralFlux = fluxComputed ? spectralFlux : 0.0f;
-    features.onsetDetected =
-        fluxComputed &&
-        maxFlux > 0.0f &&
-        spectralFlux > maxFlux * 1.3f &&
-        spectralFlux > 0.001f;
-
-    if (fluxComputed) {
-        history.fluxHistory[history.fluxHistoryIndex] = spectralFlux;
-        history.fluxHistoryIndex = (history.fluxHistoryIndex + 1) % history.fluxHistory.size();
-    }
 }
 
 }

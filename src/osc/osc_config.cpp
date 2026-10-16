@@ -80,7 +80,7 @@ bool isPrivateOrLoopbackIPv4(const std::array<uint8_t, 4>& octets) {
     return false;
 }
 
-}  // namespace
+}
 
 OSCDestinationValidationResult validateOSCDestination(const std::string& destinationHost) {
     OSCDestinationValidationResult result;

@@ -23,8 +23,8 @@ bool readChunkHeader(std::ifstream& stream, char (&id)[4], uint32_t& size) {
 float readPCMValue(const uint8_t* data, uint16_t bitsPerSample) {
     switch (bitsPerSample) {
         case 8: {
-            const float value = static_cast<float>(*data) / 255.0f;
-            return value * 2.0f - 1.0f;
+            // https://learn.microsoft.com/en-us/windows/win32/multimedia/devices-and-data-types
+            return static_cast<float>(static_cast<int>(*data) - 128) / 128.0f;
         }
         case 16: {
             int16_t sample;

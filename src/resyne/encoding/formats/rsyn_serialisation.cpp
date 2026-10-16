@@ -11,6 +11,7 @@
 #include <utility>
 
 #include <nlohmann/json.hpp>
+#include "colour/colour_track.h"
 
 namespace RSYNSerialisation {
 
@@ -97,6 +98,7 @@ bool readFloatVector(const std::vector<std::uint8_t>& input, std::size_t& offset
         return false;
     }
 
+    if (size > (input.size() - offset) / sizeof(T)) return false;
     values.resize(size);
     for (T& value : values) {
         if (!readFloat(input, offset, value)) {
@@ -116,8 +118,11 @@ json encodePresentationSettings(const RSYNPresentationSettings& settings) {
         {"smoothing_enabled", settings.smoothingEnabled},
         {"manual_smoothing", settings.manualSmoothing},
         {"smoothing_amount", settings.smoothingAmount},
-        {"smoothing_update_factor", settings.smoothingUpdateFactor},
-        {"spring_mass", settings.springMass},
+        {"automatic_response", "resolution-connected-envelope-tracking-exponential-v5"},
+        {"manual_response", "connected-colour-motion-one-euro-v2"},
+        {"spectral_presentation", "causal-bass-shape-short-mass-v1"},
+        {"bass_window", "1024-hann-decimated-kaiser-8.6"},
+        {"bass_crossover_hz", {150,300}},
         {"pipeline_id", settings.pipelineId}
     };
 }
@@ -131,9 +136,7 @@ void decodePresentationSettings(const json& input, RSYNPresentationSettings& set
     settings.smoothingEnabled = input.value("smoothing_enabled", settings.smoothingEnabled);
     settings.manualSmoothing = input.value("manual_smoothing", settings.manualSmoothing);
     settings.smoothingAmount = input.value("smoothing_amount", settings.smoothingAmount);
-    settings.smoothingUpdateFactor = input.value("smoothing_update_factor", settings.smoothingUpdateFactor);
-    settings.springMass = input.value("spring_mass", settings.springMass);
-    settings.pipelineId = input.value("pipeline_id", settings.pipelineId);
+    settings.pipelineId = input.value("pipeline_id", std::string{});
 }
 
 void writeFrameResult(std::vector<std::uint8_t>& output, const ColourCore::FrameResult& result) {
@@ -165,10 +168,15 @@ void writeFrameResult(std::vector<std::uint8_t>& output, const ColourCore::Frame
     appendFloat(output, result.phaseInstabilityNorm);
     appendFloat(output, result.phaseCoherenceNorm);
     appendFloat(output, result.phaseTransientNorm);
+    appendIntegral(output, static_cast<std::uint8_t>(result.spectral.available));
+    appendFloat(output, result.spectral.xyz.X);
+    appendFloat(output, result.spectral.xyz.Y);
+    appendFloat(output, result.spectral.xyz.Z);
+    appendIntegral(output, static_cast<std::uint8_t>(result.loudnessIsLufs));
 }
 
-bool readFrameResult(const std::vector<std::uint8_t>& input, std::size_t& offset, ColourCore::FrameResult& result) {
-    return readFloat(input, offset, result.r) &&
+bool readFrameResult(const std::vector<std::uint8_t>& input, std::size_t& offset, ColourCore::FrameResult& result, bool legacy) {
+    const bool valid = readFloat(input, offset, result.r) &&
         readFloat(input, offset, result.g) &&
         readFloat(input, offset, result.b) &&
         readFloat(input, offset, result.X) &&
@@ -196,6 +204,21 @@ bool readFrameResult(const std::vector<std::uint8_t>& input, std::size_t& offset
         readFloat(input, offset, result.phaseInstabilityNorm) &&
         readFloat(input, offset, result.phaseCoherenceNorm) &&
         readFloat(input, offset, result.phaseTransientNorm);
+    if (!valid) return false;
+    std::uint8_t available = 0;
+    if (!readIntegral(input, offset, available) || available > 1) return false;
+    result.spectral.available = available != 0;
+    const bool spectralValid = readFloat(input, offset, result.spectral.xyz.X) &&
+        readFloat(input, offset, result.spectral.xyz.Y) && readFloat(input, offset, result.spectral.xyz.Z);
+    // Legacy records contain a second observer triplet; consume it only to preserve record boundaries.
+    if (legacy) {
+        std::array<float,3> discarded{};
+        for (auto& value : discarded) if (!readFloat(input, offset, value)) return false;
+    }
+    std::uint8_t lufs = 0;
+    if (!spectralValid || !readIntegral(input, offset, lufs) || lufs > 1) return false;
+    result.loudnessIsLufs = lufs != 0;
+    return true;
 }
 
 void writeSignals(std::vector<std::uint8_t>& output, const RSYNSmoothingSignals& signals) {
@@ -251,6 +274,8 @@ bool encodeMetadata(const AudioMetadata& metadata, std::vector<std::uint8_t>& ou
         {"fft_size", metadata.fftSize},
         {"hop_size", metadata.hopSize},
         {"duration_seconds", metadata.durationSeconds},
+        {"original_sample_count", metadata.originalSampleCount},
+        {"analysis_leading_samples", metadata.analysisLeadingSamples},
         {"window_type", metadata.windowType},
         {"num_frames", metadata.numFrames},
         {"num_bins", metadata.numBins},
@@ -272,7 +297,15 @@ bool encodeMetadata(const AudioMetadata& metadata, std::vector<std::uint8_t>& ou
     if (metadata.presentationData != nullptr && !metadata.presentationData->frames.empty()) {
         encoded["presentation"] = {
             {"settings", encodePresentationSettings(metadata.presentationData->settings)},
-            {"frame_count", metadata.presentationData->frames.size()}
+            {"frame_count", metadata.presentationData->frames.size()},
+            {"interpolation", "XYZ"},
+            {"gamut_mapping", "soft-neutral-axis-linear-rgb-v1"},
+            {"colour_smoothing", "shared-spectral-contributions-exponential-v1"},
+            {"onset_detector", "local-log-frequency-trajectory-peak-v1"},
+            {"measurement_observer", "CIE-2015-2-degree"},
+            {"presentation_observer", "CIE-2015-2-degree-D65"},
+            {"rgb_reference_model", "CIE-2015-BT2020-lines-D65-v1"},
+            {"lab_reference_illuminant", "D65"}
         };
     }
 
@@ -292,6 +325,8 @@ bool decodeMetadata(const std::vector<std::uint8_t>& input, AudioMetadata& metad
     metadata.fftSize = decoded.value("fft_size", metadata.fftSize);
     metadata.hopSize = decoded.value("hop_size", metadata.hopSize);
     metadata.durationSeconds = decoded.value("duration_seconds", metadata.durationSeconds);
+    metadata.originalSampleCount = decoded.value("original_sample_count", std::uint64_t{0});
+    metadata.analysisLeadingSamples = decoded.value("analysis_leading_samples", std::uint32_t{0});
     metadata.windowType = decoded.value("window_type", metadata.windowType);
     metadata.numFrames = decoded.value("num_frames", metadata.numFrames);
     metadata.numBins = decoded.value("num_bins", metadata.numBins);
@@ -308,6 +343,7 @@ bool decodeMetadata(const std::vector<std::uint8_t>& input, AudioMetadata& metad
     if (decoded.value("has_presentation_data", false) && decoded.contains("presentation")) {
         metadata.presentationData = std::make_shared<RSYNPresentationData>();
         decodePresentationSettings(decoded["presentation"].value("settings", json::object()), metadata.presentationData->settings);
+        if (!readablePresentationPipeline(metadata.presentationData->settings.pipelineId)) return false;
     }
 
     return true;
@@ -337,7 +373,10 @@ bool decodeSourceBytes(const std::vector<std::uint8_t>& input,
 bool encodeSamples(const std::vector<AudioColourSample>& samples,
                    std::vector<std::uint8_t>& output) {
     output.clear();
-    appendIntegral(output, static_cast<std::uint32_t>(samples.size()));
+    if (samples.size() >= 0x80000000u) return false;
+    // The count's high bit marks the bass extension; frames without bass retain the legacy SPEC layout.
+    const bool hasBass = std::any_of(samples.begin(),samples.end(),[](const auto& sample) { return !sample.bass.empty(); });
+    appendIntegral(output, static_cast<std::uint32_t>(samples.size()) | (hasBass ? 0x80000000u : 0u));
 
     for (const AudioColourSample& sample : samples) {
         appendFloat(output, sample.timestamp);
@@ -360,6 +399,21 @@ bool encodeSamples(const std::vector<AudioColourSample>& samples,
         for (const auto& channel : sample.frequencies) {
             appendFloatVector(output, channel);
         }
+        if (hasBass) {
+            if (sample.bass.size() > sample.channels) return false;
+            appendIntegral(output,static_cast<std::uint32_t>(sample.bass.size()));
+            for (const auto& channel : sample.bass) {
+                appendIntegral(output,static_cast<std::uint32_t>(channel != nullptr));
+                if (!channel) continue;
+                if (!std::isfinite(channel->sampleRate) || channel->sampleRate < 2000 || channel->sampleRate >= 4000 ||
+                    !std::isfinite(channel->coverage) || channel->coverage < 0 || channel->coverage > 1 ||
+                    channel->magnitudes.size() > 513) return false;
+                for (float magnitude : channel->magnitudes) if (!std::isfinite(magnitude) || magnitude < 0) return false;
+                appendFloat(output,channel->sampleRate);
+                appendFloat(output,channel->coverage);
+                appendFloatVector(output,channel->magnitudes);
+            }
+        }
     }
 
     return true;
@@ -377,6 +431,10 @@ bool decodeSamples(const std::vector<std::uint8_t>& input,
         return false;
     }
 
+    const bool hasBass = (frameCount & 0x80000000u) != 0;
+    frameCount &= 0x7fffffffu;
+    constexpr std::size_t minimumSampleBytes = sizeof(double) + 3 * sizeof(float) + 4 * sizeof(std::uint32_t);
+    if (frameCount > (input.size() - offset) / minimumSampleBytes) return false;
     samples.resize(frameCount);
     const std::size_t callbackStride = std::max<std::size_t>(1, frameCount / 200U);
     for (std::uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
@@ -393,6 +451,7 @@ bool decodeSamples(const std::vector<std::uint8_t>& input,
         if (!readIntegral(input, offset, magnitudeChannels)) {
             return false;
         }
+        if (magnitudeChannels > (input.size() - offset) / sizeof(std::uint32_t)) return false;
         sample.magnitudes.resize(magnitudeChannels);
         for (auto& channel : sample.magnitudes) {
             if (!readFloatVector(input, offset, channel)) {
@@ -404,6 +463,7 @@ bool decodeSamples(const std::vector<std::uint8_t>& input,
         if (!readIntegral(input, offset, phaseChannels)) {
             return false;
         }
+        if (phaseChannels > (input.size() - offset) / sizeof(std::uint32_t)) return false;
         sample.phases.resize(phaseChannels);
         for (auto& channel : sample.phases) {
             if (!readFloatVector(input, offset, channel)) {
@@ -415,10 +475,31 @@ bool decodeSamples(const std::vector<std::uint8_t>& input,
         if (!readIntegral(input, offset, frequencyChannels)) {
             return false;
         }
+        if (frequencyChannels > (input.size() - offset) / sizeof(std::uint32_t)) return false;
         sample.frequencies.resize(frequencyChannels);
         for (auto& channel : sample.frequencies) {
             if (!readFloatVector(input, offset, channel)) {
                 return false;
+            }
+        }
+
+        if (hasBass) {
+            std::uint32_t channels = 0;
+            if (!readIntegral(input,offset,channels) || channels > sample.channels ||
+                channels > (input.size()-offset)/sizeof(std::uint32_t)) return false;
+            sample.bass.resize(channels);
+            for (auto& channel : sample.bass) {
+                std::uint32_t present = 0;
+                if (!readIntegral(input,offset,present) || present > 1) return false;
+                if (!present) continue;
+                auto spectrum = std::make_shared<AudioAnalysis::BassSpectrum>();
+                if (!readFloat(input,offset,spectrum->sampleRate) || !readFloat(input,offset,spectrum->coverage) ||
+                    !readFloatVector(input,offset,spectrum->magnitudes)) return false;
+                if (!std::isfinite(spectrum->sampleRate) || spectrum->sampleRate < 2000 || spectrum->sampleRate >= 4000 ||
+                    !std::isfinite(spectrum->coverage) || spectrum->coverage < 0 || spectrum->coverage > 1 ||
+                    spectrum->magnitudes.size() > 513) return false;
+                for (float magnitude : spectrum->magnitudes) if (!std::isfinite(magnitude) || magnitude < 0) return false;
+                channel = std::move(spectrum);
             }
         }
 
@@ -434,23 +515,65 @@ bool decodeSamples(const std::vector<std::uint8_t>& input,
     return offset == input.size();
 }
 
+static bool validContributionFrame(const RSYNPresentationFrame& frame) {
+    if (!std::isfinite(frame.timestamp) || !std::isfinite(frame.responseSeconds) || frame.responseSeconds < 0.0f ||
+        !std::isfinite(frame.frequencyResolution) || frame.frequencyResolution < 0.0f) return false;
+    const std::array<float, 3> raw{frame.analysis.X, frame.analysis.Y, frame.analysis.Z};
+    for (const auto& pair : {std::pair{frame.contributionTargets, raw}, std::pair{frame.presentedContributions, frame.presentedXYZ}}) {
+        if (!pair.first || pair.first->size() > ColourPresentation::contributionBandCount) return false;
+        std::array<double, 3> sum{};
+        std::uint16_t previous = 0;
+        for (std::size_t i = 0; i < pair.first->size(); ++i) {
+            const auto& band = (*pair.first)[i];
+            if (band.band >= ColourPresentation::contributionBandCount || (i > 0 && band.band <= previous) ||
+                !std::isfinite(band.magnitude) || band.magnitude < 0.0f ||
+                !std::isfinite(band.responseSeconds) || band.responseSeconds < 0.0f) return false;
+            for (std::size_t c = 0; c < 3; ++c) {
+                if (!std::isfinite(band.xyz[c])) return false;
+                sum[c] += static_cast<double>(band.xyz[c]);
+            }
+            previous = band.band;
+        }
+        for (std::size_t c = 0; c < 3; ++c) {
+            const double expected = static_cast<double>(pair.second[c]);
+            if (!std::isfinite(expected) || std::abs(sum[c] - expected) > 2e-6 * std::max(1.0, std::abs(expected))) return false;
+        }
+    }
+    return true;
+}
+
 bool encodePresentationFrames(const std::shared_ptr<RSYNPresentationData>& presentationData,
                               std::vector<std::uint8_t>& output) {
     output.clear();
+    if (presentationData && presentationData->settings.pipelineId != RSYN_PRESENTATION_PIPELINE_ID) return false;
+    appendIntegral(output, std::numeric_limits<std::uint32_t>::max());
+    appendIntegral(output, std::uint32_t{4});
     if (presentationData == nullptr) {
         appendIntegral(output, static_cast<std::uint32_t>(0));
         return true;
     }
 
     appendIntegral(output, static_cast<std::uint32_t>(presentationData->frames.size()));
+    double previousTimestamp = -std::numeric_limits<double>::infinity();
     for (const RSYNPresentationFrame& frame : presentationData->frames) {
+        if (!validContributionFrame(frame) || frame.timestamp <= previousTimestamp) return false;
+        previousTimestamp = frame.timestamp;
         appendFloat(output, frame.timestamp);
         writeFrameResult(output, frame.analysis);
         writeSignals(output, frame.smoothingSignals);
-        writeFloatTriple(output, frame.targetOklab);
-        writeFloatTriple(output, frame.smoothedOklab);
-        writeFloatTriple(output, frame.smoothedLab);
-        writeFloatTriple(output, frame.smoothedDisplayRgb);
+        writeFloatTriple(output, frame.presentedXYZ);
+        appendFloat(output, frame.responseSeconds);
+        appendFloat(output, frame.frequencyResolution);
+        for (const auto& bands : {frame.contributionTargets, frame.presentedContributions}) {
+            appendIntegral(output, static_cast<std::uint32_t>(bands ? bands->size() : 0));
+            if (!bands) continue;
+            for (const auto& band : *bands) {
+                appendIntegral(output, band.band);
+                writeFloatTriple(output, band.xyz);
+                appendFloat(output, band.magnitude);
+                appendFloat(output, band.responseSeconds);
+            }
+        }
     }
     return true;
 }
@@ -469,19 +592,63 @@ bool decodePresentationFrames(const std::vector<std::uint8_t>& input,
         return false;
     }
 
+    if (frameCount != std::numeric_limits<std::uint32_t>::max()) return false;
+    std::uint32_t version = 0;
+    if (!readIntegral(input, offset, version) || (version != 3 && version != 4) || !readIntegral(input, offset, frameCount)) return false;
+    if (!readablePresentationPipeline(metadata.presentationData->settings.pipelineId)) return false;
+    const bool legacy = version == 3;
+    if (legacy == (metadata.presentationData->settings.pipelineId == RSYN_PRESENTATION_PIPELINE_ID)) return false;
+    const std::size_t minimumFrameBytes = legacy ? 215 : 203;
+    if (frameCount > (input.size() - offset) / minimumFrameBytes) return false;
+
     metadata.presentationData->frames.resize(frameCount);
     for (std::uint32_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         RSYNPresentationFrame& frame = metadata.presentationData->frames[frameIndex];
         if (!readFloat(input, offset, frame.timestamp) ||
-            !readFrameResult(input, offset, frame.analysis) ||
-            !readSignals(input, offset, frame.smoothingSignals) ||
-            !readFloatTriple(input, offset, frame.targetOklab) ||
-            !readFloatTriple(input, offset, frame.smoothedOklab) ||
-            !readFloatTriple(input, offset, frame.smoothedLab) ||
-            !readFloatTriple(input, offset, frame.smoothedDisplayRgb)) {
+            !readFrameResult(input, offset, frame.analysis, legacy) ||
+            !readSignals(input, offset, frame.smoothingSignals)) {
             return false;
         }
 
+        {
+            if (!readFloatTriple(input, offset, frame.presentedXYZ) || !readFloat(input, offset, frame.responseSeconds) ||
+                !std::isfinite(frame.responseSeconds) || frame.responseSeconds < 0.0f ||
+                !readFloat(input, offset, frame.frequencyResolution) || !std::isfinite(frame.frequencyResolution) ||
+                frame.frequencyResolution < 0.0f) return false;
+            for (const float value : frame.presentedXYZ) if (!std::isfinite(value)) return false;
+            for (auto* destination : {&frame.contributionTargets, &frame.presentedContributions}) {
+                std::uint32_t count = 0;
+                if (!readIntegral(input, offset, count) || count > ColourPresentation::contributionBandCount) return false;
+                auto bands = std::make_shared<ColourPresentation::SpectralContributions>();
+                bands->resize(count);
+                std::uint16_t previous = 0;
+                for (std::size_t i = 0; i < count; ++i) {
+                    auto& band = (*bands)[i];
+                    if (!readIntegral(input, offset, band.band) || band.band >= ColourPresentation::contributionBandCount ||
+                        (i > 0 && band.band <= previous) || !readFloatTriple(input, offset, band.xyz) ||
+                        !readFloat(input, offset, band.magnitude) || !readFloat(input, offset, band.responseSeconds)) return false;
+                    for (const float value : band.xyz) if (!std::isfinite(value)) return false;
+                    if (!std::isfinite(band.magnitude) || band.magnitude < 0.0f ||
+                        !std::isfinite(band.responseSeconds) || band.responseSeconds < 0.0f) return false;
+                    previous = band.band;
+                }
+                *destination = std::move(bands);
+            }
+        }
+
+        // Older presentations are rebuilt from spectra by the loader; never reinterpret their cached XYZ.
+        if (!legacy) {
+            ColourCore::XYZtoOklab(frame.analysis.X, frame.analysis.Y, frame.analysis.Z,
+                frame.targetOklab[0], frame.targetOklab[1], frame.targetOklab[2]);
+            ColourCore::XYZtoOklab(frame.presentedXYZ[0], frame.presentedXYZ[1], frame.presentedXYZ[2],
+                frame.smoothedOklab[0], frame.smoothedOklab[1], frame.smoothedOklab[2]);
+            ColourCore::XYZtoLab(frame.presentedXYZ[0], frame.presentedXYZ[1], frame.presentedXYZ[2],
+                frame.smoothedLab[0], frame.smoothedLab[1], frame.smoothedLab[2]);
+            const auto rgb = ColourPresentation::projectXYZ(ColourPresentation::toColourTriple(frame.presentedXYZ),
+                metadata.presentationData->settings.colourSpace, metadata.presentationData->settings.applyGamutMapping);
+            frame.smoothedDisplayRgb = {rgb.r, rgb.g, rgb.b};
+        }
+        if (!validContributionFrame(frame) || (frameIndex > 0 && frame.timestamp <= metadata.presentationData->frames[frameIndex - 1].timestamp)) return false;
         if (progress) {
             progress(static_cast<float>(frameIndex + 1U) / static_cast<float>(std::max<std::uint32_t>(1U, frameCount)));
         }

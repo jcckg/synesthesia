@@ -2,7 +2,6 @@
 #include <iostream>
 
 namespace {
-    // MIDI protocol constants (status byte upper nibble)
     constexpr unsigned char MIDI_NOTE_OFF = 0x80;
     constexpr unsigned char MIDI_NOTE_ON = 0x90;
     constexpr unsigned char MIDI_AFTERTOUCH = 0xA0;

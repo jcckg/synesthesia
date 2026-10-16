@@ -5,10 +5,11 @@
 #include <cmath>
 #include <limits>
 #include <numeric>
+#include <stdexcept>
 #include <vector>
 
 #include "audio/analysis/phase/phase_features.h"
-#include "colour/cie_2006.h"
+#include "colour/cie_2015.h"
 
 namespace {
 
@@ -18,29 +19,25 @@ using FrameResult = ColourCore::FrameResult;
 
 constexpr float kMinLoudnessDb = -70.0f;
 constexpr float kMaxLoudnessDb = 0.0f;
-constexpr float kRmsEpsilon = 1e-12f;
 constexpr float kPerceptualReferenceLufs = -23.0f;
 constexpr float kEpsilonSmall = 1e-6f;
 constexpr float kEpsilonTiny = 1e-10f;
 constexpr float kSrgbEncodeThreshold = 0.0031308f;
 constexpr float kSrgbDecodeThreshold = 0.04045f;
 
-// CIE D50 and D65 values are integrated from the official CIE SPDs against the
-// CIE 2006 2° CMFs at 1 nm spacing.
+// https://cie.co.at/datatable/cie-standard-illuminant-d50
 constexpr ColourCore::WhitePoint kD50White{
-    0.9656938793f,
-    1.0f,
-    0.8054430783f
+    0.965693878369f,
+    1.000000000000f,
+    0.805443077767f
 };
 
+// https://cie.co.at/datatable/cie-standard-illuminant-d65
 constexpr ColourCore::WhitePoint kD65White{
-    0.9475535595f,
-    1.0f,
-    1.0754043442f
+    0.947553558570f,
+    1.000000000000f,
+    1.075404343361f
 };
-
-constexpr float kD50UPrime = 0.2101387586f;
-constexpr float kD50VPrime = 0.4896087848f;
 
 enum class TransferFunction {
     SRGB,
@@ -48,34 +45,35 @@ enum class TransferFunction {
 };
 
 struct OutputProfileDefinition {
-    std::array<float, 9> xyzToRgb;
-    std::array<float, 9> rgbToXyz;
+    std::array<float, 9> encodingXYZToRgb;
+    std::array<float, 9> rgbToEncodingXYZ;
     TransferFunction transfer;
     ColourCore::VideoProfile videoProfile;
 };
 
-constexpr std::array<float, 9> kXYZToOklabLms{
+constexpr std::array<float, 9> kEncodingXYZToOklabLms{
     0.8190224379967030f, 0.3619062600528904f, -0.1288737815209879f,
     0.0329836539323885f, 0.9292868615863434f, 0.0361446663506424f,
     0.0481771893596242f, 0.2642395317527308f, 0.6335478284694309f
 };
 
-constexpr std::array<float, 9> kOklabLmsToXYZ{
+constexpr std::array<float, 9> kOklabLmsToEncodingXYZ{
     1.2268798758459243f, -0.5578149944602171f, 0.2813910456659647f,
     -0.0405757452148008f, 1.1122868032803170f, -0.0717110580655164f,
     -0.0763729366746601f, -0.4214933324022432f, 1.5869240198367816f
 };
 
+// https://ffmpeg.org/ffmpeg-filters.html#scale-1
 constexpr OutputProfileDefinition kRec2020Definition{
-    .xyzToRgb = {1.7166512f, -0.35567078f, -0.25336629f,
+    .encodingXYZToRgb = {1.7166512f, -0.35567078f, -0.25336629f,
                  -0.66668433f, 1.6164813f, 0.01576854f,
                  0.01763986f, -0.04277061f, 0.94210315f},
-    .rgbToXyz = {0.63695806f, 0.1446169f, 0.16888098f,
+    .rgbToEncodingXYZ = {0.63695806f, 0.1446169f, 0.16888098f,
                  0.2627002f, 0.67799807f, 0.05930172f,
                  0.0f, 0.02807269f, 1.0609851f},
     .transfer = TransferFunction::Rec2020,
     .videoProfile = {
-        "colorspace=ispace=gbr:iprimaries=bt2020:itrc=bt2020-10:irange=pc:space=bt2020ncl:primaries=bt2020:trc=bt2020-10:range=tv",
+        "scale=in_range=pc:out_range=tv:out_color_matrix=bt2020",
         "bt2020nc",
         "bt2020",
         "bt2020-10",
@@ -94,19 +92,19 @@ constexpr ColourCore::PngProfile kRec2020PngProfile{
 };
 
 constexpr OutputProfileDefinition kDisplayP3Definition{
-    .xyzToRgb = {2.4934969f, -0.93138361f, -0.40271077f,
+    .encodingXYZToRgb = {2.4934969f, -0.93138361f, -0.40271077f,
                  -0.82948899f, 1.7626641f, 0.02362468f,
                  0.03584583f, -0.07617239f, 0.9568845f},
-    .rgbToXyz = {0.48657095f, 0.2656677f, 0.19821729f,
+    .rgbToEncodingXYZ = {0.48657095f, 0.2656677f, 0.19821729f,
                  0.22897457f, 0.69173855f, 0.07928691f,
                  0.0f, 0.04511338f, 1.0439444f},
     .transfer = TransferFunction::SRGB,
     .videoProfile = {
-        "colorspace=ispace=gbr:iprimaries=smpte432:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=smpte432:trc=iec61966-2-1:range=tv",
+        "scale=in_range=pc:out_range=tv:out_color_matrix=bt709",
         "bt709",
         "smpte432",
         "iec61966-2-1",
-        "yuv420p"
+        "yuv420p10le"
     }
 };
 
@@ -121,19 +119,19 @@ constexpr ColourCore::PngProfile kDisplayP3PngProfile{
 };
 
 constexpr OutputProfileDefinition kSrgbDefinition{
-    .xyzToRgb = {3.2409699f, -1.5373832f, -0.49861076f,
+    .encodingXYZToRgb = {3.2409699f, -1.5373832f, -0.49861076f,
                  -0.96924365f, 1.8759675f, 0.04155506f,
                  0.05563008f, -0.20397697f, 1.0569714f},
-    .rgbToXyz = {0.4123908f, 0.35758433f, 0.18048079f,
+    .rgbToEncodingXYZ = {0.4123908f, 0.35758433f, 0.18048079f,
                  0.212639f, 0.7151687f, 0.07219231f,
                  0.01933082f, 0.11919478f, 0.95053214f},
     .transfer = TransferFunction::SRGB,
     .videoProfile = {
-        "colorspace=ispace=gbr:iprimaries=bt709:itrc=iec61966-2-1:irange=pc:space=bt709:primaries=bt709:trc=iec61966-2-1:range=tv",
+        "scale=in_range=pc:out_range=tv:out_color_matrix=bt709",
         "bt709",
         "bt709",
         "iec61966-2-1",
-        "yuv420p"
+        "yuv420p10le"
     }
 };
 
@@ -145,13 +143,6 @@ constexpr ColourCore::PngProfile kSrgbPngProfile{
     13,
     0,
     1
-};
-
-struct SpectralBandBalance {
-    float low = 0.0f;
-    float mid = 0.0f;
-    float high = 0.0f;
-    float tilt = 0.0f;
 };
 
 const OutputProfileDefinition& outputProfileDefinition(const ColourSpace colourSpace) {
@@ -187,6 +178,73 @@ std::array<float, 3> multiplyMatrix(const std::array<float, 9>& matrix,
         matrix[3] * x + matrix[4] * y + matrix[5] * z,
         matrix[6] * x + matrix[7] * y + matrix[8] * z
     };
+}
+
+using Matrix = std::array<double, 9>;
+
+Matrix multiplyMatrices(const Matrix& left, const Matrix& right) {
+    Matrix result{};
+    for (std::size_t row = 0; row < 3; ++row)
+        for (std::size_t column = 0; column < 3; ++column)
+            for (std::size_t k = 0; k < 3; ++k)
+                result[row*3+column] += left[row*3+k] * right[k*3+column];
+    return result;
+}
+
+Matrix encodingMatrix(const std::array<float, 9>& values) {
+    Matrix result{};
+    std::copy(values.begin(), values.end(), result.begin());
+    return result;
+}
+
+// https://www.itu.int/dms_pub/itu-r/opb/rep/r-rep-bt.2246-2-2012-pdf-e.pdf
+// https://cie.co.at/datatable/cie-cone-fundamental-based-spectral-tristimulus-values-2-degree-field-size
+const ColourCore::SpectralPrimaryProfile& referencePrimaryProfile() {
+    static const auto profile = [] {
+        std::array<std::array<float, Colour::CIE2015::kTableSize>, 3> spectra{};
+        constexpr std::array<std::size_t, 3> wavelengths{630, 532, 467};
+        for (std::size_t channel = 0; channel < spectra.size(); ++channel)
+            spectra[channel][wavelengths[channel]-390] = 1.0f;
+        const auto unbalanced = ColourCore::makeSpectralPrimaryProfile(spectra[0], spectra[1], spectra[2]);
+        const auto gains = ColourCore::projectWithPrimaryProfile({kD65White.X, kD65White.Y, kD65White.Z}, unbalanced);
+        const std::array<float, 3> weights{gains.r, gains.g, gains.b};
+        for (std::size_t channel = 0; channel < spectra.size(); ++channel)
+            spectra[channel][wavelengths[channel]-390] *= weights[channel];
+        return ColourCore::makeSpectralPrimaryProfile(spectra[0], spectra[1], spectra[2]);
+    }();
+    return profile;
+}
+
+// The spectral reference is an explicit display model, not a measurement of the user's screen.
+// Standard RGB matrices below convert output encodings only; all working XYZ values use CIE 2015.
+// https://www.w3.org/TR/css-color-4/#color-conversion-code
+const ColourCore::SpectralPrimaryProfile& workingPrimaryProfile(const ColourSpace space) {
+    static const auto profiles = [] {
+        std::array<ColourCore::SpectralPrimaryProfile, 3> result{};
+        const auto& reference = referencePrimaryProfile();
+        for (const auto colourSpace : {ColourSpace::Rec2020, ColourSpace::DisplayP3, ColourSpace::SRGB}) {
+            const auto& encoding = outputProfileDefinition(colourSpace);
+            auto& profile = result[static_cast<std::size_t>(colourSpace)];
+            if (colourSpace == ColourSpace::Rec2020) { profile = reference; continue; }
+            profile.rgbToXYZ = multiplyMatrices(reference.rgbToXYZ, multiplyMatrices(
+                encodingMatrix(kRec2020Definition.encodingXYZToRgb), encodingMatrix(encoding.rgbToEncodingXYZ)));
+            profile.xyzToRgb = multiplyMatrices(multiplyMatrices(encodingMatrix(encoding.encodingXYZToRgb),
+                encodingMatrix(kRec2020Definition.rgbToEncodingXYZ)), reference.xyzToRgb);
+        }
+        return result;
+    }();
+    const auto index = static_cast<std::size_t>(space);
+    return profiles[index < profiles.size() ? index : static_cast<std::size_t>(ColourSpace::SRGB)];
+}
+
+std::array<float, 3> toEncodingXYZ(const float X, const float Y, const float Z) {
+    const auto rgb = ColourCore::projectWithPrimaryProfile({X,Y,Z}, referencePrimaryProfile());
+    return multiplyMatrix(kRec2020Definition.rgbToEncodingXYZ, rgb.r, rgb.g, rgb.b);
+}
+
+ColourCore::XYZ fromEncodingXYZ(const std::array<float, 3>& xyz) {
+    const auto rgb = multiplyMatrix(kRec2020Definition.encodingXYZToRgb, xyz[0], xyz[1], xyz[2]);
+    return ColourCore::reconstructWithPrimaryProfile({rgb[0],rgb[1],rgb[2]}, referencePrimaryProfile());
 }
 
 float encodeSrgb(const float value) {
@@ -255,92 +313,53 @@ float decodeTransferValue(const TransferFunction transfer, const float value) {
     }
 }
 
-void mixTowardsWhite(float& r, float& g, float& b) {
-    float mixFactor = 1.0f;
-    if (r < 0.0f) {
-        mixFactor = std::min(mixFactor, 1.0f / (1.0f - r));
-    }
-    if (g < 0.0f) {
-        mixFactor = std::min(mixFactor, 1.0f / (1.0f - g));
-    }
-    if (b < 0.0f) {
-        mixFactor = std::min(mixFactor, 1.0f / (1.0f - b));
-    }
-
-    if (mixFactor < 1.0f) {
-        const auto mixChannel = [mixFactor](const float channel) {
-            return 1.0f + mixFactor * (channel - 1.0f);
-        };
-
-        r = mixChannel(r);
-        g = mixChannel(g);
-        b = mixChannel(b);
-    }
-}
-
-void gamutMapRgb(float& r, float& g, float& b) {
-    const bool isOutOfGamut =
-        r < 0.0f || r > 1.0f ||
-        g < 0.0f || g > 1.0f ||
-        b < 0.0f || b > 1.0f;
-    if (!isOutOfGamut) {
-        return;
-    }
-
-    mixTowardsWhite(r, g, b);
-
-    const float maxComponent = std::max({r, g, b});
-    if (maxComponent > 1.0f && maxComponent > 0.0f) {
-        const float scale = 1.0f / maxComponent;
-        r *= scale;
-        g *= scale;
-        b *= scale;
-    }
-
-    r = std::clamp(r, 0.0f, 1.0f);
-    g = std::clamp(g, 0.0f, 1.0f);
-    b = std::clamp(b, 0.0f, 1.0f);
-}
-
-float soneFromLoudness(const float loudnessDb) {
-    const float relative = (loudnessDb - kPerceptualReferenceLufs) / 10.0f;
-    return std::pow(2.0f, relative);
-}
-
-float clampLoudnessDb(const float value) {
-    if (!std::isfinite(value)) {
-        return kMinLoudnessDb;
-    }
-    return std::clamp(value, kMinLoudnessDb, kMaxLoudnessDb);
-}
-
-float calculateLoudnessDbFromEnergy(const float totalEnergy, const size_t binCount) {
-    if (binCount == 0) {
+float calculateLoudnessDbFromSpectrum(std::span<const float> magnitudes, const ColourCore::SpectrumLayout* layout = nullptr) {
+    if (magnitudes.empty()) {
         return kMinLoudnessDb;
     }
 
-    const float meanSquare = totalEnergy / static_cast<float>(binCount);
-    if (meanSquare <= kRmsEpsilon) {
-        return kMinLoudnessDb;
+    double meanSquare = 0.0;
+    for (size_t i = 0; i < magnitudes.size(); ++i) {
+        const double magnitude = static_cast<double>(magnitudes[i]);
+        const double weight = layout != nullptr && layout->powerWeights.size() == magnitudes.size()
+            ? static_cast<double>(layout->powerWeights[i]) : (i == 0 || i + 1 == magnitudes.size() ? 1.0 : 0.5);
+        meanSquare += weight * magnitude * magnitude;
+    }
+    const size_t fftSize = layout != nullptr && layout->fftSize > 0 ? layout->fftSize :
+        (magnitudes.size() > 1 ? 2 * (magnitudes.size() - 1) : 1);
+    if (fftSize > 2) {
+        const double hannMeanSquare = 3.0 / 8.0 * static_cast<double>(fftSize - 1) /
+            static_cast<double>(fftSize);
+        meanSquare /= hannMeanSquare;
+    }
+    if (meanSquare <= 0.0) {
+        return -std::numeric_limits<float>::infinity();
     }
 
-    const float rms = std::sqrt(std::max(meanSquare, kRmsEpsilon));
-    return 20.0f * std::log10(std::max(rms, kRmsEpsilon));
+    return static_cast<float>(10.0 * std::log10(meanSquare));
+}
+
+float relativeLoudnessStrength(const float loudnessDb) {
+    return std::pow(2.0f, (loudnessDb - kPerceptualReferenceLufs) / 10.0f);
+}
+
+float clampLoudnessDb(float db) {
+    return std::isfinite(db) ? std::clamp(db, kMinLoudnessDb, kMaxLoudnessDb) : kMinLoudnessDb;
 }
 
 float normaliseLoudness(const float clampedDb) {
     return (clampedDb - kMinLoudnessDb) / (kMaxLoudnessDb - kMinLoudnessDb);
 }
 
-float logisticSone(const float sone) {
-    return sone / (sone + 1.0f);
+float logisticStrength(const float strength) {
+    return strength / (strength + 1.0f);
 }
 
 float loudnessToBrightness(const float clampedDb) {
-    const float soneValue = soneFromLoudness(clampedDb);
-    const float logisticValue = logisticSone(soneValue);
-    const float logisticMin = logisticSone(soneFromLoudness(kMinLoudnessDb));
-    const float logisticMax = logisticSone(soneFromLoudness(kMaxLoudnessDb));
+    const float relativeStrength = relativeLoudnessStrength(clampedDb);
+    const float logisticValue = logisticStrength(relativeStrength);
+    const float logisticMin = logisticStrength(relativeLoudnessStrength(kMinLoudnessDb));
+    const float logisticMax = logisticStrength(relativeLoudnessStrength(kMaxLoudnessDb));
 
     float normalised = 0.0f;
     if (logisticMax - logisticMin > kEpsilonSmall) {
@@ -348,90 +367,6 @@ float loudnessToBrightness(const float clampedDb) {
     }
     normalised = std::clamp(normalised, 0.0f, 1.0f);
     return std::pow(normalised, 1.1f);
-}
-
-float resolveBrightnessLoudnessDb(const float frameLoudnessDb,
-                                  const float slowLoudnessDb,
-                                  const float crestFactor,
-                                  float& transientMix) {
-    const float clampedFrame = clampLoudnessDb(frameLoudnessDb);
-    if (!std::isfinite(slowLoudnessDb)) {
-        transientMix = 1.0f;
-        return clampedFrame;
-    }
-
-    const float clampedSlow = clampLoudnessDb(slowLoudnessDb);
-    const float attackDb = std::max(0.0f, clampedFrame - clampedSlow);
-    const float crestMix = std::clamp((crestFactor - 1.5f) / 4.5f, 0.0f, 1.0f);
-    const float attackMix = std::clamp(attackDb / 12.0f, 0.0f, 1.0f);
-    transientMix = attackMix * (0.35f + 0.65f * crestMix);
-    return clampedSlow + transientMix * attackDb;
-}
-
-float normaliseLogFrequency(const float frequency) {
-    if (!std::isfinite(frequency) || frequency <= synesthesia::constants::MIN_AUDIO_FREQ) {
-        return 0.0f;
-    }
-
-    const float minLog = std::log(synesthesia::constants::MIN_AUDIO_FREQ);
-    const float maxLog = std::log(synesthesia::constants::MAX_AUDIO_FREQ);
-    const float freqLog = std::log(std::clamp(
-        frequency,
-        synesthesia::constants::MIN_AUDIO_FREQ,
-        synesthesia::constants::MAX_AUDIO_FREQ));
-
-    return std::clamp((freqLog - minLog) / std::max(maxLog - minLog, kEpsilonSmall), 0.0f, 1.0f);
-}
-
-float blendLogFrequencies(const float lhs, const float rhs, const float blend) {
-    const float clampedLhs = std::clamp(
-        std::isfinite(lhs) ? lhs : synesthesia::constants::MIN_AUDIO_FREQ,
-        synesthesia::constants::MIN_AUDIO_FREQ,
-        synesthesia::constants::MAX_AUDIO_FREQ);
-    const float clampedRhs = std::clamp(
-        std::isfinite(rhs) ? rhs : clampedLhs,
-        synesthesia::constants::MIN_AUDIO_FREQ,
-        synesthesia::constants::MAX_AUDIO_FREQ);
-
-    return std::exp(std::lerp(
-        std::log(clampedLhs),
-        std::log(clampedRhs),
-        std::clamp(blend, 0.0f, 1.0f)));
-}
-
-SpectralBandBalance calculateBandBalance(std::span<const float> magnitudes,
-                                         std::span<const float> frequencies) {
-    SpectralBandBalance balance{};
-    if (magnitudes.size() != frequencies.size()) {
-        return balance;
-    }
-
-    for (size_t i = 0; i < magnitudes.size(); ++i) {
-        const float magnitude = magnitudes[i];
-        const float frequency = frequencies[i];
-        if (!std::isfinite(magnitude) || !std::isfinite(frequency) || magnitude <= 0.0f) {
-            continue;
-        }
-
-        const float energy = magnitude * magnitude;
-        if (frequency < 220.0f) {
-            balance.low += energy;
-        } else if (frequency < 2200.0f) {
-            balance.mid += energy;
-        } else {
-            balance.high += energy;
-        }
-    }
-
-    const float total = balance.low + balance.mid + balance.high;
-    if (total <= kRmsEpsilon) {
-        return balance;
-    }
-
-    const float weightedLow = balance.low + 0.5f * balance.mid;
-    const float weightedHigh = balance.high + 0.5f * balance.mid;
-    balance.tilt = std::clamp((weightedHigh - weightedLow) / total, -1.0f, 1.0f);
-    return balance;
 }
 
 float calculateSpectralCentroid(std::span<const float> magnitudes,
@@ -444,7 +379,7 @@ float calculateSpectralCentroid(std::span<const float> magnitudes,
         const float frequency = frequencies[i];
         if (frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
             frequency > synesthesia::constants::MAX_AUDIO_FREQ ||
-            magnitude <= kEpsilonSmall) {
+            magnitude <= 0.0f) {
             continue;
         }
 
@@ -452,7 +387,7 @@ float calculateSpectralCentroid(std::span<const float> magnitudes,
         totalWeight += magnitude;
     }
 
-    return totalWeight > kEpsilonSmall ? weightedSum / totalWeight : 0.0f;
+    return totalWeight > 0.0f ? weightedSum / totalWeight : 0.0f;
 }
 
 float calculateSpectralSpread(std::span<const float> magnitudes,
@@ -466,7 +401,7 @@ float calculateSpectralSpread(std::span<const float> magnitudes,
         const float frequency = frequencies[i];
         if (frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
             frequency > synesthesia::constants::MAX_AUDIO_FREQ ||
-            magnitude <= kEpsilonSmall) {
+            magnitude <= 0.0f) {
             continue;
         }
 
@@ -475,29 +410,37 @@ float calculateSpectralSpread(std::span<const float> magnitudes,
         totalWeight += magnitude;
     }
 
-    return totalWeight > kEpsilonSmall ? std::sqrt(spreadSum / totalWeight) : 0.0f;
+    return totalWeight > 0.0f ? std::sqrt(spreadSum / totalWeight) : 0.0f;
 }
 
-float calculateSpectralFlatness(std::span<const float> magnitudes) {
-    float geometricSum = 0.0f;
-    float arithmeticSum = 0.0f;
-    int count = 0;
-
-    for (const float magnitude : magnitudes) {
-        if (magnitude > kEpsilonSmall) {
-            geometricSum += std::log(magnitude);
-            arithmeticSum += magnitude;
-            ++count;
+// https://librosa.org/doc/0.11.0/generated/librosa.feature.spectral_flatness.html
+float calculateSpectralFlatness(std::span<const float> magnitudes,
+                               std::span<const float> frequencies) {
+    double logSum = 0.0;
+    double powerSum = 0.0;
+    size_t count = 0;
+    bool hasZero = false;
+    for (size_t i = 0; i < magnitudes.size() && i < frequencies.size(); ++i) {
+        if (!std::isfinite(frequencies[i]) ||
+            frequencies[i] < synesthesia::constants::MIN_AUDIO_FREQ ||
+            frequencies[i] > synesthesia::constants::MAX_AUDIO_FREQ) {
+            continue;
+        }
+        const double magnitude = static_cast<double>(magnitudes[i]);
+        const double power = std::isfinite(magnitude) && magnitude > 0.0 ? magnitude * magnitude : 0.0;
+        powerSum += power;
+        ++count;
+        hasZero = hasZero || power == 0.0;
+        if (power > 0.0) {
+            logSum += std::log(power);
         }
     }
 
-    if (count == 0 || arithmeticSum < kEpsilonSmall) {
-        return 0.5f;
+    if (count == 0 || powerSum == 0.0 || hasZero) {
+        return 0.0f;
     }
-
-    const float geometricMean = std::exp(geometricSum / static_cast<float>(count));
-    const float arithmeticMean = arithmeticSum / static_cast<float>(count);
-    return geometricMean / arithmeticMean;
+    const double binCount = static_cast<double>(count);
+    return static_cast<float>(std::clamp(std::exp(logSum / binCount) / (powerSum / binCount), 0.0, 1.0));
 }
 
 float calculateSpectralRolloff(std::span<const float> magnitudes,
@@ -507,25 +450,30 @@ float calculateSpectralRolloff(std::span<const float> magnitudes,
         return 0.0f;
     }
 
-    float totalEnergy = 0.0f;
-    for (const float magnitude : magnitudes) {
-        totalEnergy += magnitude * magnitude;
-    }
-    if (totalEnergy < kEpsilonSmall) {
-        return 0.0f;
-    }
-
-    const float targetEnergy = totalEnergy * threshold;
-    float cumulativeEnergy = 0.0f;
-
+    std::vector<std::pair<float, double>> frequencyPowers;
+    frequencyPowers.reserve(magnitudes.size());
+    double totalEnergy = 0.0;
     for (size_t i = 0; i < magnitudes.size(); ++i) {
-        cumulativeEnergy += magnitudes[i] * magnitudes[i];
-        if (cumulativeEnergy >= targetEnergy) {
-            return frequencies[i];
-        }
+        if (!std::isfinite(magnitudes[i]) || magnitudes[i] <= 0.0f || !std::isfinite(frequencies[i]) ||
+            frequencies[i] < synesthesia::constants::MIN_AUDIO_FREQ ||
+            frequencies[i] > synesthesia::constants::MAX_AUDIO_FREQ) continue;
+        const double magnitude = static_cast<double>(magnitudes[i]);
+        const double power = magnitude * magnitude;
+        totalEnergy += power;
+        frequencyPowers.emplace_back(frequencies[i], power);
     }
-
-    return frequencies.back();
+    if (totalEnergy <= 0.0) return 0.0f;
+    const auto byFrequency = [](const auto& left, const auto& right) { return left.first < right.first; };
+    if (!std::is_sorted(frequencyPowers.begin(), frequencyPowers.end(), byFrequency)) {
+        std::sort(frequencyPowers.begin(), frequencyPowers.end(), byFrequency);
+    }
+    const double targetEnergy = totalEnergy * static_cast<double>(threshold);
+    double cumulativeEnergy = 0.0;
+    for (const auto& [frequency, power] : frequencyPowers) {
+        cumulativeEnergy += power;
+        if (cumulativeEnergy >= targetEnergy) return frequency;
+    }
+    return frequencyPowers.back().first;
 }
 
 float calculateSpectralCrestFactor(std::span<const float> magnitudes,
@@ -534,46 +482,20 @@ float calculateSpectralCrestFactor(std::span<const float> magnitudes,
     if (magnitudes.empty() ||
         !std::isfinite(maxMagnitude) ||
         !std::isfinite(totalEnergy) ||
-        maxMagnitude < kEpsilonSmall ||
-        totalEnergy < kEpsilonSmall) {
+        maxMagnitude <= 0.0f ||
+        totalEnergy <= 0.0f) {
         return 1.0f;
     }
 
     const float rms = std::sqrt(totalEnergy / static_cast<float>(magnitudes.size()));
-    if (!std::isfinite(rms) || rms < kEpsilonSmall) {
+    if (!std::isfinite(rms) || rms <= 0.0f) {
         return 1.0f;
     }
 
     return maxMagnitude / rms;
 }
 
-ColourCore::XYZ integrateSpectrum2006(std::span<const float> magnitudes,
-                                      std::span<const float> frequencies) {
-    ColourCore::XYZ total{};
-
-    for (size_t i = 0; i < magnitudes.size() && i < frequencies.size(); ++i) {
-        const float magnitude = magnitudes[i];
-        const float frequency = frequencies[i];
-        if (frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
-            frequency > synesthesia::constants::MAX_AUDIO_FREQ ||
-            magnitude <= kEpsilonSmall) {
-            continue;
-        }
-
-        const float wavelength = ColourCore::logFrequencyToWavelength(frequency);
-        float X = 0.0f;
-        float Y = 0.0f;
-        float Z = 0.0f;
-        ColourCore::interpolateCIE(wavelength, X, Y, Z);
-
-        total.X += magnitude * X;
-        total.Y += magnitude * Y;
-        total.Z += magnitude * Z;
-    }
-
-    return total;
-}
-
+// https://colour.readthedocs.io/en/master/_modules/colour/appearance/hke.html
 float helmholtzKohlrauschCorrection(const float X,
                                     const float Y,
                                     const float Z,
@@ -585,8 +507,8 @@ float helmholtzKohlrauschCorrection(const float X,
 
     const float uPrime = 4.0f * X / sum;
     const float vPrime = 9.0f * Y / sum;
-    const float du = uPrime - kD50UPrime;
-    const float dv = vPrime - kD50VPrime;
+    const float du = uPrime - (4.0f * kD65White.X / (kD65White.X + 15.0f + 3.0f * kD65White.Z));
+    const float dv = vPrime - (9.0f / (kD65White.X + 15.0f + 3.0f * kD65White.Z));
 
     const float suv = 13.0f * std::sqrt(du * du + dv * dv);
     if (suv < kEpsilonSmall) {
@@ -608,8 +530,8 @@ float helmholtzKohlrauschCorrection(const float X,
         - 0.03017f * cosT - 0.04556f * cos2T - 0.02667f * cos3T - 0.00295f * cos4T
         + 0.14592f * sinT + 0.05084f * sin2T - 0.01900f * sin3T - 0.00764f * sin4T;
 
-    constexpr float laPow = 7.9250f;
-    constexpr float kBr = 0.2717f * (6.469f + 6.362f * laPow) / (6.469f + laPow);
+    const float laPow = std::pow(synesthesia::constants::HK_ADAPTING_LUMINANCE, 0.4495f);
+    const float kBr = 0.2717f * (6.469f + 6.362f * laPow) / (6.469f + laPow);
 
     const float inner = 1.0f + (-0.8660f * q + 0.0872f * kBr) * suv + 0.3086f;
     const float vcc = 0.4462f * inner * inner * inner;
@@ -619,55 +541,7 @@ float helmholtzKohlrauschCorrection(const float X,
     return 1.0f + clampedStrength * (clampedVcc - 1.0f);
 }
 
-void applyPhaseInfluence(FrameResult& result,
-                         const PhaseAnalysis::PhaseFeatureMetrics* phaseMetrics,
-                         const OutputSettings& outputSettings) {
-    if (phaseMetrics == nullptr) {
-        return;
-    }
-
-    result.phaseInstabilityNorm = phaseMetrics->instabilityNorm;
-    result.phaseCoherenceNorm = phaseMetrics->coherenceNorm;
-    result.phaseTransientNorm = phaseMetrics->transientNorm;
-
-    if (phaseMetrics->isNeutral()) {
-        return;
-    }
-
-    float oklabL = 0.0f;
-    float oklabA = 0.0f;
-    float oklabB = 0.0f;
-    ColourCore::XYZtoOklab(result.X, result.Y, result.Z, oklabL, oklabA, oklabB);
-
-    const float coherence = std::clamp(phaseMetrics->coherenceNorm, 0.0f, 1.0f);
-    const float instability = std::clamp(phaseMetrics->instabilityNorm, 0.0f, 1.0f);
-    const float transient = std::clamp(phaseMetrics->transientNorm, 0.0f, 1.0f);
-    const float stableWarmth = coherence * (1.0f - instability);
-    const float unstableCoolness = instability * (1.0f - 0.3f * coherence);
-    const float chromaScale = std::clamp(
-        1.0f + 0.06f * stableWarmth - 0.05f * unstableCoolness,
-        0.92f,
-        1.08f);
-
-    oklabA = oklabA * chromaScale + stableWarmth * 1.0f - unstableCoolness * 0.6f;
-    oklabB = oklabB * chromaScale + stableWarmth * 0.6f - unstableCoolness * 1.4f;
-    oklabL = std::clamp(
-        oklabL + transient * (1.5f + 2.5f * std::clamp(result.brightnessNormalised, 0.0f, 1.0f)) - unstableCoolness * 0.6f,
-        0.0f,
-        100.0f);
-
-    ColourCore::OklabtoXYZ(oklabL, oklabA, oklabB, result.X, result.Y, result.Z);
-    ColourCore::XYZtoLab(result.X, result.Y, result.Z, result.L, result.a, result.b_comp);
-    ColourCore::XYZtoRGB(result.X, result.Y, result.Z,
-                         result.r, result.g, result.b,
-                         outputSettings.colourSpace,
-                         true,
-                         outputSettings.applyGamutMapping);
-    result.luminanceCdM2 =
-        std::max(0.0f, result.Y) * synesthesia::constants::REFERENCE_WHITE_LUMINANCE_CDM2;
 }
-
-} // namespace
 
 namespace ColourCore {
 
@@ -679,8 +553,155 @@ WhitePoint D65White() {
     return kD65White;
 }
 
+
+// https://www.fhwa.dot.gov/Environment/noise/measurement/handbook.cfm
+float soundPressureLevel(const float rmsPascals) {
+    if (!std::isfinite(rmsPascals) || rmsPascals < 0.0f) return std::numeric_limits<float>::quiet_NaN();
+    return static_cast<float>(20.0 * std::log10(static_cast<double>(rmsPascals) / 20e-6));
+}
+
+// https://www.color.org/technotes/ICC_TN-06-2025_Recommendations_on_calculation_of_tristimulus_values.pdf
+SpectralMeasurement measureSpectrum(std::span<const float> magnitudes, std::span<const float> frequencies,
+    ColourPresentation::SpectralContributions* contributions) {
+    struct ObserverWeights {
+        std::vector<float> frequencies;
+        std::vector<std::array<float, 3>> values;
+        std::vector<bool> valid;
+        std::vector<double> bandPositions;
+    };
+    thread_local ObserverWeights cached;
+    if (cached.frequencies.size() != frequencies.size() ||
+        !std::equal(frequencies.begin(), frequencies.end(), cached.frequencies.begin())) {
+        cached.frequencies.assign(frequencies.begin(), frequencies.end());
+        cached.values.resize(frequencies.size());
+        cached.valid.assign(frequencies.size(), false);
+        cached.bandPositions.resize(frequencies.size());
+        for (std::size_t i = 0; i < frequencies.size(); ++i) {
+            const float frequency = frequencies[i];
+            if (!std::isfinite(frequency) || frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
+                frequency > synesthesia::constants::MAX_AUDIO_FREQ) continue;
+            const float wavelength = logFrequencyToWavelength(frequency);
+            auto& weights = cached.values[i];
+            interpolateCIE(wavelength, weights[0], weights[1], weights[2]);
+            cached.valid[i] = true;
+            cached.bandPositions[i] = ColourPresentation::contributionBandPosition(static_cast<double>(frequency));
+        }
+    }
+    std::array<double, 3> integrated{};
+    std::array<std::array<double, 4>, ColourPresentation::contributionBandCount> bands{};
+    if (contributions) contributions->clear();
+    double totalWeight = 0.0;
+    for (std::size_t i = 0; i < std::min(magnitudes.size(), frequencies.size()); ++i) {
+        const double weight = static_cast<double>(magnitudes[i]);
+        if (!std::isfinite(weight) || weight <= 0.0 || !cached.valid[i]) continue;
+        const auto& values = cached.values[i];
+        for (std::size_t component = 0; component < 3; ++component) {
+            integrated[component] += weight * static_cast<double>(values[component]);
+        }
+        if (contributions) {
+            const double position = std::clamp(cached.bandPositions[i], 0.0,
+                static_cast<double>(ColourPresentation::contributionBandCount - 1));
+            const auto left = static_cast<std::size_t>(position);
+            const auto right = std::min(left + 1, ColourPresentation::contributionBandCount - 1);
+            const double fraction = position - static_cast<double>(left);
+            for (std::size_t component = 0; component < 3; ++component) {
+                const double value = weight * static_cast<double>(values[component]);
+                bands[left][component] += (1.0 - fraction) * value;
+                bands[right][component] += fraction * value;
+            }
+            bands[left][3] += (1.0 - fraction) * weight;
+            bands[right][3] += fraction * weight;
+        }
+        totalWeight += weight;
+    }
+    if (contributions && totalWeight > 0.0) {
+        for (std::size_t i = 0; i < bands.size(); ++i) {
+            if (bands[i][3] <= 0.0) continue;
+            ColourPresentation::SpectralContribution band;
+            band.band = static_cast<std::uint16_t>(i);
+            for (std::size_t component = 0; component < 3; ++component)
+                band.xyz[component] = static_cast<float>(bands[i][component] / totalWeight);
+            band.magnitude = static_cast<float>(bands[i][3]);
+            contributions->push_back(band);
+        }
+    }
+    SpectralMeasurement result{};
+    if (totalWeight > 0.0) {
+        result.xyz = {static_cast<float>(integrated[0] / totalWeight),
+            static_cast<float>(integrated[1] / totalWeight), static_cast<float>(integrated[2] / totalWeight)};
+        result.available = true;
+    }
+    return result;
+}
+
+XYZ integrateEmission(std::span<const float> emissionAtOneNm) {
+    if (emissionAtOneNm.size() != Colour::CIE2015::kTableSize) {
+        throw std::invalid_argument("Expected 441 spectral samples from 390 to 830 nm");
+    }
+    std::array<double, 3> xyz{};
+    for (size_t i = 0; i < emissionAtOneNm.size(); ++i) {
+        const double emission = static_cast<double>(emissionAtOneNm[i]);
+        if (!std::isfinite(emission) || emission < 0.0) {
+            throw std::invalid_argument("Spectral emission must be finite and non-negative");
+        }
+        for (size_t component = 0; component < 3; ++component) {
+            xyz[component] += emission * static_cast<double>(Colour::CIE2015::kTable[i][component + 1]);
+        }
+    }
+    return {static_cast<float>(xyz[0]), static_cast<float>(xyz[1]), static_cast<float>(xyz[2])};
+}
+
+SpectralPrimaryProfile makeSpectralPrimaryProfile(std::span<const float> redAtOneNm,
+                                             std::span<const float> greenAtOneNm,
+                                             std::span<const float> blueAtOneNm) {
+    const std::array<XYZ, 3> primaries{integrateEmission(redAtOneNm),
+        integrateEmission(greenAtOneNm), integrateEmission(blueAtOneNm)};
+    const double whiteY = static_cast<double>(primaries[0].Y) + static_cast<double>(primaries[1].Y) + static_cast<double>(primaries[2].Y);
+    if (!std::isfinite(whiteY) || whiteY <= 0.0) {
+        throw std::invalid_argument("Primary spectra must produce a positive finite white luminance");
+    }
+    SpectralPrimaryProfile profile{};
+    auto& m = profile.rgbToXYZ;
+    for (size_t c = 0; c < 3; ++c) {
+        m[c] = static_cast<double>(primaries[c].X) / whiteY;
+        m[3 + c] = static_cast<double>(primaries[c].Y) / whiteY;
+        m[6 + c] = static_cast<double>(primaries[c].Z) / whiteY;
+    }
+    const double det = m[0] * (m[4] * m[8] - m[5] * m[7]) -
+        m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6]);
+    const double scale = std::max({std::abs(m[0]) + std::abs(m[1]) + std::abs(m[2]),
+        std::abs(m[3]) + std::abs(m[4]) + std::abs(m[5]), std::abs(m[6]) + std::abs(m[7]) + std::abs(m[8])});
+    if (!std::isfinite(det) || std::abs(det) <= 1e-12 * scale * scale * scale) {
+        throw std::invalid_argument("Primary spectra form a singular or ill-conditioned colour basis");
+    }
+    auto& inv = profile.xyzToRgb;
+    inv = {(m[4]*m[8]-m[5]*m[7])/det, (m[2]*m[7]-m[1]*m[8])/det, (m[1]*m[5]-m[2]*m[4])/det,
+           (m[5]*m[6]-m[3]*m[8])/det, (m[0]*m[8]-m[2]*m[6])/det, (m[2]*m[3]-m[0]*m[5])/det,
+           (m[3]*m[7]-m[4]*m[6])/det, (m[1]*m[6]-m[0]*m[7])/det, (m[0]*m[4]-m[1]*m[3])/det};
+    const double inverseScale = std::max({std::abs(inv[0])+std::abs(inv[1])+std::abs(inv[2]),
+        std::abs(inv[3])+std::abs(inv[4])+std::abs(inv[5]), std::abs(inv[6])+std::abs(inv[7])+std::abs(inv[8])});
+    if (scale * inverseScale > 1e8) {
+        throw std::invalid_argument("Primary spectra form an ill-conditioned colour basis");
+    }
+    return profile;
+}
+
+RGB projectWithPrimaryProfile(const XYZ& xyz, const SpectralPrimaryProfile& profile) {
+    const auto& m = profile.xyzToRgb;
+    return {static_cast<float>(m[0]*static_cast<double>(xyz.X) + m[1]*static_cast<double>(xyz.Y) + m[2]*static_cast<double>(xyz.Z)),
+        static_cast<float>(m[3]*static_cast<double>(xyz.X) + m[4]*static_cast<double>(xyz.Y) + m[5]*static_cast<double>(xyz.Z)),
+        static_cast<float>(m[6]*static_cast<double>(xyz.X) + m[7]*static_cast<double>(xyz.Y) + m[8]*static_cast<double>(xyz.Z))};
+}
+
+XYZ reconstructWithPrimaryProfile(const RGB& rgb, const SpectralPrimaryProfile& profile) {
+    const auto& m = profile.rgbToXYZ;
+    return {static_cast<float>(m[0]*static_cast<double>(rgb.r) + m[1]*static_cast<double>(rgb.g) + m[2]*static_cast<double>(rgb.b)),
+        static_cast<float>(m[3]*static_cast<double>(rgb.r) + m[4]*static_cast<double>(rgb.g) + m[5]*static_cast<double>(rgb.b)),
+        static_cast<float>(m[6]*static_cast<double>(rgb.r) + m[7]*static_cast<double>(rgb.g) + m[8]*static_cast<double>(rgb.b))};
+}
+
 void interpolateCIE(const float wavelength, float& X, float& Y, float& Z) {
-    Colour::CIE2006::interpolate(wavelength, X, Y, Z);
+    Colour::CIE2015::interpolate(wavelength, X, Y, Z);
 }
 
 float logFrequencyToWavelength(const float frequency) {
@@ -716,114 +737,92 @@ float wavelengthToLogFrequency(const float wavelengthIn) {
         std::isfinite(wavelengthIn) ? wavelengthIn : maxWavelength,
         minWavelength,
         maxWavelength);
+    if (wavelength == maxWavelength) return synesthesia::constants::MIN_AUDIO_FREQ;
+    if (wavelength == minWavelength) return synesthesia::constants::MAX_AUDIO_FREQ;
     const float t = (maxWavelength - wavelength) / (maxWavelength - minWavelength);
     const float minLog = std::log2(synesthesia::constants::MIN_AUDIO_FREQ);
     const float maxLog = std::log2(synesthesia::constants::MAX_AUDIO_FREQ);
-    return std::pow(2.0f, minLog + t * (maxLog - minLog));
+    return std::clamp(std::pow(2.0f, minLog + t * (maxLog - minLog)),
+        synesthesia::constants::MIN_AUDIO_FREQ, synesthesia::constants::MAX_AUDIO_FREQ);
 }
 
 float chromaticDominantWavelength(const float X, const float Y, const float Z) {
-    const float sum = X + Y + Z;
-    if (!std::isfinite(sum) || sum <= 0.0f) {
-        return synesthesia::constants::MAX_WAVELENGTH_NM;
-    }
-
-    const float x = X / sum;
-    const float y = Y / sum;
-
-    const float whiteSum = kD50White.X + kD50White.Y + kD50White.Z;
-    const float whiteX = kD50White.X / whiteSum;
-    const float whiteY = kD50White.Y / whiteSum;
-
-    const float rayDx = x - whiteX;
-    const float rayDy = y - whiteY;
-    const float rayLengthSquared = rayDx * rayDx + rayDy * rayDy;
-    if (rayLengthSquared < kEpsilonTiny) {
-        return synesthesia::constants::MAX_WAVELENGTH_NM;
-    }
-
-    bool found = false;
-    float bestT = std::numeric_limits<float>::max();
-    float bestWavelength = synesthesia::constants::MAX_WAVELENGTH_NM;
-
-    auto chromaticityAt = [](const float wavelength) {
-        float sampleX = 0.0f;
-        float sampleY = 0.0f;
-        float sampleZ = 0.0f;
-        ColourCore::interpolateCIE(wavelength, sampleX, sampleY, sampleZ);
-        const float sampleSum = sampleX + sampleY + sampleZ;
-        if (sampleSum <= 0.0f) {
-            return std::array<float, 2>{0.0f, 0.0f};
+    // https://ies.org/definitions/dominant-wavelength-of-a-color-stimulus/
+    const double sum = static_cast<double>(X) + static_cast<double>(Y) + static_cast<double>(Z);
+    if (!std::isfinite(sum) || sum <= 0.0) return 0.0f;
+    const double x = static_cast<double>(X) / sum, y = static_cast<double>(Y) / sum;
+    const double whiteSum = static_cast<double>(kD65White.X) + static_cast<double>(kD65White.Y) + static_cast<double>(kD65White.Z);
+    const double wx = static_cast<double>(kD65White.X) / whiteSum, wy = static_cast<double>(kD65White.Y) / whiteSum;
+    const double dx = x - wx, dy = y - wy;
+    if (std::hypot(dx, dy) < 1e-7) return 0.0f;
+    struct Vertex { double x, y, sum; };
+    static const auto locus = [] {
+        std::array<Vertex, Colour::CIE2015::kTableSize> result{};
+        for (size_t i = 0; i < result.size(); ++i) {
+            const auto& row = Colour::CIE2015::kTable[i];
+            const double total = static_cast<double>(row[1]) + static_cast<double>(row[2]) + static_cast<double>(row[3]);
+            result[i] = {static_cast<double>(row[1]) / total, static_cast<double>(row[2]) / total, total};
         }
-        return std::array<float, 2>{sampleX / sampleSum, sampleY / sampleSum};
-    };
-
-    for (int wavelength = 390; wavelength < 830; ++wavelength) {
-        const auto c0 = chromaticityAt(static_cast<float>(wavelength));
-        const auto c1 = chromaticityAt(static_cast<float>(wavelength + 1));
-
-        const float segDx = c1[0] - c0[0];
-        const float segDy = c1[1] - c0[1];
-        const float det = rayDx * (-segDy) - rayDy * (-segDx);
-        if (std::abs(det) < kEpsilonTiny) {
-            continue;
-        }
-
-        const float px = c0[0] - whiteX;
-        const float py = c0[1] - whiteY;
-        const float t = (px * (-segDy) - py * (-segDx)) / det;
-        const float u = (rayDx * py - rayDy * px) / det;
-
-        if (t >= 0.0f && u >= 0.0f && u <= 1.0f && t < bestT) {
-            found = true;
-            bestT = t;
-            bestWavelength = std::clamp(
-                std::lerp(static_cast<float>(wavelength), static_cast<float>(wavelength + 1), u),
-                synesthesia::constants::MIN_WAVELENGTH_NM,
-                synesthesia::constants::MAX_WAVELENGTH_NM);
-        }
-    }
-
-    if (found) {
-        return bestWavelength;
-    }
-
-    const float rayLength = std::sqrt(rayLengthSquared);
-    float bestCosine = -1.0f;
-    float bestDistance = std::numeric_limits<float>::max();
-
+        return result;
+    }();
+    const auto at = [](int wavelength) { return locus[static_cast<size_t>(wavelength - 390)]; };
     for (int wavelength = 390; wavelength <= 830; ++wavelength) {
-        const auto chromaticity = chromaticityAt(static_cast<float>(wavelength));
-        const float vecX = chromaticity[0] - whiteX;
-        const float vecY = chromaticity[1] - whiteY;
-        const float vectorLength = std::sqrt(vecX * vecX + vecY * vecY);
-        if (vectorLength < kEpsilonSmall) {
-            continue;
-        }
-
-        const float dot = rayDx * vecX + rayDy * vecY;
-        const float cosine = dot / (rayLength * vectorLength);
-        if (!std::isfinite(cosine) || cosine < 0.0f) {
-            continue;
-        }
-
-        const float cross = rayDx * vecY - rayDy * vecX;
-        const float distance = std::abs(cross) / vectorLength;
-        if (cosine > bestCosine ||
-            (std::abs(cosine - bestCosine) < 1e-4f && distance < bestDistance)) {
-            bestCosine = cosine;
-            bestDistance = distance;
-            bestWavelength = static_cast<float>(wavelength);
+        const auto v = at(wavelength);
+        if (std::hypot(x - v.x, y - v.y) < 1e-12) return static_cast<float>(wavelength);
+    }
+    double closestDistance = std::numeric_limits<double>::infinity();
+    float closestWavelength = 0.0f;
+    for (int wavelength = 390; wavelength < 830; ++wavelength) {
+        const auto a = at(wavelength), b = at(wavelength + 1);
+        const double sx = b.x - a.x, sy = b.y - a.y;
+        const double lengthSquared = sx * sx + sy * sy;
+        if (lengthSquared == 0.0) continue;
+        const double u = std::clamp(((x - a.x) * sx + (y - a.y) * sy) / lengthSquared, 0.0, 1.0);
+        const double distance = std::hypot(x - a.x - u * sx, y - a.y - u * sy);
+        if (distance < closestDistance - 1e-12) {
+            closestDistance = distance;
+            closestWavelength = static_cast<float>(wavelength + u * a.sum / ((1.0 - u) * b.sum + u * a.sum));
         }
     }
-
-    return bestWavelength;
+    if (closestDistance < 5e-8) return closestWavelength;
+    const auto intersect = [&](Vertex a, Vertex b, double direction, double& t, double& u) {
+        const double sx = b.x - a.x, sy = b.y - a.y;
+        const double rx = direction * dx, ry = direction * dy;
+        const double determinant = rx * sy - ry * sx;
+        if (std::abs(determinant) < 1e-15 * std::hypot(rx, ry)) return false;
+        const double px = a.x - wx, py = a.y - wy;
+        t = (px * sy - py * sx) / determinant;
+        u = (px * ry - py * rx) / determinant;
+        return t >= 0.0 && u >= -1e-7 && u <= 1.0 + 1e-7;
+    };
+    const auto spectralHit = [&](double direction, double& bestT) {
+        float wavelengthResult = 0.0f;
+        bestT = std::numeric_limits<double>::infinity();
+        for (int wavelength = 390; wavelength < 830; ++wavelength) {
+            const auto a = at(wavelength), b = at(wavelength + 1);
+            double t, u;
+            if (intersect(a, b, direction, t, u) && t < bestT) {
+                bestT = t;
+                u = std::clamp(u, 0.0, 1.0);
+                const double fraction = u * a.sum / ((1.0 - u) * b.sum + u * a.sum);
+                wavelengthResult = static_cast<float>(wavelength + fraction);
+            }
+        }
+        return wavelengthResult;
+    };
+    double spectralT;
+    const float wavelength = spectralHit(1.0, spectralT);
+    double purpleT, purpleU;
+    const bool purpleHit = intersect(at(830), at(390), 1.0, purpleT, purpleU);
+    if (wavelength > 0.0f && (!purpleHit || spectralT <= purpleT + 1e-7)) return wavelength;
+    if (!purpleHit) return 0.0f;
+    return -spectralHit(-1.0, spectralT);
 }
 
-void XYZtoLab(const float X, const float Y, const float Z, float& L, float& a, float& bValue) {
-    const float xr = kD50White.X > 0.0f ? X / kD50White.X : 0.0f;
-    const float yr = kD50White.Y > 0.0f ? Y / kD50White.Y : 0.0f;
-    const float zr = kD50White.Z > 0.0f ? Z / kD50White.Z : 0.0f;
+void relativeXYZtoLab(const float X, const float Y, const float Z, float& L, float& a, float& bValue, const WhitePoint white) {
+    const float xr = white.X > 0.0f ? X / white.X : 0.0f;
+    const float yr = white.Y > 0.0f ? Y / white.Y : 0.0f;
+    const float zr = white.Z > 0.0f ? Z / white.Z : 0.0f;
 
     auto f = [](const float value) {
         constexpr float epsilon = synesthesia::constants::LAB_EPSILON;
@@ -840,7 +839,7 @@ void XYZtoLab(const float X, const float Y, const float Z, float& L, float& a, f
     bValue = 200.0f * (fy - fz);
 }
 
-void LabtoXYZ(const float L, const float a, const float bValue, float& X, float& Y, float& Z) {
+void relativeLabtoXYZ(const float L, const float a, const float bValue, float& X, float& Y, float& Z, const WhitePoint white) {
     const float fY = (L + 16.0f) / 116.0f;
     const float fX = fY + a / 500.0f;
     const float fZ = fY - bValue / 200.0f;
@@ -851,13 +850,24 @@ void LabtoXYZ(const float L, const float a, const float bValue, float& X, float&
         return value > delta ? std::pow(value, 3.0f) : 3.0f * deltaSquared * (value - 4.0f / 29.0f);
     };
 
-    X = kD50White.X * inverse(fX);
-    Y = kD50White.Y * inverse(fY);
-    Z = kD50White.Z * inverse(fZ);
+    X = white.X * inverse(fX);
+    Y = white.Y * inverse(fY);
+    Z = white.Z * inverse(fZ);
+}
+
+void XYZtoLab(const float X, const float Y, const float Z, float& L, float& a, float& bValue) {
+    // Lab is relative to the same CIE 2015 D65 white as the working tristimulus values.
+    relativeXYZtoLab(X, Y, Z, L, a, bValue, kD65White);
+}
+
+void LabtoXYZ(const float L, const float a, const float bValue, float& X, float& Y, float& Z) {
+    relativeLabtoXYZ(L, a, bValue, X, Y, Z, kD65White);
 }
 
 void XYZtoOklab(const float X, const float Y, const float Z, float& L, float& a, float& bValue) {
-    const auto lms = multiplyMatrix(kXYZToOklabLms, X, Y, Z);
+    // Oklab's published basis is reached through the reference RGB model, rather than reinterpreting working XYZ.
+    const auto encoding = toEncodingXYZ(X,Y,Z);
+    const auto lms = multiplyMatrix(kEncodingXYZToOklabLms, encoding[0], encoding[1], encoding[2]);
     const float l = std::cbrt(lms[0]);
     const float m = std::cbrt(lms[1]);
     const float s = std::cbrt(lms[2]);
@@ -871,10 +881,10 @@ void OklabtoXYZ(const float L, const float a, const float bValue, float& X, floa
     const float l = L / 100.0f + 0.3963377773761749f * (a / 100.0f) + 0.2158037573099136f * (bValue / 100.0f);
     const float m = L / 100.0f - 0.1055613458156586f * (a / 100.0f) - 0.0638541728258133f * (bValue / 100.0f);
     const float s = L / 100.0f - 0.0894841775298119f * (a / 100.0f) - 1.2914855480194092f * (bValue / 100.0f);
-    const auto xyz = multiplyMatrix(kOklabLmsToXYZ, l * l * l, m * m * m, s * s * s);
-    X = xyz[0];
-    Y = xyz[1];
-    Z = xyz[2];
+    const auto xyz = fromEncodingXYZ(multiplyMatrix(kOklabLmsToEncodingXYZ, l * l * l, m * m * m, s * s * s));
+    X = xyz.X;
+    Y = xyz.Y;
+    Z = xyz.Z;
 }
 
 void RGBtoXYZ(const float r, const float g, const float b, float& X, float& Y, float& Z,
@@ -883,10 +893,10 @@ void RGBtoXYZ(const float r, const float g, const float b, float& X, float& Y, f
     const float linearR = decodeTransferValue(definition.transfer, r);
     const float linearG = decodeTransferValue(definition.transfer, g);
     const float linearB = decodeTransferValue(definition.transfer, b);
-    const auto xyz = multiplyMatrix(definition.rgbToXyz, linearR, linearG, linearB);
-    X = xyz[0];
-    Y = xyz[1];
-    Z = xyz[2];
+    const auto xyz = reconstructWithPrimaryProfile({linearR,linearG,linearB}, workingPrimaryProfile(colourSpace));
+    X = xyz.X;
+    Y = xyz.Y;
+    Z = xyz.Z;
 }
 
 void XYZtoRGB(const float X, const float Y, const float Z,
@@ -895,30 +905,54 @@ void XYZtoRGB(const float X, const float Y, const float Z,
               const bool applyGamma,
               const bool applyGamutMapping) {
     const auto& definition = outputProfileDefinition(colourSpace);
-    const auto linearRgb = multiplyMatrix(definition.xyzToRgb, X, Y, Z);
+    const auto& matrix = workingPrimaryProfile(colourSpace).xyzToRgb;
+    const std::array<double,3> linearRgb{
+        static_cast<double>(matrix[0]) * X + static_cast<double>(matrix[1]) * Y + static_cast<double>(matrix[2]) * Z,
+        static_cast<double>(matrix[3]) * X + static_cast<double>(matrix[4]) * Y + static_cast<double>(matrix[5]) * Z,
+        static_cast<double>(matrix[6]) * X + static_cast<double>(matrix[7]) * Y + static_cast<double>(matrix[8]) * Z};
 
-    float linearR = linearRgb[0];
-    float linearG = linearRgb[1];
-    float linearB = linearRgb[2];
+    double linearR = linearRgb[0];
+    double linearG = linearRgb[1];
+    double linearB = linearRgb[2];
 
+    // https://www.w3.org/TR/css-color-4/#interpolation-space
+    // https://bottosson.github.io/posts/gamutclipping/#choosing-which-line-to-project-along
+    // https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.logsumexp.html
     if (applyGamutMapping) {
-        mixTowardsWhite(linearR, linearG, linearB);
-        gamutMapRgb(linearR, linearG, linearB);
-        linearR = std::clamp(linearR, 0.0f, 1.0f);
-        linearG = std::clamp(linearG, 0.0f, 1.0f);
-        linearB = std::clamp(linearB, 0.0f, 1.0f);
+        if (!std::isfinite(X) || !std::isfinite(Y) || !std::isfinite(Z) || Y <= 0.0f) {
+            linearR = linearG = linearB = 0.0f;
+        } else {
+            const double luminance = Y;
+            const std::array<double,4> distances{0.0, -linearR / luminance, -linearG / luminance, -linearB / luminance};
+            const double maximum = *std::max_element(distances.begin(), distances.end());
+            if (maximum > 0.0) {
+                // Taper the soft maximum to zero at the boundary so in-gamut colours are unchanged and the mapping stays continuous.
+                const double boundarySoftness = std::min(.02, maximum);
+                double sum = 0.0;
+                for (const double distance : distances) sum += std::exp((distance - maximum) / boundarySoftness);
+                const double negativeExtent = maximum + boundarySoftness * std::log(sum);
+                const double proportion = 1.0 / (1.0 + negativeExtent);
+                linearR = luminance + proportion * (linearR - luminance);
+                linearG = luminance + proportion * (linearG - luminance);
+                linearB = luminance + proportion * (linearB - luminance);
+            }
+            const double peak = std::max({1.0, linearR, linearG, linearB});
+            linearR = std::clamp(linearR / peak, 0.0, 1.0);
+            linearG = std::clamp(linearG / peak, 0.0, 1.0);
+            linearB = std::clamp(linearB / peak, 0.0, 1.0);
+        }
     }
 
     if (!applyGamma) {
-        r = linearR;
-        g = linearG;
-        b = linearB;
+        r = static_cast<float>(linearR);
+        g = static_cast<float>(linearG);
+        b = static_cast<float>(linearB);
         return;
     }
 
-    r = encodeTransferValue(definition.transfer, linearR);
-    g = encodeTransferValue(definition.transfer, linearG);
-    b = encodeTransferValue(definition.transfer, linearB);
+    r = encodeTransferValue(definition.transfer, static_cast<float>(linearR));
+    g = encodeTransferValue(definition.transfer, static_cast<float>(linearG));
+    b = encodeTransferValue(definition.transfer, static_cast<float>(linearB));
 
     if (applyGamutMapping) {
         r = std::clamp(r, 0.0f, 1.0f);
@@ -962,6 +996,12 @@ RGB projectToRGB(const XYZ& xyz, const OutputSettings& settings) {
     return rgb;
 }
 
+RGB encodeRGB(const RGB& linear, const ColourSpace colourSpace) {
+    const auto transfer = outputProfileDefinition(colourSpace).transfer;
+    return {encodeTransferValue(transfer, linear.r), encodeTransferValue(transfer, linear.g),
+        encodeTransferValue(transfer, linear.b)};
+}
+
 const VideoProfile& videoProfileFor(const ColourSpace colourSpace) {
     return outputProfileDefinition(colourSpace).videoProfile;
 }
@@ -972,66 +1012,21 @@ const PngProfile& pngProfileFor(const ColourSpace colourSpace) {
 
 SpectralCharacteristics calculateSpectralCharacteristics(std::span<const float> spectrum, const float sampleRate) {
     SpectralCharacteristics result{};
-    if (spectrum.empty() || sampleRate <= 0.0f) {
+    if (spectrum.empty() || !std::isfinite(sampleRate) || sampleRate <= 0.0f) {
         return result;
     }
-
-    float totalWeight = 0.0f;
-    float weightedFrequencySum = 0.0f;
-    float logSum = 0.0f;
-    int count = 0;
-
+    std::vector<float> frequencies(spectrum.size(), 0.0f);
+    std::vector<float> magnitudes(spectrum.size(), 0.0f);
     for (size_t i = 0; i < spectrum.size(); ++i) {
-        const float value = spectrum[i];
-        if (value <= kEpsilonSmall || !std::isfinite(value)) {
-            continue;
+        if (spectrum.size() > 1) {
+            frequencies[i] = static_cast<float>(i) * sampleRate /
+                (2.0f * static_cast<float>(spectrum.size() - 1));
         }
-
-        const float frequency = spectrum.size() <= 1
-            ? 0.0f
-            : static_cast<float>(i) * sampleRate / (2.0f * static_cast<float>(spectrum.size() - 1));
-        if (frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
-            frequency > synesthesia::constants::MAX_AUDIO_FREQ) {
-            continue;
-        }
-
-        totalWeight += value;
-        weightedFrequencySum += frequency * value;
-        logSum += std::log(value);
-        ++count;
+        magnitudes[i] = std::isfinite(spectrum[i]) && spectrum[i] > 0.0f ? spectrum[i] : 0.0f;
     }
-
-    if (count == 0 || totalWeight <= 0.0f) {
-        return result;
-    }
-
-    const float arithmeticMean = totalWeight / static_cast<float>(count);
-    if (arithmeticMean > kEpsilonTiny) {
-        result.flatness = std::exp(logSum / static_cast<float>(count)) / arithmeticMean;
-    }
-
-    result.centroid = weightedFrequencySum / totalWeight;
-
-    float spreadSum = 0.0f;
-    for (size_t i = 0; i < spectrum.size(); ++i) {
-        const float value = spectrum[i];
-        if (value <= kEpsilonSmall || !std::isfinite(value)) {
-            continue;
-        }
-
-        const float frequency = spectrum.size() <= 1
-            ? 0.0f
-            : static_cast<float>(i) * sampleRate / (2.0f * static_cast<float>(spectrum.size() - 1));
-        if (frequency < synesthesia::constants::MIN_AUDIO_FREQ ||
-            frequency > synesthesia::constants::MAX_AUDIO_FREQ) {
-            continue;
-        }
-
-        const float diff = frequency - result.centroid;
-        spreadSum += value * diff * diff;
-    }
-
-    result.spread = std::sqrt(spreadSum / totalWeight);
+    result.flatness = calculateSpectralFlatness(magnitudes, frequencies);
+    result.centroid = calculateSpectralCentroid(magnitudes, frequencies);
+    result.spread = calculateSpectralSpread(magnitudes, frequencies, result.centroid);
     result.normalisedSpread = std::min(result.spread / 5000.0f, 1.0f);
     return result;
 }
@@ -1042,17 +1037,17 @@ FrameResult analyseSpectrum(std::span<const float> magnitudes,
                             const float sampleRate,
                             const OutputSettings& outputSettings,
                             const float overrideLoudnessDb,
-                            const PhaseAnalysis::PhaseFeatureMetrics* phaseMetrics) {
+                            const PhaseAnalysis::PhaseFeatureMetrics* phaseMetrics,
+                            const SpectrumLayout* layout,
+                            ColourPresentation::SpectralContributions* contributions,
+                            const EmissionSpectrum* emissions) {
     FrameResult result{};
+    if (contributions) contributions->clear();
 
-    if (magnitudes.empty() || sampleRate <= 0.0f) {
-        result.r = 0.1f;
-        result.g = 0.1f;
-        result.b = 0.1f;
-        result.loudnessDb = kMinLoudnessDb;
-        result.frameLoudnessDb = kMinLoudnessDb;
+    if (magnitudes.empty() || !std::isfinite(sampleRate) || sampleRate <= 0.0f) {
+        result.loudnessDb = std::numeric_limits<float>::quiet_NaN();
+        result.frameLoudnessDb = std::numeric_limits<float>::quiet_NaN();
         result.brightnessLoudnessDb = kMinLoudnessDb;
-        result.estimatedSPL = synesthesia::constants::REFERENCE_SPL_AT_0_LUFS + kMinLoudnessDb;
         return result;
     }
 
@@ -1073,9 +1068,25 @@ FrameResult analyseSpectrum(std::span<const float> magnitudes,
         }
     }
 
+    for (size_t i = 0; i < cleanMagnitudes.size(); ++i) {
+        if (!std::isfinite(effectiveFrequencies[i]) || effectiveFrequencies[i] < 0.0f ||
+            effectiveFrequencies[i] > sampleRate * 0.5f) {
+            cleanMagnitudes[i] = 0.0f;
+        }
+    }
+    const float computedLoudnessDb = calculateLoudnessDbFromSpectrum(cleanMagnitudes, layout);
+
+    for (size_t i = 0; i < cleanMagnitudes.size(); ++i) {
+        if (!std::isfinite(effectiveFrequencies[i]) ||
+            effectiveFrequencies[i] < synesthesia::constants::MIN_AUDIO_FREQ ||
+            effectiveFrequencies[i] > synesthesia::constants::MAX_AUDIO_FREQ) {
+            cleanMagnitudes[i] = 0.0f;
+        }
+    }
+
     result.spectralCentroid = calculateSpectralCentroid(cleanMagnitudes, effectiveFrequencies);
     result.spectralSpread = calculateSpectralSpread(cleanMagnitudes, effectiveFrequencies, result.spectralCentroid);
-    result.spectralFlatness = calculateSpectralFlatness(cleanMagnitudes);
+    result.spectralFlatness = calculateSpectralFlatness(cleanMagnitudes, effectiveFrequencies);
     result.spectralRolloff = calculateSpectralRolloff(cleanMagnitudes, effectiveFrequencies);
 
     float maxMagnitude = 0.0f;
@@ -1086,169 +1097,78 @@ FrameResult analyseSpectrum(std::span<const float> magnitudes,
     }
     result.spectralCrestFactor = calculateSpectralCrestFactor(cleanMagnitudes, maxMagnitude, totalEnergy);
 
-    const float computedLoudnessDb = calculateLoudnessDbFromEnergy(totalEnergy, cleanMagnitudes.size());
-    const float loudnessDb = std::isfinite(overrideLoudnessDb) ? overrideLoudnessDb : computedLoudnessDb;
+    result.loudnessIsLufs = std::isfinite(overrideLoudnessDb) && overrideLoudnessDb > -200.0f;
+    const float loudnessDb = result.loudnessIsLufs ? overrideLoudnessDb : computedLoudnessDb;
     const float clampedLoudnessDb = clampLoudnessDb(loudnessDb);
     const float loudnessNormalised = std::clamp(normaliseLoudness(clampedLoudnessDb), 0.0f, 1.0f);
-    float transientMix = 0.0f;
-    const float brightnessLoudnessDb = resolveBrightnessLoudnessDb(
-        computedLoudnessDb,
-        loudnessDb,
-        result.spectralCrestFactor,
-        transientMix);
+    const float transientMix = 0.0f;
+    const float brightnessLoudnessDb = clampedLoudnessDb;
 
-    const float centroidNormalised = normaliseLogFrequency(result.spectralCentroid);
-    const float rolloffNormalised = normaliseLogFrequency(result.spectralRolloff);
-    const float spreadNormalised = std::clamp(
-        result.spectralCentroid > 1e-3f ? (result.spectralSpread / result.spectralCentroid) / 1.75f : 0.0f,
-        0.0f,
-        1.0f);
-    const float crestNormalised = std::clamp(
-        std::log2(std::max(result.spectralCrestFactor, 1.0f)) / 3.5f,
-        0.0f,
-        1.0f);
-    const float tonalStrength = std::clamp(
-        0.55f * (1.0f - result.spectralFlatness) + 0.45f * crestNormalised,
-        0.0f,
-        1.0f);
-    const SpectralBandBalance bandBalance = calculateBandBalance(cleanMagnitudes, effectiveFrequencies);
-    const float transientAccent = transientMix * (0.35f + 0.65f * tonalStrength);
-    const float brightnessGain = std::clamp(
-        loudnessToBrightness(brightnessLoudnessDb) * (1.0f + 0.18f * transientAccent),
-        0.0f,
-        1.2f);
-
-    const XYZ integratedXYZ = integrateSpectrum2006(cleanMagnitudes, effectiveFrequencies);
-
-    float chromaX = 0.0f;
-    float chromaY = 0.0f;
-    float chromaZ = 0.0f;
-    const float totalWeight = std::accumulate(cleanMagnitudes.begin(), cleanMagnitudes.end(), 0.0f);
-    if (totalWeight > kEpsilonSmall) {
-        const float invWeight = 1.0f / totalWeight;
-        chromaX = integratedXYZ.X * invWeight;
-        chromaY = integratedXYZ.Y * invWeight;
-        chromaZ = integratedXYZ.Z * invWeight;
+    if (std::isfinite(outputSettings.pascalsPerDigitalUnit) && outputSettings.pascalsPerDigitalUnit > 0.0f) {
+        result.estimatedSPL = computedLoudnessDb + soundPressureLevel(outputSettings.pascalsPerDigitalUnit);
+    }
+    if (maxMagnitude == 0.0f) {
+        if (std::isfinite(outputSettings.referenceWhiteLuminanceCdM2) && outputSettings.referenceWhiteLuminanceCdM2 > 0.0f) {
+            result.luminanceCdM2 = 0.0f;
+        }
+        result.loudnessDb = loudnessDb;
+        result.frameLoudnessDb = computedLoudnessDb;
+        result.brightnessLoudnessDb = kMinLoudnessDb;
+        return result;
     }
 
-    {
-        const float flatness = std::clamp(result.spectralFlatness, 0.0f, 1.0f);
-        const float spreadRatio =
-            result.spectralCentroid > 100.0f ? result.spectralSpread / result.spectralCentroid : 0.0f;
-        const float normalisedSpread = std::clamp(spreadRatio, 0.0f, 2.0f) * 0.5f;
-        const float desaturation = flatness * normalisedSpread * 0.35f;
-        const float saturation = std::clamp(1.0f - desaturation, 0.4f, 1.0f);
 
-        const float neutralX = chromaY * (kD50White.X / kD50White.Y);
-        const float neutralZ = chromaY * (kD50White.Z / kD50White.Y);
-        chromaX = std::lerp(neutralX, chromaX, saturation);
-        chromaZ = std::lerp(neutralZ, chromaZ, saturation);
-    }
+    result.spectral = emissions ? measureSpectrum(emissions->magnitudes, emissions->frequencies, contributions) :
+        measureSpectrum(cleanMagnitudes, effectiveFrequencies, contributions);
+    const XYZ integratedXYZ = result.spectral.xyz;
+    const float brightnessGain = loudnessToBrightness(brightnessLoudnessDb);
 
-    const float scaledX = chromaX * brightnessGain;
-    const float scaledY = chromaY * brightnessGain;
-    const float scaledZ = chromaZ * brightnessGain;
 
-    const float hkFactor = helmholtzKohlrauschCorrection(scaledX, scaledY, scaledZ);
-    const float hkX = scaledX / hkFactor;
-    const float hkY = scaledY / hkFactor;
-    const float hkZ = scaledZ / hkFactor;
+    constexpr float spectralExposure = 0.5f;
+    const float hkFactor = helmholtzKohlrauschCorrection(
+        integratedXYZ.X, integratedXYZ.Y, integratedXYZ.Z);
+    const float gain = spectralExposure * brightnessGain / hkFactor;
+    result.X = integratedXYZ.X * gain;
+    result.Y = integratedXYZ.Y * gain;
+    result.Z = integratedXYZ.Z * gain;
 
-    result.loudnessDb = clampedLoudnessDb;
-    result.frameLoudnessDb = clampLoudnessDb(computedLoudnessDb);
+    result.loudnessDb = loudnessDb;
+    result.frameLoudnessDb = computedLoudnessDb;
     result.brightnessLoudnessDb = brightnessLoudnessDb;
     result.loudnessNormalised = loudnessNormalised;
     result.brightnessNormalised = brightnessGain;
     result.transientMix = transientMix;
-    result.estimatedSPL = synesthesia::constants::REFERENCE_SPL_AT_0_LUFS + clampedLoudnessDb;
-
-    float baseL = 0.0f;
-    float baseA = 0.0f;
-    float baseB = 0.0f;
-    ColourCore::XYZtoLab(hkX, hkY, hkZ, baseL, baseA, baseB);
-
-    const float baseRadius = std::hypot(baseA, baseB);
-    const float guidedFrequency = blendLogFrequencies(
-        result.spectralCentroid > 1e-3f ? result.spectralCentroid : result.spectralRolloff,
-        result.spectralRolloff > 1e-3f ? result.spectralRolloff : result.spectralCentroid,
-        0.35f);
-    const float guidedWavelength = ColourCore::logFrequencyToWavelength(guidedFrequency);
-
-    float guidedX = 0.0f;
-    float guidedY = 0.0f;
-    float guidedZ = 0.0f;
-    ColourCore::interpolateCIE(guidedWavelength, guidedX, guidedY, guidedZ);
-    const float guidedScale = guidedY > kEpsilonSmall ? 0.35f / guidedY : 1.0f;
-
-    float guidedL = 0.0f;
-    float guidedA = 0.0f;
-    float guidedB = 0.0f;
-    ColourCore::XYZtoLab(
-        guidedX * guidedScale,
-        guidedY * guidedScale,
-        guidedZ * guidedScale,
-        guidedL,
-        guidedA,
-        guidedB);
-
-    const float baseNormaliser = baseRadius > kEpsilonSmall ? 1.0f / baseRadius : 0.0f;
-    const float guidedRadius = std::hypot(guidedA, guidedB);
-    const float guidedNormaliser = guidedRadius > kEpsilonSmall ? 1.0f / guidedRadius : 0.0f;
-
-    float hueA = baseRadius > kEpsilonSmall ? baseA * baseNormaliser : guidedA * guidedNormaliser;
-    float hueB = baseRadius > kEpsilonSmall ? baseB * baseNormaliser : guidedB * guidedNormaliser;
-    const float hueGuidance = std::clamp(0.25f + 0.25f * tonalStrength + 0.15f * transientAccent, 0.0f, 0.65f);
-    if (guidedRadius > kEpsilonSmall) {
-        hueA = std::lerp(hueA, guidedA * guidedNormaliser, hueGuidance);
-        hueB = std::lerp(hueB, guidedB * guidedNormaliser, hueGuidance);
-    }
-
-    hueA += -bandBalance.tilt * 0.18f;
-    hueB += -bandBalance.tilt * 0.26f;
-
-    const float hueLength = std::hypot(hueA, hueB);
-    if (hueLength > kEpsilonSmall) {
-        hueA /= hueLength;
-        hueB /= hueLength;
-    }
-
-    const float semanticRadiusFloor = brightnessGain * (6.0f + 18.0f * tonalStrength);
-    const float radiusSeed = std::max(baseRadius, semanticRadiusFloor);
-    const float radiusScale = std::clamp(
-        0.72f + 0.58f * tonalStrength + 0.18f * transientAccent - 0.18f * spreadNormalised,
-        0.45f,
-        1.45f);
-    const float finalRadius = std::clamp(radiusSeed * radiusScale, 0.0f, 96.0f);
-    const float finalL = std::clamp(
-        baseL + transientAccent * (4.0f + 6.0f * brightnessGain)
-            + (centroidNormalised - 0.5f) * 2.0f
-            + (rolloffNormalised - 0.5f) * 2.5f,
-        0.0f,
-        100.0f);
-    const float finalA = hueA * finalRadius;
-    const float finalB = hueB * finalRadius;
-
-    ColourCore::LabtoXYZ(finalL, finalA, finalB, result.X, result.Y, result.Z);
+    ColourCore::XYZtoLab(result.X, result.Y, result.Z, result.L, result.a, result.b_comp);
     ColourCore::XYZtoRGB(result.X, result.Y, result.Z,
                          result.r, result.g, result.b,
                          outputSettings.colourSpace,
                          true,
                          outputSettings.applyGamutMapping);
 
-    result.L = finalL;
-    result.a = finalA;
-    result.b_comp = finalB;
+    const auto peak = std::max_element(cleanMagnitudes.begin(), cleanMagnitudes.end());
+    result.dominantFrequency = effectiveFrequencies[static_cast<size_t>(peak - cleanMagnitudes.begin())];
+
+    if (phaseMetrics) {
+        result.phaseInstabilityNorm = phaseMetrics->instabilityNorm;
+        result.phaseCoherenceNorm = phaseMetrics->coherenceNorm;
+        result.phaseTransientNorm = phaseMetrics->transientNorm;
+    }
+    if (std::isfinite(outputSettings.referenceWhiteLuminanceCdM2) && outputSettings.referenceWhiteLuminanceCdM2 > 0.0f &&
+        result.r >= 0.0f && result.r <= 1.0f && result.g >= 0.0f && result.g <= 1.0f && result.b >= 0.0f && result.b <= 1.0f) {
+        float displayX, displayY, displayZ;
+        RGBtoXYZ(result.r, result.g, result.b, displayX, displayY, displayZ, outputSettings.colourSpace);
+        result.luminanceCdM2 = std::max(0.0f, displayY) * outputSettings.referenceWhiteLuminanceCdM2;
+    }
     result.colourIntensity = result.Y;
-    result.luminanceCdM2 =
-        std::max(0.0f, result.Y) * synesthesia::constants::REFERENCE_WHITE_LUMINANCE_CDM2;
-    result.dominantFrequency = result.spectralCentroid;
-    result.dominantWavelength = ColourCore::chromaticDominantWavelength(result.X, result.Y, result.Z);
+    result.dominantWavelength = ColourCore::chromaticDominantWavelength(result.spectral.xyz.X, result.spectral.xyz.Y, result.spectral.xyz.Z);
 
-    applyPhaseInfluence(result, phaseMetrics, outputSettings);
-    result.dominantWavelength = ColourCore::chromaticDominantWavelength(result.X, result.Y, result.Z);
-
+    if (contributions) {
+        for (auto& band : *contributions) {
+            for (float& component : band.xyz) component *= gain;
+        }
+    }
     (void)phases;
     return result;
 }
 
-} // namespace ColourCore
+}

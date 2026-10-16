@@ -1,63 +1,49 @@
 #pragma once
 
+// https://clang.llvm.org/docs/UsersManual.html#cmdoption-ffast-math
+#if defined(__FAST_MATH__) || (defined(__FINITE_MATH_ONLY__) && __FINITE_MATH_ONLY__ > 0)
+#error "Colour smoothing requires IEEE NaN and infinity handling."
+#endif
+
+#include <limits>
+#include <deque>
+#include <utility>
+
 struct SmoothingSignalFeatures {
+    float frameLevelDb = std::numeric_limits<float>::quiet_NaN();
+    double audioTimeSeconds = std::numeric_limits<double>::quiet_NaN();
     bool onsetDetected = false;
     float spectralFlux = 0.0f;
     float spectralFlatness = 0.0f;
     float loudnessNormalised = 0.0f;
     float brightnessNormalised = 0.0f;
-    float spectralSpreadNorm = 0.0f;   // [0,1] — spread/centroid ratio, normalised
-    float spectralRolloffNorm = 0.0f;  // [0,1] — log-normalised rolloff frequency
-    float spectralCrestNorm = 0.0f;    // [0,1] — log2(crestFactor), normalised
+    float spectralSpreadNorm = 0.0f;
+    float spectralRolloffNorm = 0.0f;
+    float spectralCrestNorm = 0.0f;
     float phaseInstabilityNorm = 0.0f;
     float phaseCoherenceNorm = 0.0f;
     float phaseTransientNorm = 0.0f;
 };
 
-float resolveAdaptiveSmoothingAmount(float baseSmoothingAmount,
-                                     const SmoothingSignalFeatures& features);
+float manualResponseTime(float amount);
+float manualSmoothingAmount(float seconds);
 
-class SpringSmoother {
+class AudioResponseTracker {
 public:
-    explicit SpringSmoother(float stiffness = 8.0f, float damping = 1.0f, float mass = 0.3f);
-
-    void reset(float r, float g, float b);
-    void resetOklab(float L, float a, float b);
-    void setTargetColour(float r, float g, float b);
-    void setTargetOklab(float L, float a, float b);
-    bool update(float deltaTime);
-    bool update(float deltaTime, const SmoothingSignalFeatures& features);
-    bool update(float deltaTime, bool onsetDetected, float spectralFlux, float spectralFlatness);
-    void getCurrentColour(float& r, float& g, float& b) const;
-    void getCurrentOklab(float& L, float& a, float& b) const;
-    void setSmoothingAmount(float smoothingAmount);
-    [[nodiscard]] float getSmoothingAmount() const;
-
+    float update(const SmoothingSignalFeatures& features, bool abruptAttack = false);
+    void shiftLevel(double decibels);
+    [[nodiscard]] bool attackDetected() const { return attackDetected_; }
 private:
-    struct SpringState {
-        float position = 0.0f;
-        float velocity = 0.0f; 
-        float targetPosition = 0.0f;
-    };
-
-    static constexpr float MIN_DELTA = 0.0001f;
-    static constexpr float MAX_DELTA_TIME = 0.05f;
-    static constexpr float MIN_STIFFNESS = 8.0f;
-    static constexpr float MAX_STIFFNESS = 120.0f;
-    static constexpr float LAB_L_MIN = 0.0f;
-    static constexpr float LAB_L_MAX = 100.0f;
-    static constexpr float LAB_AB_MIN = -100.0f;
-    static constexpr float LAB_AB_MAX = 100.0f;
-
-    SpringState m_channels[3];
-    float m_stiffness;
-    float m_baseStiffness;
-    float m_damping;
-    float m_mass;
-
-    mutable float m_currentRGB[3];
-    mutable bool m_rgbCacheDirty;
-
-    void updateRGBCache() const;
-    void initialiseToDefaults();
+    std::deque<std::pair<double, double>> levels_;
+    std::deque<std::pair<double, double>> modulationLevels_;
+    double previousTime_ = std::numeric_limits<double>::quiet_NaN();
+    double response_ = 0.4;
+    double lastAttack_ = -std::numeric_limits<double>::infinity();
+    double attackUntil_ = -std::numeric_limits<double>::infinity();
+    double attackResponse_ = 0.08;
+    bool previousOnset_ = false;
+    bool previousAbruptAttack_ = false;
+    bool earlyAttackPending_ = false;
+    bool attackDetected_ = false;
+    std::deque<double> intervals_;
 };

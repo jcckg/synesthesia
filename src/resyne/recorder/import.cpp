@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cmath>
 #include <filesystem>
 #include <string>
 
@@ -58,8 +59,6 @@ void applyImportedSequence(RecorderState& state,
     state.fallbackHopSize = state.metadata.hopSize;
     state.dropFlashAlpha = 1.0f;
     state.statusMessageTimer = STATUS_MESSAGE_DURATION;
-    state.timelinePreviewCache.clear();
-    state.timelinePreviewCacheDirty = true;
 }
 
 }
@@ -95,14 +94,11 @@ bool Recorder::importFromFile(RecorderState& state,
         extension == ".mpeg3" || extension == ".mpga" || extension == ".ogg" ||
         extension == ".oga") {
         success = ImportHelpers::importAudioFile(
-            filepath, colourSpace, applyGamutMapping,
+            filepath,
             FFTProcessor::HOP_SIZE,
-            NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             importedSamples, metadata, errorMessage,
             [&state](float progress) { state.loadingProgress = progress; },
             nullptr,
-            true,
-            true,
             &playbackAudio,
             RecorderState::MAX_RECORDING_SAMPLES
         );
@@ -155,7 +151,7 @@ bool Recorder::importFromFile(RecorderState& state,
     if (!playbackAudio.empty()) {
         state.playbackAudio = std::move(playbackAudio);
         refreshPlaybackOutput(state);
-    } else if (!importedSamples.empty()) {
+    } else if (!state.samples.empty()) {
         reconstructAudio(state);
     }
 
@@ -181,22 +177,24 @@ void Recorder::importFromFileThreaded(RecorderState& state,
     bool success = false;
 
     auto updateProgress = [&state](float progress) {
-        state.loadingProgressAtomic.store(progress, std::memory_order_release);
+        const float current = state.loadingProgressAtomic.load(std::memory_order_relaxed);
+        state.loadingProgressAtomic.store(std::max(current, std::clamp(progress, 0.0f, 0.95f)),
+            std::memory_order_release);
     };
 
-    auto updatePreview = [&state](const std::vector<AudioColourSample>& samples) {
-        std::lock_guard<std::mutex> lock(state.samplesMutex);
-        state.previewSamples = samples;
-        state.previewReady.store(true, std::memory_order_release);
-    };
-    auto forwardDecodedFrame = [&state](const std::vector<AudioColourSample>& decoded, size_t validCount) {
-        if (validCount == 0 || decoded.empty()) {
-            return;
-        }
+    auto forwardDecodedFrame = [&state, &metadata](const std::vector<AudioColourSample>& decoded, size_t validCount) {
         const size_t safeCount = std::min(validCount, decoded.size());
         std::lock_guard<std::mutex> lock(state.samplesMutex);
-        state.previewSamples.assign(decoded.begin(), decoded.begin() + static_cast<std::ptrdiff_t>(safeCount));
+        state.previewMetadata = metadata;
+        const size_t previousCount = state.previewSamples.size();
+        if (safeCount > previousCount) {
+            state.previewSamples.insert(state.previewSamples.end(), decoded.begin() + static_cast<std::ptrdiff_t>(previousCount),
+                decoded.begin() + static_cast<std::ptrdiff_t>(safeCount));
+        }
         state.previewReady.store(true, std::memory_order_release);
+    };
+    auto updatePreview = [&forwardDecodedFrame](const std::vector<AudioColourSample>& decoded) {
+        forwardDecodedFrame(decoded, decoded.size());
     };
 
     auto setStatus = [&state](const std::string& status) {
@@ -208,14 +206,11 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         extension == ".oga") {
         setStatus("Processing audio...");
         success = ImportHelpers::importAudioFile(
-            filepath, colourSpace, applyGamutMapping,
+            filepath,
             FFTProcessor::HOP_SIZE,
-            NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN, NEUTRAL_EQ_GAIN,
             samples, metadata, errorMessage,
             updateProgress,
             updatePreview,
-            true,
-            true,
             &playbackAudio,
             RecorderState::MAX_RECORDING_SAMPLES
         );
@@ -246,10 +241,34 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             samples, metadata, errorMessage,
             updateProgress,
             updatePreview,
-            nullptr
+            &playbackAudio
         );
     } else {
         errorMessage = "unsupported format";
+    }
+
+    if (success) {
+        std::lock_guard lock(state.samplesMutex);
+        bool changed = false;
+        for (size_t index = 0; index < std::min(samples.size(), state.previewSamples.size()); ++index) {
+            const auto& current = samples[index];
+            const auto& preview = state.previewSamples[index];
+            if ((current.loudnessLUFS != preview.loudnessLUFS &&
+                !(std::isnan(current.loudnessLUFS) && std::isnan(preview.loudnessLUFS))) ||
+                current.bass != preview.bass) {
+                changed = true;
+                break;
+            }
+        }
+        if (changed) {
+            ++state.presentationPreviewRevision;
+            state.previewSamples = samples;
+        } else if (samples.size() > state.previewSamples.size()) {
+            state.previewSamples.insert(state.previewSamples.end(),
+                samples.begin() + static_cast<std::ptrdiff_t>(state.previewSamples.size()), samples.end());
+        }
+        state.previewMetadata = metadata;
+        state.previewReady.store(true, std::memory_order_release);
     }
 
     std::vector<float> resolvedPlaybackAudio;
@@ -291,12 +310,12 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             state.importErrorMessage.clear();
 
             if (reconstructionSuccess) {
-                state.playbackAudio = std::move(resolvedPlaybackAudio);
+                state.importedPlaybackAudio = std::move(resolvedPlaybackAudio);
             } else {
-                state.playbackAudio.clear();
+                state.importedPlaybackAudio.clear();
             }
 
-            updateProgress(1.0f);
+            updateProgress(0.95f);
         } else {
             state.importedSamples.clear();
             state.importErrorMessage = errorMessage.empty() ? "unknown error" : errorMessage;

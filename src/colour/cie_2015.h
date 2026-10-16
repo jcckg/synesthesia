@@ -1,17 +1,17 @@
 #pragma once
 
+// https://cie.co.at/datatable/cie-cone-fundamental-based-spectral-tristimulus-values-2-degree-field-size
+
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
 
-namespace Colour::CIE2006 {
+namespace Colour::CIE2015 {
 
 constexpr size_t kTableSize = 441;
-constexpr float kSubAudioBrightnessBoost = 3.0f;
 constexpr float kEpsilonSmall = 1e-6f;
 
-// CIE 2006 2° colour-matching functions from CVRL, 390-830 nm at 1 nm.
 constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{{390, 3.769647E-03f, 4.146161E-04f, 1.847260E-02f},
 		{391, 4.532416E-03f, 5.028333E-04f, 2.221101E-02f},
@@ -42,7 +42,7 @@ constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{416, 1.566468E-01f, 1.545004E-02f, 8.013019E-01f},
 		{417, 1.687901E-01f, 1.664093E-02f, 8.655573E-01f},
 		{418, 1.808328E-01f, 1.785302E-02f, 9.295791E-01f},
-		{419, 1.925216E-01f, 1.907018E-02f, 9.921293E-01f},
+		{419, 1.925216E-01f, 1.907018E-02f, 9.921292E-01f},
 		{420, 2.035729E-01f, 2.027369E-02f, 1.051821E+00f},
 		{421, 2.137531E-01f, 2.144805E-02f, 1.107509E+00f},
 		{422, 2.231348E-01f, 2.260041E-02f, 1.159527E+00f},
@@ -148,7 +148,7 @@ constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{522, 9.726978E-02f, 7.511821E-01f, 4.809566E-02f},
 		{523, 1.067504E-01f, 7.663143E-01f, 4.431720E-02f},
 		{524, 1.166192E-01f, 7.807352E-01f, 4.079734E-02f},
-		{525, 1.268468E-01f, 7.946448E-01f, 3.751912E-02f},
+		{525, 1.268467E-01f, 7.946448E-01f, 3.751912E-02f},
 		{526, 1.374060E-01f, 8.082074E-01f, 3.446846E-02f},
 		{527, 1.482471E-01f, 8.213817E-01f, 3.163764E-02f},
 		{528, 1.593076E-01f, 8.340701E-01f, 2.901901E-02f},
@@ -337,7 +337,7 @@ constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{711, 4.831848E-03f, 1.849316E-03f, 0.000000E+00f},
 		{712, 4.477579E-03f, 1.713976E-03f, 0.000000E+00f},
 		{713, 4.150166E-03f, 1.588899E-03f, 0.000000E+00f},
-		{714, 3.847988E-03f, 1.473453E-03f, 0.000000E+00f},
+		{714, 3.847988E-03f, 1.473452E-03f, 0.0f},
 		{715, 3.569452E-03f, 1.367022E-03f, 0.000000E+00f},
 		{716, 3.312857E-03f, 1.268954E-03f, 0.000000E+00f},
 		{717, 3.076022E-03f, 1.178421E-03f, 0.000000E+00f},
@@ -410,7 +410,7 @@ constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{784, 2.941371E-05f, 1.151233E-05f, 0.000000E+00f},
 		{785, 2.758222E-05f, 1.080001E-05f, 0.000000E+00f},
 		{786, 2.586951E-05f, 1.013364E-05f, 0.000000E+00f},
-		{787, 2.426701E-05f, 9.509919E-06f, 0.000000E+00f},
+		{787, 2.426700E-05f, 9.509919E-06f, 0.0f},
 		{788, 2.276639E-05f, 8.925630E-06f, 0.000000E+00f},
 		{789, 2.136009E-05f, 8.377852E-06f, 0.000000E+00f},
 		{790, 2.004122E-05f, 7.863920E-06f, 0.000000E+00f},
@@ -428,7 +428,7 @@ constexpr std::array<std::array<float, 4>, kTableSize> kTable = {
 		{802, 9.446399E-06f, 3.728674E-06f, 0.000000E+00f},
 		{803, 8.884754E-06f, 3.508881E-06f, 0.000000E+00f},
 		{804, 8.356050E-06f, 3.301868E-06f, 0.000000E+00f},
-		{805, 7.857521E-06f, 3.106561E-06f, 0.000000E+00f},
+		{805, 7.857521E-06f, 3.106560E-06f, 0.0f},
 		{806, 7.386996E-06f, 2.922119E-06f, 0.000000E+00f},
 		{807, 6.943576E-06f, 2.748208E-06f, 0.000000E+00f},
 		{808, 6.526548E-06f, 2.584560E-06f, 0.000000E+00f},
@@ -459,16 +459,10 @@ inline void interpolate(float wavelength, float& X, float& Y, float& Z) {
 	const float tableMin = kTable.front()[0];
 	const float tableMax = kTable.back()[0];
 
-	if (wavelength > tableMax) {
-		const auto& lastEntry = kTable[kTableSize - 1];
-		X = lastEntry[1] * 0.1f * kSubAudioBrightnessBoost;
-		Y = lastEntry[2] * 0.1f * kSubAudioBrightnessBoost;
-		Z = lastEntry[3] * 0.1f * kSubAudioBrightnessBoost;
-		return;
-	}
+	if (!std::isfinite(wavelength) || wavelength < tableMin || wavelength > tableMax) {
 
-	if (!std::isfinite(wavelength)) {
-		wavelength = tableMin;
+		X = Y = Z = 0.0f;
+		return;
 	}
 
 	const float clamped = std::clamp(wavelength, tableMin, tableMax);
@@ -495,4 +489,4 @@ inline void interpolate(float wavelength, float& X, float& Y, float& Z) {
 	Z = std::lerp(entry0[3], entry1[3], t);
 }
 
-} // namespace Colour::CIE2006
+}

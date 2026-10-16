@@ -4,7 +4,10 @@ set(SOURCES
     ${SRC_DIR}/audio/analysis/phase/phase_features.cpp
     ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
     ${SRC_DIR}/audio/analysis/presentation/sample_sequence.cpp
+    ${SRC_DIR}/audio/analysis/presentation/live_presentation.cpp
+    ${SRC_DIR}/audio/analysis/presentation/contribution_history.cpp
     ${SRC_DIR}/colour/colour_core.cpp
+    ${SRC_DIR}/colour/colour_track.cpp
     ${SRC_DIR}/colour/colour_presentation.cpp
     ${SRC_DIR}/audio/analysis/eq/equaliser.cpp
     ${SRC_DIR}/audio/analysis/eq/shared_eq_model.cpp
@@ -18,13 +21,11 @@ set(SOURCES
     ${SRC_DIR}/resyne/encoding/spectral/colour_native_codec.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_wrapping.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/transient_detection.cpp
-    ${SRC_DIR}/resyne/encoding/reconstruction/damage_detection.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_locking.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_vocoder.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/pghi.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/edit_detection.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/boundary_phase_interpolation.cpp
-    ${SRC_DIR}/resyne/encoding/reconstruction/phase_smoothing.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/spectral_resampling.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/varispeed.cpp
     ${SRC_DIR}/resyne/encoding/formats/exporter.cpp
@@ -65,6 +66,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/decoding/decoder_mp3.cpp
     ${SRC_DIR}/resyne/decoding/decoder_ogg.cpp
     ${SRC_DIR}/resyne/recorder/recording.cpp
+    ${SRC_DIR}/resyne/recorder/presentation_worker.cpp
     ${SRC_DIR}/resyne/recorder/playback.cpp
     ${SRC_DIR}/resyne/recorder/dialogs.cpp
     ${SRC_DIR}/resyne/recorder/import.cpp

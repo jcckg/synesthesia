@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <cstdint>
 #include <string>
 
 struct SpectralSample {
@@ -25,7 +26,10 @@ public:
 		const std::vector<SpectralSample>& samples,
 		float sampleRate,
 		int fftSize = 2048,
-		int hopSize = 1024
+		int hopSize = 1024,
+        std::uint32_t leadingSamples = 0,
+        std::uint64_t originalSampleCount = 0,
+        bool limitPeak = true
 	);
 
 	static bool exportToWAV(

@@ -7,11 +7,9 @@ namespace UI::AudioVisualisation {
 
 struct ColourUpdateContext {
     float deltaTime;
-    bool smoothingEnabled;
-    bool manualSmoothing;
-    SpringSmoother& colourSmoother;
     float* clearColour;
-    UIState::View activeView;
+    ColourCore::XYZ& displayXYZ;
+    bool& displayXYZValid;
 };
 
 void syncRecorderPresentationSettings(UIState& state);

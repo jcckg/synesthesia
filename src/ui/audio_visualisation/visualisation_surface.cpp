@@ -8,27 +8,6 @@
 
 namespace UI::AudioVisualisation {
 
-namespace {
-
-float resolveSpectrumSampleRate(const UIState& state,
-                                const AudioInput& audioInput,
-                                const bool hasPlaybackSession) {
-    if (hasPlaybackSession) {
-        const auto& recorderState = state.resyneState.recorderState;
-        if (recorderState.metadata.sampleRate > 0.0f) {
-            return recorderState.metadata.sampleRate;
-        }
-        if (recorderState.fallbackSampleRate > 0.0f) {
-            return recorderState.fallbackSampleRate;
-        }
-    }
-
-    const float liveSampleRate = audioInput.getSampleRate();
-    return liveSampleRate > 0.0f ? liveSampleRate : UIConstants::DEFAULT_SAMPLE_RATE;
-}
-
-} // namespace
-
 std::array<float, 4> currentVisualisationClearColour(const UIState& state) {
     const auto sanitise = [](const float value) {
         if (!std::isfinite(value)) {
@@ -46,7 +25,6 @@ std::array<float, 4> currentVisualisationClearColour(const UIState& state) {
 }
 
 void renderSpectrumOverlay(UIState& state,
-                           const AudioInput& audioInput,
                            const SurfaceLayout& layout,
                            const bool hasPlaybackSession) {
     const bool hasLiveInput = state.deviceState.selectedDeviceIndex >= 0 && !state.deviceState.streamError;
@@ -55,13 +33,12 @@ void renderSpectrumOverlay(UIState& state,
     }
 
     state.spectrumAnalyser.drawSpectrumWindow(
-        state.audioSettings.smoothedMagnitudes,
+        state.audioSettings.spectrumContributions,
         layout.displaySize,
-        resolveSpectrumSampleRate(state, audioInput, hasPlaybackSession),
         layout.sidebarWidth,
         layout.sidebarOnLeft,
         layout.bottomPanelHeight
     );
 }
 
-} // namespace UI::AudioVisualisation
+}

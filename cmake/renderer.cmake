@@ -114,7 +114,7 @@ elseif(APPLE)
         "-Wnull-dereference" "-Wdouble-promotion"
         "-Wmissing-include-dirs" "-Wundef" "-Wredundant-decls"
         "-Woverloaded-virtual" "-Wnon-virtual-dtor"
-        "-O3" "-ffast-math" "-march=native"
+        "-O3" "-march=native"
     )
 
     set_source_files_properties(${SRC_DIR}/renderer/styling/mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
@@ -140,7 +140,7 @@ elseif(APPLE)
 else()
     target_compile_options(${EXECUTABLE_NAME} PRIVATE
         "-Wall" "-Wextra" "-Wformat" "-Wpedantic"
-        "-O3" "-ffast-math" "-march=native"
+        "-O3" "-march=native"
     )
 endif()
 

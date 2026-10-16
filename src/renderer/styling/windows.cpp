@@ -23,6 +23,8 @@
 
 namespace Renderer::Styling {
 
+void applyPresentationColourSpace(GLFWwindow*) {}
+
 namespace {
 
 void applyApplicationIcon(HWND hwnd) {
@@ -75,6 +77,6 @@ void applyPlatformWindowStyling(GLFWwindow* window) {
     DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, &captionColour, sizeof(captionColour));
 }
 
-} // namespace Renderer::Styling
+}
 
 #endif

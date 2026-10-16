@@ -22,19 +22,12 @@ inline constexpr std::size_t DEFAULT_MAX_ANALYSIS_FRAMES = 100000;
 
 bool importAudioFile(
     const std::string& filepath,
-    ColourCore::ColourSpace colourSpace,
-    bool applyGamutMapping,
     int analysisHopSize,
-    float importLowGain,
-    float importMidGain,
-    float importHighGain,
     std::vector<AudioColourSample>& samples,
     AudioMetadata& metadata,
     std::string& errorMessage,
     const ProgressCallback& onProgress = nullptr,
     const PreviewCallback& onPreview = nullptr,
-    bool enableSmoothing = true,
-    bool enableMelWeighting = true,
     std::vector<float>* playbackAudio = nullptr,
     std::size_t maxAnalysisFrames = DEFAULT_MAX_ANALYSIS_FRAMES
 );

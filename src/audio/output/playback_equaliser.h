@@ -2,7 +2,10 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <vector>
+#include <mutex>
+#include "audio/analysis/eq/shared_eq_model.h"
 
 class PlaybackEqualiser {
 public:
@@ -31,6 +34,13 @@ private:
     std::atomic<float> lowGain_{1.0f};
     std::atomic<float> midGain_{1.0f};
     std::atomic<float> highGain_{1.0f};
+
+    std::mutex coefficientMutex_;
+    std::atomic<std::uint64_t> coefficientVersion_{0};
+    std::uint64_t appliedVersion_ = 0;
+    AudioEQ::CascadeCoefficients currentCoefficients_{};
+    AudioEQ::CascadeCoefficients targetCoefficients_{};
+    std::size_t transitionRemaining_ = 0;
 
     std::atomic<float> lowB0_{1.0f};
     std::atomic<float> lowB1_{0.0f};

@@ -1,19 +1,25 @@
 #pragma once
 
-#include <vector>
 #include <cstddef>
+#include <vector>
 
 namespace PhaseReconstruction {
 
-// Phase Gradient Heap Integration (PGHI) algorithm
-// Průša et al. (2017) - "A noniterative method for reconstruction of phase from STFT magnitude"
-// Reconstructs phase from magnitude spectrogram using heap-based integration
-void reconstructPhasePGHI(const std::vector<std::vector<float>>& allMagnitudes,
-					  const std::vector<std::vector<float>>& allFrequencies,
-					  size_t currentFrame,
-					  std::vector<float>& phases,
-					  float sampleRate,
-					  int hopSize,
-					  const std::vector<float>* prevOutputPhase);
+struct PhaseGradient {
+    double frequency = 0.0;
+    double time = 0.0;
+};
+
+// https://ltfat.org/notes/ltfatnote040.pdf
+PhaseGradient phaseGradient(const std::vector<std::vector<float>>& magnitudes,
+                            std::size_t frame, std::size_t bin,
+                            std::size_t fftSize, int hopSize, double gamma);
+
+std::vector<std::vector<float>> reconstructPhasePGHI(
+    const std::vector<std::vector<float>>& magnitudes,
+    const std::vector<std::vector<float>>& suppliedPhases,
+    const std::vector<std::vector<bool>>& knownPhase,
+    std::size_t fftSize, int hopSize,
+    double gamma = 0.0, double relativeTolerance = 1e-6);
 
 }

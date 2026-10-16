@@ -13,6 +13,10 @@ public:
 	void processSamples(std::span<const float> samples, float sampleRate);
 	float getIntegratedLoudness() const;
 	float getMomentaryLoudness() const;
+    float getMaximumMomentaryLoudness() const;
+
+	static float combineChannelLoudness(std::span<const float> channelLoudness,
+                                       std::span<const float> channelWeights = {});
 	uint64_t getProcessedBlockCount() const { return processedBlockCount; }
 	size_t getBlockSizeSamples() const { return blockSize; }
 	size_t getBlockHopSamples() const { return hopSize; }
@@ -22,35 +26,34 @@ public:
 
 private:
 	struct BiquadFilter {
-		std::array<float, 3> b = {0.0f, 0.0f, 0.0f};
-		std::array<float, 3> a = {1.0f, 0.0f, 0.0f};
-		std::array<float, 2> z = {0.0f, 0.0f};
+		std::array<double, 3> b = {0.0, 0.0, 0.0};
+		std::array<double, 3> a = {1.0, 0.0, 0.0};
+		std::array<double, 2> z = {0.0, 0.0};
 
-		float process(float input);
+		double process(double input);
 		void reset();
 	};
 
 	void initialiseFilters(float sampleRate);
-	float calculateMeanSquare(std::span<const float> samples) const;
-	float loudnessFromMeanSquare(float meanSquare) const;
+	float loudnessFromMeanSquare(double meanSquare) const;
 
 	BiquadFilter preFilter;
 	BiquadFilter rlbFilter;
 
 	std::deque<std::pair<uint64_t, float>> blockHistory;
 
-	// ITU-R BS.1770-4 gating thresholds for integrated loudness measurement
-	// Absolute gate: -70 LUFS (removes silent/very quiet blocks)
-	// Relative gate: -10 LU below mean loudness (removes quiet background)
 	static constexpr float ABSOLUTE_THRESHOLD = -70.0f;
 	static constexpr float RELATIVE_THRESHOLD = -10.0f;
-	static constexpr float BLOCK_DURATION = 0.4f;  // 400ms measurement blocks
-	static constexpr float OVERLAP = 0.75f;         // 75% overlap (100ms hop size)
+	static constexpr float BLOCK_DURATION = 0.4f;
+	static constexpr float OVERLAP = 0.75f;
 
 	float currentSampleRate;
 	size_t blockSize;
 	size_t hopSize;
-	std::vector<float> audioBuffer;
+	std::vector<double> audioBuffer;
+    double runningEnergy = 0.0;
+    double maximumMeanSquare = 0.0;
+    std::uint64_t sampleCount = 0;
 	size_t bufferPosition;
 	uint64_t processedBlockCount{0};
 	bool bufferInitialised{false};

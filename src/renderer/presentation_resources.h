@@ -38,7 +38,9 @@ public:
                                                     float visibleEnd,
                                                     int width,
                                                     ColourCore::ColourSpace colourSpace,
-                                                    bool applyGamutMapping);
+                                                    bool applyGamutMapping,
+                                                    const ColourPresentation::ColourTrack* track = nullptr,
+                                                    double duration = 0.0);
 
     [[nodiscard]] ImTextureID updateActiveColourTexture(PreviewSurface surface,
                                                         float r,
@@ -69,6 +71,7 @@ private:
         float visibleEnd = 1.0f;
         ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
         bool applyGamutMapping = true;
+        double duration = 0.0;
     };
 
     std::vector<float> timelinePixels_;

@@ -54,8 +54,7 @@ PendingOSCSettings SynesthesiaOSCIntegration::consumePendingSettings() {
                 pendingSettings.smoothingEnabled = value.enabled;
             } else if constexpr (std::is_same_v<ValueType, SetColourSmoothingSpeedCommand>) {
                 pendingSettings.colourSmoothingSpeed = value.speed;
-            } else if constexpr (std::is_same_v<ValueType, SetSpectrumSmoothingCommand>) {
-                pendingSettings.spectrumSmoothingAmount = value.amount;
+
             } else if constexpr (std::is_same_v<ValueType, SetColourSpaceCommand>) {
                 pendingSettings.colourSpace = value.colourSpace;
             } else if constexpr (std::is_same_v<ValueType, SetGamutMappingCommand>) {

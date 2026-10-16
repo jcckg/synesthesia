@@ -111,4 +111,4 @@ void ImGuiWindowContext::destroyContexts() {
     }
 }
 
-} // namespace Renderer
+}

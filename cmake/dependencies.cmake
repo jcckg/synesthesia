@@ -10,8 +10,7 @@ include(cmake/vendor.cmake)
 function(resolve_synesthesia_bgfx_config definitions_var)
     set(bgfx_renderer_definitions "")
 
-    # bgfx enables several backends per platform by default. Synesthesia pins
-    # a single renderer per platform so local and CI builds use the same code path.
+    # Pin the platform backends so local and CI builds agree; Windows retains D3D11 as a fallback.
     if(APPLE)
         list(APPEND bgfx_renderer_definitions
             BGFX_CONFIG_RENDERER_DIRECT3D11=0

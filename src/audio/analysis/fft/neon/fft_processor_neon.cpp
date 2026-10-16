@@ -82,7 +82,7 @@ void calculateSpectralEnergy(std::span<float> envelope, std::span<const float> r
 
 void applyEQGains(std::span<float> magnitudes, std::span<const float> frequencies,
                  float lowGain, float midGain, float highGain,
-                 float /* sampleRate */, size_t minBin, size_t maxBin) {
+                 float , size_t minBin, size_t maxBin) {
     const size_t size = std::min(magnitudes.size(), frequencies.size());
     if (maxBin >= size) maxBin = size - 1;
     if (minBin > maxBin) return;
@@ -259,7 +259,7 @@ void calculateMagnitudesFromComplex(std::span<float> magnitudes,
         float32x4_t realSq = vmulq_f32(real_vals, real_vals);
         float32x4_t imagSq = vmulq_f32(imag_vals, imag_vals);
         float32x4_t sum = vaddq_f32(realSq, imagSq);
-        // Direct square root is defined at zero; reciprocal sqrt produced 0 * inf.
+        // Direct square root handles silence; multiplying zero by its reciprocal square root yields NaN.
         float32x4_t result = vsqrtq_f32(sum);
         
         vst1q_f32(&magnitudes[i], result);

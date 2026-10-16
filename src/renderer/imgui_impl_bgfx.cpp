@@ -334,7 +334,7 @@ bool createDeviceObjects() {
     return true;
 }
 
-} // namespace
+}
 
 bool ImGui_Implbgfx_Init(bgfx::ViewId viewId, const bool linearOutput) {
     ImGuiIO& io = ImGui::GetIO();

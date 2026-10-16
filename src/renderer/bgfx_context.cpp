@@ -144,15 +144,14 @@ bgfx::RendererType::Enum preferredRendererType() {
     }
 
 #if defined(_WIN32)
-    // bgfx's generic Windows auto-selection ranks D3D11 ahead of D3D12.
-    // Prefer D3D12 for this app and let bgfx fall back to D3D11 if needed.
+    // Make the D3D12 preference independent of bgfx's platform-dependent renderer ranking.
     return bgfx::RendererType::Direct3D12;
 #else
     return bgfx::RendererType::Count;
 #endif
 }
 
-} // namespace
+}
 
 BgfxContext::BgfxContext() = default;
 
@@ -162,7 +161,8 @@ bool BgfxContext::initialise(const Window& window, uint32_t width, uint32_t heig
     }
 
 #if defined(__APPLE__)
-    // bgfx documentation and long-standing example code keep renderer startup on the API thread on macOS.
+    // https://bkaradzic.github.io/bgfx/bgfx.html#_CPPv4N4bgfx11renderFrameEi
+    // Calling before init keeps rendering on this thread; frame() then renders inline on macOS.
     bgfx::renderFrame(0);
 #endif
 
@@ -258,4 +258,4 @@ bool BgfxContext::usesLinearPresentation() const {
     return colour_format_ == bgfx::TextureFormat::RGBA16F;
 }
 
-} // namespace Renderer
+}

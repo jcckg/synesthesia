@@ -18,7 +18,7 @@ namespace RSYNContainer {
 namespace {
 
 constexpr std::array<char, 4> kMagic = {'R', 'S', 'Y', 'N'};
-constexpr std::uint32_t kVersion = 1;
+constexpr std::uint32_t kVersion = 2;
 
 struct Header {
     std::array<char, 4> magic{};

@@ -28,7 +28,6 @@ struct RenderArgs {
     float* clearColour;
     UIState& uiState;
     ReSyne::RecorderState& recorderState;
-    SpringSmoother& colourSmoother;
     LayoutMetrics layout;
     ImVec2 displaySize;
     bool isPlaybackActive;

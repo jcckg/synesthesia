@@ -82,7 +82,7 @@ void calculateSpectralEnergy(std::span<float> envelope, std::span<const float> r
 
 void applyEQGains(std::span<float> magnitudes, std::span<const float> frequencies,
                  float lowGain, float midGain, float highGain,
-                 float /* sampleRate */, size_t minBin, size_t maxBin) {
+                 float , size_t minBin, size_t maxBin) {
     const size_t size = std::min(magnitudes.size(), frequencies.size());
     if (maxBin >= size) maxBin = size - 1;
     if (minBin > maxBin) return;

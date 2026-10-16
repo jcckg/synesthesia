@@ -50,6 +50,9 @@ add_sse_sources()
 
 include(cmake/renderer.cmake)
 include(cmake/ffmpeg.cmake)
+set(SYNESTHESIA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
+include(cmake/fft.cmake)
+synesthesia_configure_fft(${EXECUTABLE_NAME})
 
 configure_include_directories()
 apply_neon_optimisations()

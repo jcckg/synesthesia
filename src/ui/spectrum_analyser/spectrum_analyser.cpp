@@ -1,63 +1,48 @@
 #include "spectrum_analyser.h"
-#include "fft_processor.h"
+#include "spectrum_curve.h"
 #include <algorithm>
 #include <cmath>
-#include <numeric>
-#include <string>
 
 namespace {
-constexpr float SPECTRUM_INTENSITY_CLAMP = 0.7f;
-constexpr float SPECTRUM_INTENSITY_SCALE = 0.75f;
-constexpr float LOG_AMPLITUDE_GAIN = 4.0f;
 constexpr ImVec4 SPECTRUM_COLOUR = ImVec4(1.0f, 1.0f, 1.0f, 0.9f);
 }
 
 void SpectrumAnalyser::drawSpectrumWindow(
-    const std::vector<std::vector<float>>& smoothedMagnitudes,
+    const std::vector<float>& contributions,
     const ImVec2& displaySize,
-    float sampleRate,
     float sidebarWidth,
     bool sidebarOnLeft,
     float bottomPanelHeight
 ) {
-    float spectrumX = sidebarOnLeft ? sidebarWidth : 0.0f;
-    auto spectrumPos = ImVec2(spectrumX, displaySize.y - SPECTRUM_HEIGHT - bottomPanelHeight);
-    auto spectrumSize = ImVec2(displaySize.x - sidebarWidth, SPECTRUM_HEIGHT);
+    const float spectrumX = sidebarOnLeft ? sidebarWidth : 0.0f;
+    const float availableHeight = std::max(0.0f, displaySize.y - bottomPanelHeight);
+    const float spectrumHeight = std::min(120.0f, availableHeight * .15f);
+    const auto spectrumPos = ImVec2(spectrumX, availableHeight - spectrumHeight);
+    const auto spectrumSize = ImVec2(std::max(0.0f, displaySize.x - sidebarWidth), spectrumHeight);
+    if (spectrumSize.x < 1.0f || spectrumSize.y < 1.0f) return;
 
     ImGui::SetNextWindowPos(spectrumPos);
     ImGui::SetNextWindowSize(spectrumSize);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 
     ImGui::Begin("##SpectrumAnalyser", nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                  ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBackground);
+                 ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoInputs);
 
-    size_t numChannels = smoothedMagnitudes.size();
-    if (numChannels == 0) {
+    const auto count = static_cast<std::size_t>(std::clamp(std::ceil(spectrumSize.x * ImGui::GetIO().DisplayFramebufferScale.x), 241.0f, 8192.0f));
+    if (frequencies_.size() != count) {
+        frequencies_.resize(count);
+        for (std::size_t i = 0; i < count; ++i) frequencies_[i] = static_cast<float>(
+            ColourPresentation::contributionMinimumFrequency * std::pow(
+                ColourPresentation::contributionMaximumFrequency / ColourPresentation::contributionMinimumFrequency,
+                static_cast<double>(i) / static_cast<double>(count-1)));
     }
+    const auto heights = UI::Spectrum::curveHeights(contributions, count);
 
-    if (!buffersInitialised || previousFrameData.size() != numChannels) {
-        initialiseBuffers(numChannels);
-    }
-
-    sampleRate = sampleRate > 0.0f ? sampleRate : 44100.0f;
-
-    for (size_t ch = 0; ch < numChannels; ++ch) {
-         prepareSpectrumData(smoothingBuffer1[ch], smoothingBuffer2[ch], smoothedMagnitudes[ch], sampleRate);
-
-         if (previousFrameData[ch].size() != LINE_COUNT) previousFrameData[ch].resize(LINE_COUNT, 0.0f);
-         for (size_t i = 0; i < LINE_COUNT; ++i) {
-            smoothingBuffer2[ch][i] = TEMPORAL_SMOOTHING_FACTOR * previousFrameData[ch][i] +
-                                      (1.0f - TEMPORAL_SMOOTHING_FACTOR) * smoothingBuffer2[ch][i];
-            previousFrameData[ch][i] = smoothingBuffer2[ch][i];
-         }
-
-         smoothData(smoothingBuffer2[ch]);
-         applyDynamicRangeCompensation(smoothingBuffer2[ch]);
-    }
-
+    ImPlot::PushStyleVar(ImPlotStyleVar_PlotMinSize, ImVec2(0, 0));
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));
     ImPlot::PushStyleVar(ImPlotStyleVar_FitPadding, ImVec2(0, 0));
     ImPlot::PushStyleColor(ImPlotCol_PlotBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
@@ -67,270 +52,40 @@ void SpectrumAnalyser::drawSpectrumWindow(
     ImPlot::PushStyleColor(ImPlotCol_AxisBgHovered, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
     ImPlot::PushStyleColor(ImPlotCol_AxisBg, ImVec4(0.0f, 0.0f, 0.0f, 0.0f));
 
-    if (ImPlot::BeginPlot("##Spectrum", ImVec2(-1, -1), 
-                          ImPlotFlags_NoTitle | ImPlotFlags_NoLegend | 
+    if (ImPlot::BeginPlot("##Spectrum", spectrumSize,
+                          ImPlotFlags_NoTitle | ImPlotFlags_NoLegend |
                           ImPlotFlags_NoMenus | ImPlotFlags_NoBoxSelect |
                           ImPlotFlags_NoMouseText | ImPlotFlags_NoFrame |
                           ImPlotFlags_NoInputs)) {
-        
-        ImPlot::SetupAxis(ImAxis_X1, nullptr, 
-                         ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoTickMarks | 
+
+        ImPlot::SetupAxis(ImAxis_X1, nullptr,
+                         ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoTickMarks |
                          ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoHighlight);
-        ImPlot::SetupAxis(ImAxis_Y1, nullptr, 
-                         ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoTickMarks | 
+        ImPlot::SetupAxis(ImAxis_Y1, nullptr,
+                         ImPlotAxisFlags_NoTickLabels | ImPlotAxisFlags_NoTickMarks |
                          ImPlotAxisFlags_NoGridLines | ImPlotAxisFlags_NoHighlight);
-        ImPlot::SetupAxisLimits(ImAxis_X1, static_cast<double>(FFTProcessor::MIN_FREQ), static_cast<double>(FFTProcessor::MAX_FREQ));
+        ImPlot::SetupAxisLimits(ImAxis_X1, ColourPresentation::contributionMinimumFrequency, ColourPresentation::contributionMaximumFrequency);
         ImPlot::SetupAxisScale(ImAxis_X1, ImPlotScale_Log10);
 
-        constexpr float plotYMax = SPECTRUM_INTENSITY_CLAMP + 0.05f;
-        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, static_cast<double>(plotYMax));
-        
-        for (size_t ch = 0; ch < numChannels; ++ch) {
-            ImVec4 fillColour = SPECTRUM_COLOUR;
-            fillColour.w = 0.1f;
+        ImPlot::SetupAxisLimits(ImAxis_Y1, 0.0, 1.04);
 
+        if (contributions.size() == ColourPresentation::contributionBandCount) {
             ImPlotSpec fillStyle;
-            fillStyle.FillColor = fillColour;
-            ImPlot::PlotShaded(("##Fill" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT, 0.0, fillStyle);
-
+            fillStyle.FillColor = ImVec4(1.0f, 1.0f, 1.0f, 0.08f);
+            ImPlot::PlotShaded("##Fill", frequencies_.data(), heights.data(), static_cast<int>(count), 0.0, fillStyle);
             ImPlotSpec lineStyle;
             lineStyle.LineColor = SPECTRUM_COLOUR;
             lineStyle.LineWeight = 1.5f;
-            ImPlot::PlotLine(("##Line" + std::to_string(ch)).c_str(), smoothingBuffer1[ch].data(), smoothingBuffer2[ch].data(), LINE_COUNT, lineStyle);
+            ImPlot::PlotLine("##Line", frequencies_.data(), heights.data(), static_cast<int>(count), lineStyle);
         }
-        
+
         ImPlot::EndPlot();
     }
 
     ImPlot::PopStyleColor(6);
-    ImPlot::PopStyleVar(2);
+    ImPlot::PopStyleVar(3);
 
     ImGui::End();
     ImGui::PopStyleColor();
-    ImGui::PopStyleVar();
-}
-
-void SpectrumAnalyser::prepareSpectrumData(std::vector<float>& xData, std::vector<float>& yData,
-                                           const std::vector<float>& magnitudes, float sampleRate) {
-    if (cachedFrequencies.empty()) {
-        cachedFrequencies.resize(LINE_COUNT);
-    }
-    
-    const float binSize = sampleRate / FFTProcessor::FFT_SIZE;
-    constexpr float minFreq = FFTProcessor::MIN_FREQ;
-    constexpr float maxFreq = FFTProcessor::MAX_FREQ;
-    const float logMinFreq = std::log10(minFreq);
-    const float logMaxFreq = std::log10(maxFreq);
-    const float logFreqRange = logMaxFreq - logMinFreq;
-
-    if (sampleRate != lastCachedSampleRate) {
-        lastCachedSampleRate = sampleRate;
-        for (size_t i = 0; i < LINE_COUNT; ++i) {
-            float logPosition = static_cast<float>(i) / (LINE_COUNT - 1);
-            float currentLogFreq = logMinFreq + logPosition * logFreqRange;
-            cachedFrequencies[i] = std::pow(10.0f, currentLogFreq);
-        }
-    }
-
-    if (!magnitudes.empty() && binSize > 0.0f && logFreqRange > 0.0f) {
-        for (size_t i = 0; i < LINE_COUNT; ++i) {
-            const float freq = cachedFrequencies[i];
-            xData[i] = freq;
-
-            float binIndex = freq / binSize;
-            int binIndexFloor = static_cast<int>(binIndex);
-            float t = binIndex - static_cast<float>(binIndexFloor);
-
-            int idx0 = std::min(std::max(binIndexFloor, 0),
-                               static_cast<int>(magnitudes.size()) - 1);
-            int idx1 = std::min(idx0 + 1, static_cast<int>(magnitudes.size()) - 1);
-
-            float magnitude;
-
-            if (idx0 > 0 && idx1 < static_cast<int>(magnitudes.size()) - 1) {
-                int idx_m1 = idx0 - 1;
-                int idx2 = idx1 + 1;
-
-                magnitude = cubicInterpolate(
-                    magnitudes[static_cast<size_t>(idx_m1)], magnitudes[static_cast<size_t>(idx0)],
-                    magnitudes[static_cast<size_t>(idx1)], magnitudes[static_cast<size_t>(idx2)], t);
-            } else {
-                magnitude = magnitudes[static_cast<size_t>(idx0)] * (1.0f - t) +
-                           magnitudes[static_cast<size_t>(idx1)] * t;
-            }
-            
-            float normalisedMagnitude = std::max(0.0f, magnitude);
-
-            if (normalisedMagnitude > 0.001f) {
-                normalisedMagnitude = std::log10(1.0f + normalisedMagnitude * LOG_AMPLITUDE_GAIN);
-            }
-
-            normalisedMagnitude *= SPECTRUM_INTENSITY_SCALE;
-
-            yData[i] = std::clamp(normalisedMagnitude, 0.0f, SPECTRUM_INTENSITY_CLAMP);
-        }
-    } else {
-        for (size_t i = 0; i < LINE_COUNT; ++i) {
-            xData[i] = cachedFrequencies[i];
-            yData[i] = 0.0f;
-        }
-    }
-}
-
-
-void SpectrumAnalyser::smoothData(std::vector<float>& yData) {
-    applyGaussianSmoothing(yData);
-}
-
-void SpectrumAnalyser::applyGaussianSmoothing(std::vector<float>& yData) {
-    if (smoothingScratchBuffer.size() != LINE_COUNT) {
-        smoothingScratchBuffer.assign(LINE_COUNT, 0.0f);
-    } else {
-        std::fill(smoothingScratchBuffer.begin(), smoothingScratchBuffer.end(), 0.0f);
-    }
-    
-    for (size_t i = 0; i < LINE_COUNT; ++i) {
-        int windowSize = getFrequencyDependentWindowSize(static_cast<int>(i));
-        int halfWindow = windowSize / 2;
-        
-        float weightedSum = 0.0f;
-        float totalWeight = 0.0f;
-        
-        for (int j = std::max(0, static_cast<int>(i) - halfWindow);
-             j <= std::min(LINE_COUNT - 1, static_cast<int>(i) + halfWindow); ++j) {
-            float weight = gaussianWeight(std::abs(static_cast<int>(i) - j), GAUSSIAN_SIGMA * 0.7f);
-            weightedSum += yData[static_cast<size_t>(j)] * weight;
-            totalWeight += weight;
-        }
-        
-        smoothingScratchBuffer[i] = totalWeight > 0.0f ? weightedSum / totalWeight : yData[i];
-    }
-    
-    yData.assign(smoothingScratchBuffer.begin(), smoothingScratchBuffer.end());
-}
-
-int SpectrumAnalyser::getFrequencyDependentWindowSize(int index) {
-    float normalisedIndex = static_cast<float>(index) / (LINE_COUNT - 1);
-    return BASE_SMOOTHING_WINDOW_SIZE + static_cast<int>(normalisedIndex * 3.0f);
-}
-
-float SpectrumAnalyser::gaussianWeight(int distance, float sigma) {
-    if (distance == 0) return 1.0f;
-    
-    if (std::abs(sigma - GAUSSIAN_SIGMA) < 0.01f && distance < static_cast<int>(gaussianWeights.size())) {
-        return gaussianWeights[static_cast<size_t>(distance)];
-    }
-
-    float d = static_cast<float>(distance);
-    return std::exp(-(d * d) / (2.0f * sigma * sigma));
-}
-
-float SpectrumAnalyser::cubicInterpolate(float y0, float y1, float y2, float y3, float t) {
-    float a0, a1, a2, a3;
-    a0 = -0.5f * y0 + 1.5f * y1 - 1.5f * y2 + 0.5f * y3;
-    a1 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
-    a2 = -0.5f * y0 + 0.5f * y2;
-    a3 = y1;
-    
-    return a0 * t * t * t + a1 * t * t + a2 * t + a3;
-}
-
-float SpectrumAnalyser::calculateLocalVariance(const std::vector<float>& yData, int centre, int windowSize) {
-    int halfWindow = windowSize / 2;
-    float sum = 0.0f;
-    float sumSquares = 0.0f;
-    int count = 0;
-    
-    for (int j = std::max(0, centre - halfWindow);
-         j <= std::min(LINE_COUNT - 1, centre + halfWindow); ++j) {
-        sum += yData[static_cast<size_t>(j)];
-        sumSquares += yData[static_cast<size_t>(j)] * yData[static_cast<size_t>(j)];
-        count++;
-    }
-    
-    if (count <= 1) return 0.0f;
-    
-    float mean = sum / static_cast<float>(count);
-    float variance = (sumSquares / static_cast<float>(count)) - (mean * mean);
-    return std::max(variance, 0.0f);
-}
-
-void SpectrumAnalyser::initialiseBuffers(size_t numChannels) {
-    previousFrameData.resize(numChannels);
-    for (auto& buf : previousFrameData) {
-        buf.resize(LINE_COUNT, 0.0f);
-    }
-
-    smoothingBuffer1.resize(numChannels);
-    smoothingBuffer2.resize(numChannels);
-    for (auto& buf : smoothingBuffer1) {
-        buf.resize(LINE_COUNT, 0.0f);
-    }
-    for (auto& buf : smoothingBuffer2) {
-        buf.resize(LINE_COUNT, 0.0f);
-    }
-    
-    cachedFrequencies.resize(LINE_COUNT);
-    smoothingScratchBuffer.resize(LINE_COUNT, 0.0f);
-    precomputeGaussianWeights();
-    buffersInitialised = true;
-}
-
-void SpectrumAnalyser::precomputeGaussianWeights() {
-    constexpr int maxDistance = 20;
-    gaussianWeights.resize(maxDistance + 1);
-
-    for (int d = 0; d <= maxDistance; ++d) {
-        if (d == 0) {
-            gaussianWeights[static_cast<size_t>(d)] = 1.0f;
-        } else {
-            float distance = static_cast<float>(d);
-            gaussianWeights[static_cast<size_t>(d)] = std::exp(-(distance * distance) / (2.0f * GAUSSIAN_SIGMA * GAUSSIAN_SIGMA));
-        }
-    }
-}
-
-void SpectrumAnalyser::resetTemporalBuffers() {
-    for (auto& buf : previousFrameData) {
-        std::fill(buf.begin(), buf.end(), 0.0f);
-    }
-}
-
-void SpectrumAnalyser::applyDynamicRangeCompensation(std::vector<float>& yData) {
-    if (yData.empty()) {
-        return;
-    }
-
-    const float maxValue = *std::max_element(yData.begin(), yData.end());
-    if (maxValue <= 1e-4f) {
-        return;
-    }
-
-    const float meanValue = std::accumulate(yData.begin(), yData.end(), 0.0f) /
-                            static_cast<float>(yData.size());
-    const float occupancy = meanValue / maxValue;
-
-    constexpr float occupancyThreshold = 0.5f;
-    if (occupancy <= occupancyThreshold) {
-        return;
-    }
-
-    const float intensity = std::clamp(
-        (occupancy - occupancyThreshold) / (1.0f - occupancyThreshold),
-        0.0f,
-        1.0f);
-
-    constexpr float maxGamma = 1.3f;
-    const float gamma = 1.0f + intensity * (maxGamma - 1.0f);
-    const float inverseMax = 1.0f / maxValue;
-
-    for (float& value : yData) {
-        float normalised = value * inverseMax;
-        normalised = std::clamp(normalised, 0.0f, 1.0f);
-        if (normalised <= 0.0f) {
-            value = 0.0f;
-            continue;
-        }
-        value = std::min(SPECTRUM_INTENSITY_CLAMP, maxValue * std::pow(normalised, gamma));
-    }
+    ImGui::PopStyleVar(2);
 }

@@ -8,8 +8,27 @@
 #include <GLFW/glfw3native.h>
 
 #import <AppKit/AppKit.h>
+#import <QuartzCore/CAMetalLayer.h>
 
 namespace Renderer::Styling {
+
+// https://developer.apple.com/documentation/quartzcore/cametallayer/colorspace
+void applyPresentationColourSpace(GLFWwindow* window) {
+    if (window == nullptr) return;
+    NSWindow* nativeWindow = glfwGetCocoaWindow(window);
+    NSView* view = nativeWindow.contentView;
+    if (view == nil) return;
+    view.wantsLayer = YES;
+    CAMetalLayer* layer;
+    if ([view.layer isKindOfClass:[CAMetalLayer class]]) layer = (CAMetalLayer*)view.layer;
+    else {
+        layer = [CAMetalLayer layer];
+        view.layer = layer;
+    }
+    CGColorSpaceRef colourSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    layer.colorspace = colourSpace;
+    CGColorSpaceRelease(colourSpace);
+}
 
 void applyPlatformWindowStyling(GLFWwindow* window) {
     if (window == nullptr) {
@@ -56,6 +75,6 @@ void applyPlatformWindowStyling(GLFWwindow* window) {
     [nsWindow invalidateShadow];
 }
 
-} // namespace Renderer::Styling
+}
 
 #endif

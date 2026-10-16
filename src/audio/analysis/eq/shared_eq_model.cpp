@@ -206,7 +206,7 @@ void applyMagnitudeResponse(std::vector<float>& magnitudes,
             const float frequency = static_cast<float>(index) * sampleRate / static_cast<float>(fftSize);
             float response = cascadeMagnitudeResponse(cascade, frequency, sampleRate);
             response *= perceptualWeightingGain(frequency, weighting);
-            cache.response[index] = std::clamp(response, 0.0f, 4.0f);
+            cache.response[index] = std::max(response, 0.0f);
         }
     }
 

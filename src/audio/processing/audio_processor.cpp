@@ -1,6 +1,8 @@
 #include "audio_processor.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 
 AudioProcessor::AudioProcessor()
 	: writeIndex(0), readIndex(0), running(false), currentSpectralData{} {
@@ -15,6 +17,9 @@ void AudioProcessor::start() {
 		return;
 	writeIndex = 0;
 	readIndex = 0;
+    sourceFramePosition = 0;
+    capturedFrameCount = 0;
+    processedFrameCount = 0;
 
 	workerThread = std::thread(&AudioProcessor::processingThreadFunc, this);
 }
@@ -22,66 +27,88 @@ void AudioProcessor::start() {
 void AudioProcessor::stop() {
 	if (!running.exchange(false))
 		return;
-	{
-		std::lock_guard lock(queueMutex);
-		dataAvailable.notify_one();
-	}
 
 	if (workerThread.joinable()) {
 		workerThread.join();
 	}
 }
 
+// https://portaudio.com/docs/v19-doxydocs/writing_a_callback.html
 void AudioProcessor::queueAudioData(const float* buffer, const size_t numSamples,
-									const float sampleRate, const size_t numChannels) {
-	if (!buffer || numSamples == 0 || !running || numChannels == 0)
-		return;
-
-	const size_t currentWrite = writeIndex.load(std::memory_order_relaxed);
-	const size_t nextWrite = (currentWrite + 1) % QUEUE_SIZE;
-
-	if (nextWrite == readIndex.load(std::memory_order_acquire)) {
-		droppedBufferCount.fetch_add(1, std::memory_order_relaxed);
-		return;
-	}
-
-	AudioBuffer& queuedBuffer = audioQueue[currentWrite];
-	queuedBuffer.sampleRate = sampleRate;
-	queuedBuffer.numChannels = numChannels;
-	queuedBuffer.sampleCount = std::min(numSamples, MAX_SAMPLES);
-	std::copy_n(buffer, queuedBuffer.sampleCount, queuedBuffer.data.begin());
-
-	writeIndex.store(nextWrite, std::memory_order_release);
-	{
-		std::lock_guard lock(queueMutex);
-		dataAvailable.notify_one();
-	}
+    const float sampleRate, const size_t numChannels) {
+    if (!buffer || !running.load(std::memory_order_acquire) || numChannels == 0 ||
+        !std::isfinite(sampleRate) || sampleRate < 8000.0f) return;
+    const size_t frames = numSamples / numChannels;
+    const size_t capacity = MAX_SAMPLES / numChannels;
+    if (capacity == 0) {
+        droppedBufferCount.fetch_add(1, std::memory_order_relaxed);
+        droppedFrameCount.fetch_add(frames, std::memory_order_relaxed);
+        return;
+    }
+    size_t copied = 0;
+    while (copied < frames && capacity > 0) {
+        const size_t current = writeIndex.load(std::memory_order_relaxed);
+        const size_t next = (current + 1) % QUEUE_SIZE;
+        if (next == readIndex.load(std::memory_order_acquire)) break;
+        auto& queued = audioQueue[current];
+        const size_t count = std::min(capacity, frames - copied);
+        queued.sampleRate = sampleRate;
+        queued.numChannels = numChannels;
+        queued.sampleCount = count * numChannels;
+        queued.firstFrame = sourceFramePosition + copied;
+        std::copy_n(buffer + copied * numChannels, queued.sampleCount, queued.data.begin());
+        writeIndex.store(next, std::memory_order_release);
+        copied += count;
+    }
+    if (copied < frames) {
+        droppedBufferCount.fetch_add(1, std::memory_order_relaxed);
+        droppedFrameCount.fetch_add(frames - copied, std::memory_order_relaxed);
+    }
+    sourceFramePosition += frames;
+    capturedFrameCount.store(sourceFramePosition, std::memory_order_release);
 }
 
 void AudioProcessor::processingThreadFunc() {
-	while (running.load(std::memory_order_acquire)) {
-		std::unique_lock lock(queueMutex);
-		dataAvailable.wait(lock, [this] {
-			return !running.load(std::memory_order_acquire) ||
-				   readIndex.load(std::memory_order_relaxed) !=
-					   writeIndex.load(std::memory_order_acquire);
-		});
-
-		if (!running.load(std::memory_order_acquire))
-			break;
-
-		lock.unlock();
-
-		while (running.load(std::memory_order_acquire)) {
-			const size_t currentRead = readIndex.load(std::memory_order_relaxed);
-			if (currentRead == writeIndex.load(std::memory_order_acquire)) {
-				break;
-			}
-
-			processBuffer(audioQueue[currentRead]);
-			readIndex.store((currentRead + 1) % QUEUE_SIZE, std::memory_order_release);
-		}
-	}
+    AudioBuffer silence;
+    std::uint64_t processed = 0;
+    float previousRate = 0.0f;
+    size_t previousChannels = 0;
+    const auto fillGap = [&](std::uint64_t end) {
+        if (previousChannels == 0 || previousChannels > MAX_SAMPLES) return;
+        silence.numChannels = previousChannels;
+        silence.sampleRate = previousRate;
+        std::fill(silence.data.begin(), silence.data.end(), 0.0f);
+        while (processed < end) {
+            const auto frames = std::min<std::uint64_t>(end - processed, MAX_SAMPLES / previousChannels);
+            silence.sampleCount = static_cast<size_t>(frames) * previousChannels;
+            processBuffer(silence);
+            processed += frames;
+            processedFrameCount.store(processed, std::memory_order_release);
+        }
+    };
+    for (;;) {
+        const size_t current = readIndex.load(std::memory_order_relaxed);
+        if (current == writeIndex.load(std::memory_order_acquire)) {
+            const auto captured = capturedFrameCount.load(std::memory_order_acquire);
+            if (current != writeIndex.load(std::memory_order_acquire)) continue;
+            fillGap(captured);
+            if (!running.load(std::memory_order_acquire)) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            continue;
+        }
+        const auto& buffer = audioQueue[current];
+        if (previousChannels == 0) {
+            previousChannels = buffer.numChannels;
+            previousRate = buffer.sampleRate;
+        }
+        fillGap(buffer.firstFrame);
+        processBuffer(buffer);
+        previousChannels = buffer.numChannels;
+        previousRate = buffer.sampleRate;
+        processed = buffer.firstFrame + buffer.sampleCount / buffer.numChannels;
+        processedFrameCount.store(processed, std::memory_order_release);
+        readIndex.store((current + 1) % QUEUE_SIZE, std::memory_order_release);
+    }
 }
 
 void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
@@ -101,18 +128,32 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
 	float maxMagnitudeVal = 0.0f;
 	FFTProcessor::AnalysisState primaryAnalysis{};
 	bool hasPrimaryAnalysis = false;
+	std::vector<float> channelLoudness(buffer.numChannels, -200.0f);
+    BufferedFrames presentationFrames(buffer.numChannels);
 
 	for (size_t ch = 0; ch < buffer.numChannels; ++ch) {
 		for (size_t i = 0; i < frames; ++i) {
 			channelBufferScratch[i] = buffer.data[i * buffer.numChannels + ch];
 		}
 
+        if (recordingAnalysis) {
+            while (recordingProcessors.size() < buffer.numChannels) {
+                auto processor = std::make_unique<FFTProcessor>();
+                processor->setHopSize(recordingHop);
+                recordingProcessors.push_back(std::move(processor));
+            }
+            recordingPendingFrames.resize(buffer.numChannels);
+            recordingProcessors[ch]->processBuffer(std::span(channelBufferScratch.data(), frames), buffer.sampleRate,
+                &recordingPendingFrames[ch]);
+            recordingProcessors[ch]->discardBufferedFrames();
+        }
 		FFTProcessor::AnalysisState analysis{};
-		fftProcessors[ch]->processBuffer(std::span(channelBufferScratch.data(), frames), buffer.sampleRate);
+		fftProcessors[ch]->processBuffer(std::span(channelBufferScratch.data(), frames), buffer.sampleRate, &presentationFrames[ch]);
 		fftProcessors[ch]->copyRawFrame(
 			stagingSpectralData.magnitudes[ch],
 			stagingSpectralData.phases[ch],
 			analysis);
+		channelLoudness[ch] = analysis.momentaryLoudnessLUFS;
 
 		if (!stagingSpectralData.magnitudes[ch].empty()) {
 			const auto maxIt = std::max_element(
@@ -137,13 +178,41 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
 		}
 	}
 
+    std::size_t completed = presentationFrames.empty() ? 0 : presentationFrames.front().size();
+    for (const auto& channel : presentationFrames) completed = std::min(completed, channel.size());
+    for (std::size_t i = 0; i < completed; ++i) {
+        AudioColourSample sample;
+        sample.sampleRate = buffer.sampleRate;
+        sample.channels = static_cast<std::uint32_t>(buffer.numChannels);
+        sample.timestamp = ((presentationFrames[0][i].frameCounter - 1) * static_cast<double>(primaryAnalysis.hopSize) +
+            primaryAnalysis.hopSize - FFTProcessor::FFT_SIZE * .5) / buffer.sampleRate;
+        sample.magnitudes.resize(buffer.numChannels);
+        sample.phases.resize(buffer.numChannels);
+        sample.bass.resize(buffer.numChannels);
+        std::vector<float> levels(buffer.numChannels);
+        for (std::size_t ch = 0; ch < buffer.numChannels; ++ch) {
+            sample.magnitudes[ch] = std::move(presentationFrames[ch][i].magnitudes);
+            sample.phases[ch] = std::move(presentationFrames[ch][i].phases);
+            sample.bass[ch] = presentationFrames[ch][i].bass;
+            levels[ch] = presentationFrames[ch][i].loudnessLUFS;
+        }
+        sample.loudnessLUFS = LoudnessMeter::combineChannelLoudness(levels);
+        const auto& result = livePresentation.process(sample);
+        if (i + 1 == completed) latestPresentation = std::make_shared<SpectralPresentation::LiveResult>(result);
+    }
+    stagingSpectralData.presentation = latestPresentation;
+
+    if (recordingAnalysis) {
+        recordingSampleCount += frames;
+        recordingRate = buffer.sampleRate;
+    }
 	stagingSpectralData.sampleRate = buffer.sampleRate;
 	stagingSpectralData.dominantFrequency = maxDominantFreq;
-	stagingSpectralData.momentaryLoudnessLUFS = primaryAnalysis.momentaryLoudnessLUFS;
-	stagingSpectralData.spectralFlux = primaryAnalysis.spectralFlux;
+	stagingSpectralData.momentaryLoudnessLUFS = LoudnessMeter::combineChannelLoudness(channelLoudness);
+	stagingSpectralData.spectralFlux = latestPresentation ? latestPresentation->frame.smoothingSignals.spectralFlux : 0.0f;
 	stagingSpectralData.frameCounter = primaryAnalysis.frameCounter;
 	stagingSpectralData.hopSize = primaryAnalysis.hopSize;
-	stagingSpectralData.onsetDetected = primaryAnalysis.onsetDetected;
+	stagingSpectralData.onsetDetected = latestPresentation && latestPresentation->frame.smoothingSignals.onsetDetected;
 
 	{
 		std::lock_guard lock(resultsMutex);
@@ -162,6 +231,11 @@ void AudioProcessor::copySpectralData(SpectralData& out) const {
 	out = currentSpectralData;
 }
 
+std::shared_ptr<const SpectralPresentation::LiveResult> AudioProcessor::getPresentation() const {
+    std::lock_guard lock(resultsMutex);
+    return currentSpectralData.presentation;
+}
+
 AudioProcessor::BufferedFrames AudioProcessor::consumeBufferedFrames() {
 	std::lock_guard processorLock(processorMutex);
 	BufferedFrames frames(activeChannelCount);
@@ -175,18 +249,58 @@ void AudioProcessor::discardBufferedFrames() {
 	(void)consumeBufferedFrames();
 }
 
-void AudioProcessor::setEQGains(const float low, const float mid, const float high) {
-	std::lock_guard processorLock(processorMutex);
-	eqLowGain = low;
-	eqMidGain = mid;
-	eqHighGain = high;
-	for (auto& processor : fftProcessors) {
-		processor->setEQGains(low, mid, high);
-	}
+void AudioProcessor::beginRecordingAnalysis(const int hopSize) {
+    std::lock_guard lock(processorMutex);
+    recordingProcessors.clear(); recordingSampleCount = 0; recordingRate = 0.0f;
+    recordingPendingFrames.clear();
+    recordingHop = std::clamp(hopSize, 1, FFTProcessor::FFT_SIZE / 2);
+    recordingAnalysis = true;
 }
 
-void AudioProcessor::reset() {
+AudioProcessor::BufferedFrames AudioProcessor::drainRecordingFramesLocked(const bool finish) {
+    auto frames = std::move(recordingPendingFrames);
+    frames.resize(recordingProcessors.size());
+    recordingPendingFrames = BufferedFrames(recordingProcessors.size());
+    for (size_t ch = 0; ch < frames.size(); ++ch) {
+        if (finish) {
+            auto tail = recordingProcessors[ch]->finish();
+            frames[ch].insert(frames[ch].end(), std::make_move_iterator(tail.begin()),std::make_move_iterator(tail.end()));
+        }
+    }
+    return frames;
+}
+
+AudioProcessor::BufferedFrames AudioProcessor::consumeRecordingFrames() {
+    std::lock_guard lock(processorMutex);
+    return drainRecordingFramesLocked(false);
+}
+
+AudioProcessor::BufferedFrames AudioProcessor::finishRecordingAnalysis(std::uint64_t& count, float& rate) {
+    const auto end = capturedFrameCount.load(std::memory_order_acquire);
+    while (running.load(std::memory_order_acquire) && processedFrameCount.load(std::memory_order_acquire) < end)
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::lock_guard lock(processorMutex);
+    recordingAnalysis = false;
+    count = recordingSampleCount; rate = recordingRate;
+    auto frames = drainRecordingFramesLocked(true);
+    recordingProcessors.clear();
+    return frames;
+}
+
+void AudioProcessor::cancelRecordingAnalysis() {
+    std::lock_guard lock(processorMutex);
+    recordingAnalysis = false; recordingProcessors.clear(); recordingPendingFrames.clear();
+}
+
+void AudioProcessor::setPresentationSettings(const RSYNPresentationSettings& settings) {
+    std::lock_guard lock(processorMutex);
+    livePresentation.setSettings(settings);
+}
+
+void AudioProcessor::reset(bool preserveColour) {
 	std::lock_guard processorLock(processorMutex);
+    livePresentation.reset(preserveColour);
+    latestPresentation.reset();
 	for (auto& processor : fftProcessors) {
 		processor->reset();
 	}
@@ -197,6 +311,7 @@ void AudioProcessor::reset() {
 		stagingSpectralData = {};
 	}
 	droppedBufferCount.store(0, std::memory_order_relaxed);
+    droppedFrameCount.store(0, std::memory_order_relaxed);
 }
 
 FFTProcessor& AudioProcessor::getFFTProcessor(size_t channel) {
@@ -219,7 +334,6 @@ size_t AudioProcessor::getChannelCount() const {
 void AudioProcessor::ensureProcessorCountLocked(const size_t numChannels) {
 	while (fftProcessors.size() < numChannels) {
 		auto processor = std::make_unique<FFTProcessor>();
-		processor->setEQGains(eqLowGain, eqMidGain, eqHighGain);
 		fftProcessors.push_back(std::move(processor));
 	}
 }

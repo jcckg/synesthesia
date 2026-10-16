@@ -25,8 +25,6 @@ class PresentationResources;
 namespace UIConstants {
     static constexpr float DEFAULT_SAMPLE_RATE = 44100.0f;
     static constexpr float DEFAULT_SMOOTHING_SPEED = 0.6f;
-    static constexpr float DEFAULT_SPECTRUM_SMOOTHING = 0.2f;
-    static constexpr float COLOUR_SMOOTH_UPDATE_FACTOR = 1.2f;
     static constexpr float COLOUR_DECAY_RATE = 0.5f;
 }
 
@@ -34,8 +32,8 @@ struct AudioSettings {
     float lowGain = 1.0f;
     float midGain = 1.0f;
     float highGain = 1.0f;
-    std::vector<std::vector<float>> smoothedMagnitudes;
-    float spectrumSmoothingFactor = UIConstants::DEFAULT_SPECTRUM_SMOOTHING;
+    std::vector<float> spectrumContributions;
+
 };
 
 struct VisualSettings {
@@ -80,6 +78,10 @@ struct PresentationDiagnostics {
 };
 
 struct UIState {
+    ColourCore::XYZ displayXYZ{};
+    bool displayXYZValid = false;
+    float presentationResponseSeconds = 0.0f;
+    ColourPresentation::ResponseRange presentationResponseRange;
     AudioSettings audioSettings;
     VisualSettings visualSettings;
     UIVisibility visibility;

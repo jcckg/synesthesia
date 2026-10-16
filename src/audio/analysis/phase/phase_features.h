@@ -1,6 +1,7 @@
 #pragma once
 
 #include <span>
+#include <cstdint>
 #include <vector>
 
 #include "resyne/encoding/formats/exporter.h"
@@ -19,6 +20,19 @@ struct PhaseFeatureMetrics {
     [[nodiscard]] bool isNeutral() const;
 };
 
+class LiveFrameTracker {
+public:
+    PhaseFeatureMetrics update(const SpectralPresentation::Frame& frame, std::uint64_t counter, int hopSize);
+    void reset();
+private:
+    std::vector<float> magnitudes, phases;
+    std::uint64_t previousCounter = 0;
+    float previousRate = 0.0f;
+    int previousHop = 0;
+    bool available = false;
+    PhaseFeatureMetrics cached{};
+};
+
 PhaseFeatureMetrics analyseTransition(std::span<const float> previousMagnitudes,
                                       std::span<const float> previousPhases,
                                       std::span<const float> currentMagnitudes,
@@ -34,4 +48,4 @@ PhaseFeatureMetrics analyseTransition(const SpectralPresentation::Frame* previou
 PhaseFeatureMetrics analyseTransition(const AudioColourSample* previousSample,
                                       const AudioColourSample& currentSample);
 
-} // namespace PhaseAnalysis
+}

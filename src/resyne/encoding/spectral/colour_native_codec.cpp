@@ -1,14 +1,7 @@
 #include "resyne/encoding/spectral/colour_native_codec.h"
 
 #include "colour/colour_core.h"
-#include "resyne/encoding/reconstruction/phase_wrapping.h"
-#include "resyne/encoding/reconstruction/transient_detection.h"
-#include "resyne/encoding/reconstruction/damage_detection.h"
-#include "resyne/encoding/reconstruction/phase_locking.h"
-#include "resyne/encoding/reconstruction/phase_vocoder.h"
 #include "resyne/encoding/reconstruction/pghi.h"
-#include "resyne/encoding/reconstruction/phase_smoothing.h"
-#include "resyne/recorder/loudness_utils.h"
 #include "constants.h"
 
 #include <algorithm>
@@ -16,7 +9,6 @@
 #include <atomic>
 #include <cmath>
 #include <limits>
-#include <numbers>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -30,9 +22,8 @@ constexpr float DB_RANGE = DB_MAX - DB_MIN;
 constexpr float EPSILON = 1e-6f;
 constexpr float DEFAULT_SAMPLE_RATE = 44100.0f;
 constexpr float MIN_SAMPLE_RATE = 8000.0f;
-constexpr float MAX_SAMPLE_RATE = 192000.0f;
-constexpr float MIN_BIN_INTENSITY = 1e-6f;
-constexpr float TWO_PI = 2.0f * std::numbers::pi_v<float>;
+constexpr float MAX_SAMPLE_RATE = 384000.0f;
+constexpr float MIN_BIN_INTENSITY = 1e-12f;
 constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
 
 bool isCommonBinCount(const size_t binCount) {
@@ -143,6 +134,9 @@ ColourNativeImage ColourNativeCodec::encode(const std::vector<AudioColourSample>
 }
 
 float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
+    if (image.height == 0 || image.width == 0 ||
+        image.width > std::numeric_limits<size_t>::max() / image.height ||
+        image.pixels.size() != image.width * image.height) return DEFAULT_SAMPLE_RATE;
 	size_t binCountPerChannel = 0;
 
 	const uint32_t metadataChannels = image.metadata.channels;
@@ -199,17 +193,13 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 				continue;
 			}
 
-			if (pixel.g > 1.0f) {
-				continue;
-			}
-			const float frequencyNormalised = std::clamp(pixel.g, 0.0f, 1.0f);
-			const float frequency = denormaliseLogFrequency(frequencyNormalised);
+			const float frequency = denormaliseLogFrequency(pixel.g);
 			if (!std::isfinite(frequency) || frequency <= 0.0f) {
 				continue;
 			}
 
 			const float candidate = frequency * fftSizeF / static_cast<float>(bin);
-			if (!std::isfinite(candidate) || candidate < MIN_SAMPLE_RATE || candidate > MAX_SAMPLE_RATE) {
+			if (!std::isfinite(candidate) || candidate < MIN_SAMPLE_RATE * 0.998f || candidate > MAX_SAMPLE_RATE * 1.002f) {
 				continue;
 			}
 
@@ -238,18 +228,18 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 		double sumSq = 0.0;
 		float commonRate = 0.0f;
 	};
-	
+
 	std::map<int, RateBucket> buckets;
 	int totalVotes = 0;
-	
+
 	constexpr std::array<float, 12> COMMON_RATES = {
 		8000.0f, 11025.0f, 16000.0f, 22050.0f, 32000.0f, 44100.0f,
 		48000.0f, 88200.0f, 96000.0f, 176400.0f, 192000.0f, 384000.0f
 	};
-	
+
 	for (float rate : candidates) {
 		for (float common : COMMON_RATES) {
-			if (std::abs(rate - common) < common * 0.002f) { 
+			if (std::abs(rate - common) < common * 0.002f) {
 				int key = static_cast<int>(common);
 				RateBucket& b = buckets[key];
 				b.count++;
@@ -261,20 +251,20 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 			}
 		}
 	}
-	
+
 	float bestRate = 0.0f;
 	double minStdDev = std::numeric_limits<double>::max();
 	const int minVotesRequired = std::max(10, totalVotes / 100);
-	
+
 	for (const auto& [key, bucket] : buckets) {
 		if (bucket.count < minVotesRequired) continue;
-		
+
 		double mean = bucket.sum / bucket.count;
 		double variance = (bucket.sumSq / bucket.count) - (mean * mean);
 		double stdDev = std::sqrt(std::max(0.0, variance));
-		
+
 		bool isBetter = false;
-		
+
 		if (bestRate == 0.0f) {
 			isBetter = true;
 		} else {
@@ -282,7 +272,7 @@ float ColourNativeCodec::detectSampleRate(const ColourNativeImage& image) {
 				isBetter = true;
 			}
 		}
-		
+
 		if (isBetter) {
 			minStdDev = stdDev;
 			bestRate = bucket.commonRate;
@@ -309,19 +299,22 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 														const std::function<void(float)>& onProgress) {
 	const uint32_t numChannels = image.metadata.channels > 0 ? image.metadata.channels : 1;
 	const bool invalidLayout = numChannels == 0 || numChannels > 8 || image.height == 0 ||
-		numChannels > image.height || (image.height % numChannels) != 0;
+		numChannels > image.height || (image.height % numChannels) != 0 ||
+        image.width > std::numeric_limits<size_t>::max() / std::max<size_t>(1, image.height) ||
+        image.pixels.size() != image.width * image.height;
 	const size_t binCount = invalidLayout ? 0 : (image.height / numChannels);
 
-	std::vector<AudioColourSample> samples(image.width);
+	std::vector<AudioColourSample> samples;
 	const size_t totalFrames = image.width;
-	if (binCount == 0 || binCount > ColourNativeCodec::MAX_BIN_COUNT || totalFrames == 0) {
+	if (binCount < 2 || binCount > ColourNativeCodec::MAX_BIN_COUNT || totalFrames == 0) {
 		if (onProgress) {
 			onProgress(1.0f);
 		}
 		return samples;
 	}
 
-	const size_t fftSize = binCount > 1 ? (binCount - 1) * 2 : 2;
+	samples.resize(image.width);
+    const size_t fftSize = binCount > 1 ? (binCount - 1) * 2 : 2;
 
 	if (!std::isfinite(sampleRate) || sampleRate <= EPSILON) {
 		sampleRate = DEFAULT_SAMPLE_RATE;
@@ -385,178 +378,29 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 		thread.join();
 	}
 
-	std::vector<std::vector<float>> allChannelsSpectralFlux(numChannels);
-	for (uint32_t ch = 0; ch < numChannels; ++ch) {
-		const auto& channelMagnitudes = allChannelsMagnitudes[ch];
-		allChannelsSpectralFlux[ch].resize(totalFrames, 0.0f);
-		for (size_t frame = 1; frame < totalFrames; ++frame) {
-			allChannelsSpectralFlux[ch][frame] = PhaseReconstruction::computeSpectralFlux(
-				channelMagnitudes[frame], channelMagnitudes[frame - 1]);
-		}
-	}
+    const size_t callbackStride = std::max<size_t>(1, totalFrames / 200);
+    std::vector<std::vector<std::vector<float>>> allChannelsReconstructedPhases(numChannels);
+    std::vector<std::thread> channelThreads;
+    std::atomic<uint32_t> channelsCompleted{0};
 
-	constexpr size_t TRANSIENT_WINDOW_RADIUS = 50;
-
-	const size_t callbackStride = std::max<size_t>(1, totalFrames / 200);
-	const float freqResolution = fftSize > 0 ? sampleRate / static_cast<float>(fftSize) : 0.0f;
-	constexpr size_t TRANSITION_RADIUS = 3;
-
-	constexpr float ADAPTIVE_DAMPING_FACTOR = 0.95f;
-	constexpr float DISCONTINUITY_THRESHOLD = std::numbers::pi_v<float> / 2.0f;
-
-	std::vector<std::vector<std::vector<float>>> allChannelsReconstructedPhases(numChannels);
-	std::vector<std::thread> channelThreads;
-	std::atomic<uint32_t> channelsCompleted{0};
-
-	auto processChannel = [&](uint32_t ch) {
-		allChannelsReconstructedPhases[ch].resize(totalFrames);
-
-		const auto& channelMagnitudes = allChannelsMagnitudes[ch];
-		const auto& channelRawPhases = allChannelsRawPhases[ch];
-		const auto& channelFrequencies = allChannelsFrequencies[ch];
-		const auto& channelSpectralFlux = allChannelsSpectralFlux[ch];
-
-		std::vector<float> prevDecodedPhase(binCount, 0.0f);
-		std::vector<float> prevOutputPhase(binCount, 0.0f);
-		std::vector<bool> phaseInitialised(binCount, false);
-		std::vector<int> silenceFrames(binCount, 0);
-
-		for (size_t frame = 0; frame < totalFrames; ++frame) {
-			const size_t windowStart = frame >= TRANSIENT_WINDOW_RADIUS ? frame - TRANSIENT_WINDOW_RADIUS : 0;
-			const size_t windowEnd = std::min(frame + TRANSIENT_WINDOW_RADIUS + 1, totalFrames);
-
-			float localMean = 0.0f;
-			size_t windowSize = 0;
-			for (size_t i = windowStart; i < windowEnd; ++i) {
-				localMean += channelSpectralFlux[i];
-				++windowSize;
-			}
-			if (windowSize > 0) {
-				localMean /= static_cast<float>(windowSize);
-			}
-
-			float localStdDev = 0.0f;
-			for (size_t i = windowStart; i < windowEnd; ++i) {
-				const float diff = channelSpectralFlux[i] - localMean;
-				localStdDev += diff * diff;
-			}
-			if (windowSize > 0) {
-				localStdDev = std::sqrt(localStdDev / static_cast<float>(windowSize));
-			}
-
-			const float localTransientThreshold = localMean + 1.5f * localStdDev;
-			const bool isTransient = channelSpectralFlux[frame] > localTransientThreshold;
-
-			const std::vector<float>& magnitudesFrame = channelMagnitudes[frame];
-			const std::vector<float>& rawPhasesFrame = channelRawPhases[frame];
-			const std::vector<float>& frequenciesFrame = channelFrequencies[frame];
-			std::vector<float> adjustedPhases(binCount, 0.0f);
-
-			const std::vector<bool> damagedMask = PhaseReconstruction::detectDamagedBins(channelMagnitudes, frame);
-			const std::vector<float> damageWeights = PhaseReconstruction::computeDamageBlend(damagedMask, TRANSITION_RADIUS);
-			const bool hasDamagedBins = std::any_of(damagedMask.begin(), damagedMask.end(),
-				[](bool value) { return value; });
-			const bool hasBlendRegions = std::any_of(damageWeights.begin(), damageWeights.end(),
-				[](float weight) { return weight > 0.0f; });
-
-			std::vector<float> reconstructedPhases(binCount, 0.0f);
-			if (hasBlendRegions) {
-				PhaseReconstruction::reconstructPhasePGHI(channelMagnitudes, channelFrequencies, frame, reconstructedPhases, sampleRate, hopSize, &prevOutputPhase);
-				PhaseReconstruction::alignReconstructedPhase(reconstructedPhases, prevOutputPhase, frequenciesFrame, damageWeights, sampleRate, hopSize);
-
-				const auto peaks = PhaseReconstruction::findSpectralPeaks(magnitudesFrame, MIN_BIN_INTENSITY * 5.0f);
-				PhaseReconstruction::applyPhaseLocking(reconstructedPhases, magnitudesFrame, peaks, damageWeights);
-				PhaseReconstruction::smoothPhase(reconstructedPhases, magnitudesFrame, 3);
-			}
-
-			for (size_t bin = 0; bin < binCount; ++bin) {
-				const float magnitude = magnitudesFrame[bin];
-				const float decodedPhase = PhaseReconstruction::wrapToPi(rawPhasesFrame[bin]);
-				const float frequency = frequenciesFrame[bin] > 0.0f
-					? frequenciesFrame[bin]
-					: freqResolution * static_cast<float>(bin);
-
-				const float expectedAdvance = (sampleRate > EPSILON && hopSize > 0)
-					? TWO_PI * frequency * static_cast<float>(hopSize) / sampleRate
-					: 0.0f;
-
-				const bool binActive = magnitude > MIN_BIN_INTENSITY;
-				silenceFrames[bin] = binActive ? 0 : std::min(silenceFrames[bin] + 1, 64);
-
-				float vocoderPhase = prevOutputPhase[bin];
-
-			if (!phaseInitialised[bin]) {
-					if (binActive) {
-						vocoderPhase = decodedPhase;
-						phaseInitialised[bin] = true;
-					} else {
-						vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
-					}
-				} else if (binActive) {
-					const float binDamageWeight = hasBlendRegions ? damageWeights[bin] : 0.0f;
-					const bool isEditedBin = binDamageWeight >= 0.01f;
-					
-					if (!isEditedBin) {
-						// Native ReSyne/TIFF exports already encode a phase vector per bin.
-						// Preserve that exact phase for untouched bins and only reconstruct
-						// where damage detection says the image has been edited.
-						vocoderPhase = decodedPhase;
-					} else if (isTransient) {
-						vocoderPhase = decodedPhase;
-					} else {
-						const float phaseDeviation = std::abs(PhaseReconstruction::wrapToPi(
-							decodedPhase - prevDecodedPhase[bin] - expectedAdvance));
-
-						if (phaseDeviation > DISCONTINUITY_THRESHOLD) {
-							vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
-						} else if (phaseDeviation > 0.6f) {
-							vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
-						} else {
-
-							const float phaseError = PhaseReconstruction::wrapToPi(
-								decodedPhase - prevDecodedPhase[bin] - expectedAdvance);
-							const float correctedAdvance = expectedAdvance + phaseError;
-							const float prediction = prevOutputPhase[bin] + correctedAdvance;
-							
-							const float driftError = PhaseReconstruction::wrapToPi(decodedPhase - prediction);
-							const float dampingScale = 1.0f - ADAPTIVE_DAMPING_FACTOR * (1.0f - binDamageWeight);
-							vocoderPhase = PhaseReconstruction::wrapToPi(prediction + dampingScale * driftError);
-						}
-					}
-				} else {
-					vocoderPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + expectedAdvance);
-				}
-
-				const float weight = hasBlendRegions ? std::clamp(damageWeights[bin], 0.0f, 1.0f) : 0.0f;
-				float finalPhase = vocoderPhase;
-
-				if (hasDamagedBins && weight > 0.0f) {
-					const float reconPhase = reconstructedPhases[bin];
-					const float phaseOffset = PhaseReconstruction::wrapToPi(reconPhase - vocoderPhase);
-					const float blendedPhase = PhaseReconstruction::wrapToPi(vocoderPhase + weight * phaseOffset);
-					const float smoothing = 0.4f + 0.6f * weight;
-					const float delta = PhaseReconstruction::wrapToPi(blendedPhase - prevOutputPhase[bin]);
-					finalPhase = PhaseReconstruction::wrapToPi(prevOutputPhase[bin] + smoothing * delta);
-				}
-
-				adjustedPhases[bin] = finalPhase;
-
-				if (binActive) {
-					prevDecodedPhase[bin] = decodedPhase;
-				}
-
-				prevOutputPhase[bin] = finalPhase;
-			}
-
-			allChannelsReconstructedPhases[ch][frame] = std::move(adjustedPhases);
-		}
-
-		channelsCompleted.fetch_add(1, std::memory_order_relaxed);
-		if (onProgress) {
-			const float channelProgress = 0.15f + 0.7f * (static_cast<float>(channelsCompleted.load(std::memory_order_relaxed)) / static_cast<float>(numChannels));
-			onProgress(channelProgress);
-		}
-	};
+    auto processChannel = [&](uint32_t ch) {
+        std::vector<std::vector<bool>> knownPhase(totalFrames, std::vector<bool>(binCount, false));
+        for (size_t frame = 0; frame < totalFrames; ++frame) {
+            for (size_t bin = 0; bin < binCount; ++bin) {
+                const auto& pixel = image.at(frame, static_cast<size_t>(ch) * binCount + bin);
+                const float cosine = 2.0f * pixel.b - 1.0f;
+                const float sine = 2.0f * pixel.a - 1.0f;
+                const float radius = std::hypot(cosine, sine);
+                knownPhase[frame][bin] = std::isfinite(pixel.b) && std::isfinite(pixel.a) &&
+                    pixel.b >= 0.0f && pixel.b <= 1.0f && pixel.a >= 0.0f && pixel.a <= 1.0f &&
+                    std::abs(radius - 1.0f) <= 0.02f;
+            }
+        }
+        allChannelsReconstructedPhases[ch] = PhaseReconstruction::reconstructPhasePGHI(
+            allChannelsMagnitudes[ch], allChannelsRawPhases[ch], knownPhase, fftSize, hopSize);
+        const uint32_t completed = channelsCompleted.fetch_add(1, std::memory_order_relaxed) + 1;
+        if (onProgress) onProgress(0.15f + 0.7f * static_cast<float>(completed) / static_cast<float>(numChannels));
+    };
 
 	if (numChannels > 1) {
 		channelThreads.reserve(numChannels);
@@ -680,8 +524,8 @@ void ColourNativeCodec::decodeTimeFrame(const std::vector<RGBAColour>& column,
 				: 0.0f;
 		}
 		if (bin == 0) {
-			resolvedFrequency = 0.0f;
-		}
+            resolvedFrequency = freqResolution * static_cast<float>(bin);
+        }
 		frequencies[bin] = resolvedFrequency;
 	}
 }
@@ -706,12 +550,13 @@ float ColourNativeCodec::normaliseMagnitude(const float magnitude) {
 		return 0.0f;
 	}
 
-	const float db = 20.0f * std::log10(std::max(magnitude, EPSILON));
+	const float db = 20.0f * std::log10(magnitude);
 	const float normalised = (db - DB_MIN) / DB_RANGE;
 	return std::clamp(normalised, 0.0f, 1.0f);
 }
 
 float ColourNativeCodec::denormaliseMagnitude(const float normalised) {
+    if (!std::isfinite(normalised) || normalised <= 0.0f) return 0.0f;
 	const float clamped = std::clamp(normalised, 0.0f, 1.0f);
 	const float db = clamped * DB_RANGE + DB_MIN;
 	return std::pow(10.0f, db / 20.0f);
@@ -721,23 +566,20 @@ float ColourNativeCodec::normaliseLogFrequency(const float frequency) {
 	if (!std::isfinite(frequency) || frequency <= 0.0f) {
 		return 0.0f;
 	}
-	const float clamped = std::clamp(frequency,
-		synesthesia::constants::MIN_AUDIO_FREQ,
-		synesthesia::constants::MAX_AUDIO_FREQ);
-	const float logValue = std::log2(clamped);
+	const float logValue = std::log2(frequency);
 	if (LOG_FREQ_RANGE <= EPSILON) {
 		return 0.0f;
 	}
 	const float normalised = (logValue - LOG_FREQ_MIN) / LOG_FREQ_RANGE;
-	return std::clamp(normalised, 0.0f, 1.0f);
+	return normalised;
 }
 
 float ColourNativeCodec::denormaliseLogFrequency(const float normalised) {
 	if (LOG_FREQ_RANGE <= EPSILON) {
 		return synesthesia::constants::MIN_AUDIO_FREQ;
 	}
-	const float clamped = std::max(normalised, 0.0f);
-	const float logValue = LOG_FREQ_MIN + clamped * LOG_FREQ_RANGE;
+	if (!std::isfinite(normalised)) return 0.0f;
+    const float logValue = LOG_FREQ_MIN + normalised * LOG_FREQ_RANGE;
 	const float maximumLogValue = std::log2(std::numeric_limits<float>::max()) - 1.0f;
 	return std::pow(2.0f, std::min(logValue, maximumLogValue));
 }

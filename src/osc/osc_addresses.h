@@ -15,6 +15,11 @@ inline constexpr const char* kFrameColourDisplayRAddress = "/synesthesia/frame/c
 inline constexpr const char* kFrameColourDisplayGAddress = "/synesthesia/frame/colour/display_g";
 inline constexpr const char* kFrameColourDisplayBAddress = "/synesthesia/frame/colour/display_b";
 inline constexpr const char* kFrameColourCIEXAddress = "/synesthesia/frame/colour/cie_x";
+inline constexpr const char* kFrameMeasurementCIE2015XAddress = "/synesthesia/frame/measurement/cie2015_x";
+inline constexpr const char* kFrameMeasurementCIE2015YAddress = "/synesthesia/frame/measurement/cie2015_y";
+inline constexpr const char* kFrameMeasurementCIE2015ZAddress = "/synesthesia/frame/measurement/cie2015_z";
+inline constexpr const char* kFrameMeasurementAvailableAddress = "/synesthesia/frame/measurement/available";
+inline constexpr const char* kFrameLoudnessIsLufsAddress = "/synesthesia/frame/analysis/loudness_is_lufs";
 inline constexpr const char* kFrameColourCIEYAddress = "/synesthesia/frame/colour/cie_y";
 inline constexpr const char* kFrameColourCIEZAddress = "/synesthesia/frame/colour/cie_z";
 inline constexpr const char* kFrameColourOklabLAddress = "/synesthesia/frame/colour/oklab_l";
@@ -57,7 +62,6 @@ inline constexpr const char* kFrameSmoothingPhaseCoherenceAddress = "/synesthesi
 inline constexpr const char* kFrameSmoothingPhaseTransientAddress = "/synesthesia/frame/smoothing/phase_transient_normalised";
 
 inline constexpr const char* kControlSmoothingAddress = "/synesthesia/control/smoothing";
-inline constexpr const char* kControlSpectrumSmoothingAddress = "/synesthesia/control/spectrum_smoothing";
 inline constexpr const char* kControlColourSpaceAddress = "/synesthesia/control/colour_space";
 inline constexpr const char* kControlGamutMappingAddress = "/synesthesia/control/gamut_mapping";
 

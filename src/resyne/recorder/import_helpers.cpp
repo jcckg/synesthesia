@@ -3,7 +3,6 @@
 #include "resyne/decoding/audio_decoder.h"
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/recorder/embedded_source_utils.h"
-#include "resyne/recorder/loudness_utils.h"
 #include "audio/analysis/fft/fft_processor.h"
 #include "colour/colour_core.h"
 #include "constants.h"
@@ -34,13 +33,6 @@ bool sanitiseDecodedAudio(AudioDecoding::DecodedAudio& decoded) {
         }
     }
     return changed;
-}
-
-bool hasUsableFrameLoudness(const AudioColourSample& sample) {
-    return std::isfinite(sample.loudnessLUFS) &&
-           std::isnormal(sample.loudnessLUFS) &&
-           sample.loudnessLUFS > -200.0f &&
-           sample.loudnessLUFS < 20.0f;
 }
 
 std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& decoded) {
@@ -110,24 +102,15 @@ std::shared_ptr<RSYNSourceData> buildSourceDataFromFile(const std::string& filep
 
 bool importAudioFile(
     const std::string& filepath,
-    ColourCore::ColourSpace colourSpace,
-    bool applyGamutMapping,
     int analysisHopSize,
-    float importLowGain,
-    float importMidGain,
-    float importHighGain,
     std::vector<AudioColourSample>& samples,
     AudioMetadata& metadata,
     std::string& errorMessage,
     const ProgressCallback& onProgress,
     const PreviewCallback& onPreview,
-    const bool enableSmoothing,
-    const bool enableMelWeighting,
     std::vector<float>* playbackAudio,
     const std::size_t maxAnalysisFrames
 ) {
-    (void)colourSpace;
-    (void)applyGamutMapping;
     if (onProgress) onProgress(0.1f);
 
     if (maxAnalysisFrames == 0) {
@@ -162,7 +145,7 @@ bool importAudioFile(
         return false;
     }
 
-    const int resolvedHopSize = std::clamp(analysisHopSize, 1, FFTProcessor::FFT_SIZE);
+    const int resolvedHopSize = std::clamp(analysisHopSize, 1, FFTProcessor::FFT_SIZE / 2);
 
     std::vector<std::unique_ptr<FFTProcessor>> processors;
     processors.reserve(numChannels);
@@ -171,9 +154,6 @@ bool importAudioFile(
     }
     for (auto& processor : processors) {
         processor->setHopSize(resolvedHopSize);
-        processor->setEQGains(importLowGain, importMidGain, importHighGain);
-        processor->setCriticalBandSmoothingEnabled(enableSmoothing);
-        processor->setMelWeightingEnabled(enableMelWeighting);
     }
 
     samples.clear();
@@ -185,6 +165,25 @@ bool importAudioFile(
     size_t offset = 0;
     uint64_t frameIndex = 0;
     bool hitFrameLimit = false;
+
+    metadata.sampleRate = sampleRate;
+    metadata.fftSize = FFTProcessor::FFT_SIZE;
+    metadata.hopSize = resolvedHopSize;
+    metadata.originalSampleCount = decoded.channelSamples[0].size();
+    metadata.analysisLeadingSamples = static_cast<std::uint32_t>(FFTProcessor::FFT_SIZE - resolvedHopSize);
+    metadata.durationSeconds = decoded.channelSamples[0].empty()
+        ? 0.0
+        : static_cast<double>(decoded.channelSamples[0].size()) / static_cast<double>(decoded.sampleRate);
+    metadata.windowType = "hann";
+    metadata.numFrames = 0;
+    metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
+    metadata.channels = numChannels;
+    metadata.version = "3.0.0";
+    metadata.sourceData.reset();
+    metadata.presentationData.reset();
+    metadata.lazyAsset.reset();
+
+    if (onPreview) onPreview(samples);
 
     auto consumeFrames = [&](std::vector<std::vector<FFTProcessor::FFTFrame>>&& channelFrames) {
         if (channelFrames.empty() || channelFrames[0].empty()) {
@@ -208,6 +207,7 @@ bool importAudioFile(
             AudioColourSample sample;
             sample.magnitudes.resize(numChannels);
             sample.phases.resize(numChannels);
+            sample.bass.resize(numChannels);
             sample.channels = numChannels;
 
             bool channelsAligned = true;
@@ -218,10 +218,11 @@ bool importAudioFile(
                 }
                 sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
                 sample.phases[ch] = std::move(channelFrames[ch][f].phases);
+                sample.bass[ch] = channelFrames[ch][f].bass;
                 if (ch == 0) {
                     sample.sampleRate = channelFrames[ch][f].sampleRate;
                     sample.loudnessLUFS = channelFrames[ch][f].loudnessLUFS;
-                    sample.splDb = channelFrames[ch][f].loudnessLUFS + synesthesia::constants::REFERENCE_SPL_AT_0_LUFS;
+                    sample.splDb = std::numeric_limits<float>::quiet_NaN();
                 }
             }
 
@@ -229,7 +230,15 @@ bool importAudioFile(
                 continue;
             }
 
-            sample.timestamp = (static_cast<double>(frameIndex) * static_cast<double>(resolvedHopSize)) /
+            std::vector<float> channelLoudness(numChannels);
+            for (uint32_t ch = 0; ch < numChannels; ++ch) {
+                channelLoudness[ch] = channelFrames[ch][f].loudnessLUFS;
+            }
+            sample.loudnessLUFS = LoudnessMeter::combineChannelLoudness(channelLoudness);
+            sample.splDb = std::numeric_limits<float>::quiet_NaN();
+
+            sample.timestamp = (static_cast<double>(frameIndex) * static_cast<double>(resolvedHopSize)
+                                + resolvedHopSize - FFTProcessor::FFT_SIZE * 0.5) /
                                static_cast<double>(decoded.sampleRate);
             samples.push_back(std::move(sample));
             ++frameIndex;
@@ -256,15 +265,12 @@ bool importAudioFile(
         const float processProgress = static_cast<float>(offset) / static_cast<float>(decoded.channelSamples[0].size());
         if (onProgress) onProgress(0.2f + (processProgress * 0.6f));
 
-        if (onPreview && (samples.size() % 500 < chunkSize / static_cast<size_t>(resolvedHopSize) ||
-            offset >= decoded.channelSamples[0].size())) {
-            onPreview(samples);
-        }
+        if (onPreview) onPreview(samples);
     }
 
     std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
     for (uint32_t ch = 0; ch < numChannels; ++ch) {
-        channelFrames[ch] = processors[ch]->getBufferedFrames();
+        channelFrames[ch] = processors[ch]->finish();
     }
     consumeFrames(std::move(channelFrames));
     if (hitFrameLimit) {
@@ -281,31 +287,9 @@ bool importAudioFile(
         return false;
     }
 
-    metadata.sampleRate = sampleRate;
-    metadata.fftSize = FFTProcessor::FFT_SIZE;
-    metadata.hopSize = resolvedHopSize;
-    metadata.durationSeconds = decoded.channelSamples[0].empty()
-        ? 0.0
-        : static_cast<double>(decoded.channelSamples[0].size()) / static_cast<double>(decoded.sampleRate);
-    metadata.windowType = "hann";
     metadata.numFrames = samples.size();
-    metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
-    metadata.channels = numChannels;
-    metadata.version = "3.0.0";
+    if (onPreview) onPreview(samples);
     metadata.sourceData = buildSourceDataFromFile(filepath);
-    metadata.presentationData.reset();
-    metadata.lazyAsset.reset();
-
-    const bool needsLoudnessBackfill = std::any_of(
-        samples.begin(),
-        samples.end(),
-        [](const AudioColourSample& sample) {
-            return !hasUsableFrameLoudness(sample);
-        });
-
-    if (needsLoudnessBackfill) {
-        ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, metadata);
-    }
 
     return true;
 }
@@ -339,18 +323,6 @@ bool importRsynFile(
         };
     }
 
-    SequenceFrameCallback frameCallback;
-    if (onPreview) {
-        frameCallback = [onPreview](const std::vector<AudioColourSample>& decoded, size_t validCount) {
-            if (validCount == 0 || decoded.empty()) {
-                return;
-            }
-            const size_t safeCount = std::min(validCount, decoded.size());
-            std::vector<AudioColourSample> preview(decoded.begin(), decoded.begin() + static_cast<std::vector<AudioColourSample>::difference_type>(safeCount));
-            onPreview(preview);
-        };
-    }
-
     if (!SequenceExporter::loadFromRsynShell(filepath, metadata, fileProgress)) {
         errorMessage = "parse failure";
         return false;
@@ -371,13 +343,22 @@ bool importRsynFile(
         metadata.windowType = "hann";
     }
 
+    samples.clear();
+    if (onPreview) onPreview(samples);
+
     if (playbackAudio != nullptr) {
+        playbackAudio->clear();
         if (SequenceExporter::hydrateRsynSource(metadata)) {
             EmbeddedSourceUtils::decodeEmbeddedSourceAudio(metadata, *playbackAudio, errorMessage);
+            errorMessage.clear();
         }
+        if (!SequenceExporter::hydrateRsynSamples(metadata, samples,
+            [onProgress](float progress) { if (onProgress) onProgress(0.6f + progress * 0.2f); })) {
+            errorMessage = "archived audio frames could not be loaded";
+            return false;
+        }
+        if (onPreview) onPreview(samples);
     }
-
-    samples.clear();
 
     if (metadata.presentationData != nullptr && !metadata.presentationData->frames.empty()) {
         metadata.numFrames = metadata.presentationData->frames.size();

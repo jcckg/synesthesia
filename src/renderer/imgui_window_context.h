@@ -35,4 +35,4 @@ private:
     bool initialised_ = false;
 };
 
-} // namespace Renderer
+}

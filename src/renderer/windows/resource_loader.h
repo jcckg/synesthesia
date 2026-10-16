@@ -86,4 +86,4 @@ inline std::string extractResourceToTemp(int resourceId, const std::string& file
     return filePath.string();
 }
 
-} // namespace ResourceLoader
+}

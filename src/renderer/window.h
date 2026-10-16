@@ -45,4 +45,4 @@ private:
     GLFWwindow* window_ = nullptr;
 };
 
-} // namespace Renderer
+}

@@ -52,7 +52,12 @@ bool Recorder::exportRecording(RecorderState& state,
             options.ffmpegExecutable = ffmpegLocator.executablePath();
             options.colourSpace = state.videoColourSpace;
             options.applyGamutMapping = state.videoGamutMapping;
-            options.smoothingAmount = state.videoSmoothingAmount;
+            options.smoothingAmount = state.presentationSmoothingAmount;
+            options.smoothingEnabled = state.presentationSmoothingEnabled;
+            options.manualSmoothing = state.presentationManualSmoothing;
+            options.lowGain = state.importLowGain;
+            options.midGain = state.importMidGain;
+            options.highGain = state.importHighGain;
             options.width = state.videoWidth;
             options.height = state.videoHeight;
             options.frameRate = state.videoFrameRate;
@@ -166,7 +171,12 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 					options.ffmpegExecutable = ffmpegLocator.executablePath();
 					options.colourSpace = state.videoColourSpace;
 					options.applyGamutMapping = state.videoGamutMapping;
-					options.smoothingAmount = state.videoSmoothingAmount;
+					options.smoothingAmount = state.presentationSmoothingAmount;
+            options.smoothingEnabled = state.presentationSmoothingEnabled;
+            options.manualSmoothing = state.presentationManualSmoothing;
+            options.lowGain = state.importLowGain;
+            options.midGain = state.importMidGain;
+            options.highGain = state.importHighGain;
 					options.width = state.videoWidth;
 					options.height = state.videoHeight;
 					options.frameRate = state.videoFrameRate;

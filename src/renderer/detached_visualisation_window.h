@@ -28,7 +28,7 @@ public:
 
     bool open(ReSyne::RecorderState& recorderState, bgfx::TextureFormat::Enum colourFormat);
     void close(ReSyne::RecorderState& recorderState);
-    void renderFrame(UIState& state, const AudioInput& audioInput);
+    void renderFrame(UIState& state);
 
     [[nodiscard]] bool isOpen() const;
 
@@ -45,4 +45,4 @@ private:
     bgfx::TextureFormat::Enum colourFormat_ = bgfx::TextureFormat::BGRA8;
 };
 
-} // namespace Renderer
+}

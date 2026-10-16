@@ -7,12 +7,6 @@
 
 namespace ReSyne::UI {
 
-std::vector<Timeline::TimelineSample> samplePreviewData(
-    RecorderState& state,
-    size_t maxSamples,
-    std::lock_guard<std::mutex>& lock
-);
-
 void renderStatusMessage(RecorderState& state);
 
 }

@@ -2,9 +2,11 @@
 
 #include <array>
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 #include "colour/colour_core.h"
+#include "audio/analysis/fft/bass_analyser.h"
 
 namespace PhaseAnalysis {
 struct PhaseFeatureMetrics;
@@ -25,11 +27,18 @@ struct Frame {
     std::vector<float> phases;
     std::vector<float> frequencies;
     float sampleRate = 0.0f;
+    std::shared_ptr<const AudioAnalysis::BassSpectrum> bass;
+    std::vector<float> measurementMagnitudes;
+    std::vector<float> measurementFrequencies;
+    std::vector<float> measurementPowerWeights;
+    std::size_t measurementFftSize = 0;
 };
 
 struct PreparedFrame {
-    std::vector<float> visualiserMagnitudes;
+    std::vector<float> analysisMagnitudes;
     ColourCore::FrameResult colourResult;
+    std::shared_ptr<const ColourPresentation::SpectralContributions> contributions;
+    float frequencyResolution = 0.0f;
 };
 
 Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
@@ -40,10 +49,6 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
 
 std::vector<float> buildSharedMagnitudes(const Frame& frame,
                                          const Settings& settings);
-
-std::vector<float> buildVisualiserMagnitudes(const std::vector<float>& sharedMagnitudes,
-                                             float sampleRate,
-                                             const ColourCore::FrameResult& colourResult);
 
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,

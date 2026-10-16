@@ -2,13 +2,14 @@
 
 #include <array>
 #include <atomic>
-#include <condition_variable>
+
 #include <memory>
 #include <mutex>
 #include <thread>
 #include <vector>
 
 #include "fft_processor.h"
+#include "audio/analysis/presentation/live_presentation.h"
 
 class AudioProcessor {
 public:
@@ -22,6 +23,7 @@ public:
 		uint64_t frameCounter = 0;
 		int hopSize = FFTProcessor::HOP_SIZE;
 		bool onsetDetected = false;
+        std::shared_ptr<const SpectralPresentation::LiveResult> presentation;
 	};
 
 	using BufferedFrames = std::vector<std::vector<FFTProcessor::FFTFrame>>;
@@ -35,18 +37,25 @@ public:
 	void copySpectralData(SpectralData& out) const;
 	BufferedFrames consumeBufferedFrames();
 	void discardBufferedFrames();
-	void setEQGains(float low, float mid, float high);
-	void reset();
+    void beginRecordingAnalysis(int hopSize);
+    BufferedFrames consumeRecordingFrames();
+    BufferedFrames finishRecordingAnalysis(std::uint64_t& sampleCount, float& sampleRate);
+    void cancelRecordingAnalysis();
+
+    void setPresentationSettings(const RSYNPresentationSettings& settings);
+    [[nodiscard]] std::shared_ptr<const SpectralPresentation::LiveResult> getPresentation() const;
+	void reset(bool preserveColour = false);
 	void start();
 	void stop();
 	uint64_t getDroppedBufferCount() const { return droppedBufferCount.load(std::memory_order_relaxed); }
+    uint64_t getDroppedFrameCount() const { return droppedFrameCount.load(std::memory_order_relaxed); }
 
 	FFTProcessor& getFFTProcessor(size_t channel = 0);
 	const FFTProcessor& getFFTProcessor(size_t channel = 0) const;
 	size_t getChannelCount() const;
 
 private:
-	static constexpr size_t QUEUE_SIZE = 16;
+	static constexpr size_t QUEUE_SIZE = 64;
 	static constexpr size_t MAX_SAMPLES = 4096;
 
 	struct AudioBuffer {
@@ -54,6 +63,7 @@ private:
 		size_t sampleCount = 0;
 		float sampleRate = 44100.0f;
 		size_t numChannels = 1;
+        std::uint64_t firstFrame = 0;
 	};
 
 	std::array<AudioBuffer, QUEUE_SIZE> audioQueue;
@@ -61,18 +71,28 @@ private:
 	std::atomic<size_t> readIndex;
 	std::thread workerThread;
 	std::atomic<bool> running;
-	std::condition_variable dataAvailable;
-	std::mutex queueMutex;
+    std::uint64_t sourceFramePosition = 0;
+    std::atomic<std::uint64_t> capturedFrameCount{0};
+    std::atomic<std::uint64_t> processedFrameCount{0};
+    std::atomic<std::uint64_t> droppedFrameCount{0};
 	std::atomic<uint64_t> droppedBufferCount{0};
 
 	mutable std::mutex processorMutex;
 	std::vector<std::unique_ptr<FFTProcessor>> fftProcessors;
 	size_t activeChannelCount = 0;
-	float eqLowGain = 1.0f;
-	float eqMidGain = 1.0f;
-	float eqHighGain = 1.0f;
+
+
 	std::vector<float> channelBufferScratch;
 	SpectralData stagingSpectralData;
+    SpectralPresentation::LivePresentation livePresentation;
+    std::shared_ptr<const SpectralPresentation::LiveResult> latestPresentation;
+    bool recordingAnalysis = false;
+    int recordingHop = FFTProcessor::HOP_SIZE;
+    std::vector<std::unique_ptr<FFTProcessor>> recordingProcessors;
+    BufferedFrames recordingPendingFrames;
+    std::uint64_t recordingSampleCount = 0;
+    float recordingRate = 0.0f;
+    BufferedFrames drainRecordingFramesLocked(bool finish);
 
 	mutable std::mutex resultsMutex;
 	SpectralData currentSpectralData;

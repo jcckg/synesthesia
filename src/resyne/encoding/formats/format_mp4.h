@@ -14,6 +14,11 @@ struct ExportOptions {
     ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
     bool applyGamutMapping = true;
     float smoothingAmount = 0.6f;
+    bool smoothingEnabled = true;
+    bool manualSmoothing = false;
+    float lowGain = 1.0f;
+    float midGain = 1.0f;
+    float highGain = 1.0f;
     int width = 1920;
     int height = 1080;
     int frameRate = 60;

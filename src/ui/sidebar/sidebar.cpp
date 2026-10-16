@@ -137,7 +137,6 @@ void renderVisualisationSections(const RenderArgs& args,
                                  const bool liveInputActive,
                                  const bool showEQControls) {
     Controls::renderVisualiserSettingsPanel(
-        args.colourSmoother,
         args.uiState.visualSettings.colourSmoothingSpeed,
         args.uiState.visualSettings.manualSmoothing,
         args.uiState.visibility.showSpectrumAnalyser,
@@ -145,7 +144,8 @@ void renderVisualisationSections(const RenderArgs& args,
         args.layout.padding,
         args.layout.labelWidth,
         args.layout.controlWidth,
-        args.layout.buttonHeight);
+        args.layout.buttonHeight,
+        &args.uiState.resyneState.recorderState, args.uiState.presentationResponseSeconds, args.uiState.presentationResponseRange);
 
     if (showEQControls) {
         Controls::renderEQControlsPanel(
@@ -254,7 +254,7 @@ void render(RenderArgs& args) {
 
     if (args.uiState.visualSettings.activeView == UIState::View::ReSyne) {
         if (showFrequencyInfo) {
-            Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.uiState, args.recorderState);
+            Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.recorderState);
         }
         renderReSyneSections(args);
         renderVisualisationSections(args, hasLiveInput, showEQControls);
@@ -265,7 +265,7 @@ void render(RenderArgs& args) {
     }
 
     if (args.uiState.visualSettings.activeView == UIState::View::Visualisation && showFrequencyInfo) {
-        Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.uiState, args.recorderState);
+        Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.recorderState);
         renderVisualisationSections(args, hasLiveInput, showEQControls);
     }
 

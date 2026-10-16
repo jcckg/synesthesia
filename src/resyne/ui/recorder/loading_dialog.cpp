@@ -1,50 +1,39 @@
 #include "resyne/recorder/recorder.h"
 
+#include <algorithm>
+#include <cstdio>
+
 #include "imgui.h"
-#include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace ReSyne {
 
 void Recorder::drawLoadingDialog(RecorderState& state) {
-    if (!state.showLoadingDialog) {
-        return;
-    }
+    if (!state.showLoadingDialog || !state.timeline.gradientRegionValid) return;
 
-    const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
-    ImGui::OpenPopup("Loading...");
+    const ImVec2 min = state.timeline.gradientRegionMin;
+    const ImVec2 max = state.timeline.gradientRegionMax;
+    if (max.x - min.x < 32.0f || max.y - min.y < 24.0f) return;
+    const float progress = std::clamp(state.loadingProgress, 0.0f, 1.0f);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->AddRectFilled(ImVec2(min.x, max.y - 3.0f), max,
+        ImGui::GetColorU32(ImGuiCol_FrameBg));
+    drawList->AddRectFilled(ImVec2(min.x, max.y - 3.0f),
+        ImVec2(min.x + (max.x - min.x) * progress, max.y), ImGui::GetColorU32(ImGuiCol_Text));
 
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize |
-                                   ImGuiWindowFlags_NoMove |
-                                   ImGuiWindowFlags_NoCollapse;
-
-    if (ImGui::BeginPopupModal("Loading...", nullptr, flags)) {
-        ImGui::Text("Importing file:");
-        ImGui::Spacing();
-
-        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
-        const ImVec4 filenameCol = isLightMode ? ImVec4(0.25f, 0.25f, 0.25f, 1.0f) : ImVec4(0.85f, 0.85f, 0.85f, 1.0f);
-        ImGui::PushStyleColor(ImGuiCol_Text, filenameCol);
-        ImGui::TextWrapped("%s", state.loadingFilename.c_str());
-        ImGui::PopStyleColor();
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        constexpr float PROGRESS_BAR_WIDTH = 400.0f;
-        ImGui::ProgressBar(state.loadingProgress, ImVec2(PROGRESS_BAR_WIDTH, 0.0f));
-
-        const std::string operationStatus = getLoadingOperationStatus(state);
-        if (!operationStatus.empty()) {
-            ImGui::Spacing();
-            const ImVec4 statusCol = isLightMode ? ImVec4(0.4f, 0.4f, 0.4f, 1.0f) : ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
-            ImGui::PushStyleColor(ImGuiCol_Text, statusCol);
-            ImGui::TextWrapped("%s", operationStatus.c_str());
-            ImGui::PopStyleColor();
-        }
-
-        ImGui::EndPopup();
+    char percentage[16];
+    std::snprintf(percentage, sizeof(percentage), "%.0f%%", static_cast<double>(progress * 100.0f));
+    const std::string label = std::string(percentage) + "  " + state.loadingFilename;
+    const float width = std::min(ImGui::CalcTextSize(label.c_str()).x + 16.0f, max.x - min.x - 16.0f);
+    const ImVec2 badgeMin(max.x - width - 8.0f, min.y + 8.0f);
+    const ImVec2 badgeMax(max.x - 8.0f, badgeMin.y + ImGui::GetFontSize() + 12.0f);
+    drawList->AddRectFilled(badgeMin, badgeMax, ImGui::GetColorU32(ImGuiCol_WindowBg), 3.0f);
+    drawList->PushClipRect(badgeMin, badgeMax, true);
+    drawList->AddText(ImVec2(badgeMin.x + 8.0f, badgeMin.y + 6.0f),
+        ImGui::GetColorU32(ImGuiCol_Text), label.c_str());
+    drawList->PopClipRect();
+    if (ImGui::IsMouseHoveringRect(badgeMin, badgeMax)) {
+        const auto status = getLoadingOperationStatus(state);
+        ImGui::SetTooltip("%s\n%s", state.loadingFilename.c_str(), status.c_str());
     }
 }
 

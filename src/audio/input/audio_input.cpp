@@ -1,4 +1,5 @@
 #include "audio_input.h"
+#include "audio/analysis/meter_response.h"
 
 #include <algorithm>
 #include <array>
@@ -56,10 +57,6 @@ public:
 #endif
 
 namespace {
-
-float smoothedLevel(const float current, const float target) {
-	return std::max(target, current * 0.84f);
-}
 
 #ifdef __APPLE__
 constexpr UInt32 makeFourCC(const char a, const char b, const char c, const char d) {
@@ -704,6 +701,10 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 	}
 	sampleRate = static_cast<float>(streamInfo->sampleRate);
 
+    processor.stop();
+    processor.reset(true);
+    processor.start();
+
 	if (const PaError startErr = Pa_StartStream(stream); startErr != paNoError) {
 		std::cerr << "AudioInput: Failed to start stream: " << Pa_GetErrorText(startErr) << std::endl;
 		stopStream();
@@ -752,9 +753,9 @@ void AudioInput::stopStream() {
 	resetStereoLevels();
 }
 
-void AudioInput::updateStereoLevels(const float left, const float right) {
-	leftLevel.store(smoothedLevel(leftLevel.load(), std::clamp(left, 0.0f, 1.0f)));
-	rightLevel.store(smoothedLevel(rightLevel.load(), std::clamp(right, 0.0f, 1.0f)));
+void AudioInput::updateStereoLevels(const float left, const float right, const double elapsed) {
+	leftLevel.store(AudioMeter::peakResponse(leftLevel.load(), std::clamp(left, 0.0f, 1.0f), elapsed));
+	rightLevel.store(AudioMeter::peakResponse(rightLevel.load(), std::clamp(right, 0.0f, 1.0f), elapsed));
 }
 
 void AudioInput::resetStereoLevels() {
@@ -775,11 +776,6 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 
 	try {
 		const auto* inBuffer = static_cast<const float*>(input);
-		constexpr size_t MAX_BUFFER_SIZE = 4096;
-		thread_local std::vector<float> processedBuffer(MAX_BUFFER_SIZE);
-		if (frameCount > MAX_BUFFER_SIZE) {
-			processedBuffer.resize(frameCount);
-		}
 
 		audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount), audio->sampleRate, static_cast<size_t>(audio->channelCount));
 
@@ -812,7 +808,7 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 			rightPeak = secondStrongestPeak > 0.0f ? secondStrongestPeak : strongestPeak;
 		}
 
-		audio->updateStereoLevels(leftPeak, rightPeak);
+		audio->updateStereoLevels(leftPeak, rightPeak, static_cast<double>(frameCount) / static_cast<double>(std::max(1.0f, audio->sampleRate)));
 	}
 	catch (const std::exception& e) {
 		std::cerr << "[Audio] Exception in audio callback: " << e.what() << std::endl;
@@ -827,6 +823,7 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 }
 
 struct AudioInputLevelMonitor::MonitoredDevice {
+    double sampleRate = 48000.0;
 	int paIndex = paNoDevice;
 	int channelCount = 0;
 	PaStream* stream = nullptr;
@@ -967,6 +964,8 @@ bool AudioInputLevelMonitor::startDevice(MonitoredDevice& device) {
 		return false;
 	}
 
+    const auto* streamInfo = Pa_GetStreamInfo(stream);
+    device.sampleRate = streamInfo ? streamInfo->sampleRate : deviceInfo->defaultSampleRate;
 	const PaError startErr = Pa_StartStream(stream);
 	if (startErr != paNoError) {
 		Pa_CloseStream(stream);
@@ -1000,7 +999,8 @@ int AudioInputLevelMonitor::monitorCallback(const void* input, [[maybe_unused]] 
 		rightPeak = std::max(rightPeak, right);
 	}
 
-	device->leftLevel.store(smoothedLevel(device->leftLevel.load(), std::clamp(leftPeak, 0.0f, 1.0f)));
-	device->rightLevel.store(smoothedLevel(device->rightLevel.load(), std::clamp(rightPeak, 0.0f, 1.0f)));
+    const double elapsed = static_cast<double>(frameCount) / std::max(1.0, device->sampleRate);
+	device->leftLevel.store(AudioMeter::peakResponse(device->leftLevel.load(), leftPeak, elapsed));
+	device->rightLevel.store(AudioMeter::peakResponse(device->rightLevel.load(), rightPeak, elapsed));
 	return paContinue;
 }

@@ -1,251 +1,132 @@
-#include "colour/colour_core.h"
 #include "smoothing.h"
 
 #include <algorithm>
 #include <cmath>
 
-namespace {
-
-constexpr float kMinStiffness = 8.0f;
-constexpr float kMaxStiffness = 120.0f;
-
-float smoothingAmountToBaseStiffness(float smoothingAmount) {
-    smoothingAmount = std::clamp(smoothingAmount, 0.0f, 1.0f);
-    const float responseAmount = 1.0f - smoothingAmount;
-    return kMinStiffness * std::pow(kMaxStiffness / kMinStiffness, responseAmount);
+float manualResponseTime(float amount) {
+    amount = std::isfinite(amount) ? std::clamp(amount, 0.0f, 1.0f) : 0.6f;
+    return 0.04f * std::pow(1.5f / 0.04f, amount);
 }
 
-float baseStiffnessToSmoothingAmount(float stiffness) {
-    const float clampedStiffness = std::clamp(stiffness, kMinStiffness, kMaxStiffness);
-    const float logRatio = std::log(clampedStiffness / kMinStiffness) /
-        std::log(kMaxStiffness / kMinStiffness);
-    return std::clamp(1.0f - logRatio, 0.0f, 1.0f);
+float manualSmoothingAmount(float seconds) {
+    seconds = std::isfinite(seconds) ? std::clamp(seconds, 0.04f, 1.5f) : manualResponseTime(.6f);
+    return std::log(seconds / 0.04f) / std::log(1.5f / 0.04f);
 }
 
-float applyAdaptiveStiffness(const float baseStiffness,
-                             const SmoothingSignalFeatures& features) {
-    float adaptiveStiffness = baseStiffness;
-
-    constexpr float onsetStiffnessBoost = 0.45f;
-    if (features.onsetDetected) {
-        adaptiveStiffness *= (1.0f + onsetStiffnessBoost);
+// https://www.mathworks.com/help/audio/ref/audioenvelopefollower-system-object.html
+// https://librosa.org/doc/0.11.0/generated/librosa.util.peak_pick.html
+// https://www.itl.nist.gov/div898/handbook/pmd/section1/pmd141.htm
+// https://www.dsprelated.com/freebooks/filters/Time_Constant_One_Pole.html
+float AudioResponseTracker::update(const SmoothingSignalFeatures& features, bool abruptAttack) {
+    const double time = features.audioTimeSeconds;
+    if (!std::isfinite(time)) return static_cast<float>(response_);
+    if (time == previousTime_) return static_cast<float>(response_);
+    if (time < previousTime_) *this = {};
+    const double dt = std::isfinite(previousTime_) ? time - previousTime_ : 0.0;
+    const double level = std::isfinite(features.frameLevelDb) ? std::clamp(static_cast<double>(features.frameLevelDb), -140.0, 24.0) : -140.0;
+    levels_.emplace_back(time, level);
+    modulationLevels_.emplace_back(time, level);
+    while (modulationLevels_.size() > 2 && modulationLevels_[1].first < time - 1.0)
+        modulationLevels_.pop_front();
+    while (levels_.size() > 2 && levels_[1].first < time - 0.15) levels_.pop_front();
+    double sumT = 0.0, sumL = 0.0, sumTT = 0.0, sumTL = 0.0, sumLL = 0.0, total = 0.0;
+    double variation = 0.0, firstLevel = level;
+    for (std::size_t i = 1; i < levels_.size(); ++i) {
+        const double start = std::max(levels_[i-1].first, time - .15);
+        const double end = levels_[i].first;
+        const double a = start - time, b = end - time, width = b - a;
+        if (width <= 0.0) continue;
+        const double first = std::lerp(levels_[i-1].second, levels_[i].second,
+            (start - levels_[i-1].first) / (end - levels_[i-1].first));
+        const double last = levels_[i].second;
+        if (total == 0.0) firstLevel = first;
+        sumT += width*(a+b)*.5;
+        sumL += width*(first+last)*.5;
+        sumTT += width*(a*a+a*b+b*b)/3.0;
+        sumTL += width*((2*a+b)*first+(a+2*b)*last)/6.0;
+        sumLL += width*(first*first+first*last+last*last)/3.0;
+        total += width;
+        variation += std::abs(last-first);
     }
-
-    constexpr float fluxStiffnessGain = 8.0f;
-    const float fluxContribution = std::clamp(features.spectralFlux * fluxStiffnessGain, 0.0f, 1.0f);
-    adaptiveStiffness *= (1.0f + fluxContribution);
-
-    constexpr float flatnessSuppression = 0.6f;
-    const float clampedFlatness = std::clamp(features.spectralFlatness, 0.0f, 1.0f);
-    const float noiseSuppression = 1.0f - clampedFlatness * flatnessSuppression;
-    adaptiveStiffness *= std::clamp(noiseSuppression, 0.35f, 1.0f);
-
-    constexpr float crestStiffnessGain = 0.35f;
-    adaptiveStiffness *= (1.0f + features.spectralCrestNorm * crestStiffnessGain);
-
-    constexpr float phaseTransientGain = 0.55f;
-    adaptiveStiffness *= (1.0f + features.phaseTransientNorm * phaseTransientGain);
-
-    constexpr float phaseCoherenceGain = 0.12f;
-    adaptiveStiffness *= (1.0f + features.phaseCoherenceNorm * phaseCoherenceGain);
-
-    constexpr float phaseInstabilitySuppression = 0.28f;
-    const float instabilityPenalty = features.phaseInstabilityNorm * (1.0f - 0.65f * features.phaseTransientNorm);
-    adaptiveStiffness *= std::clamp(1.0f - instabilityPenalty * phaseInstabilitySuppression, 0.7f, 1.0f);
-
-    constexpr float psychoacousticRange = 0.5f;
-    const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
-    const float brightness = std::clamp(features.brightnessNormalised, 0.0f, 1.0f);
-    const float psychoScalar = 0.5f * loudness + 0.5f * brightness;
-    adaptiveStiffness *= (1.0f + psychoScalar * psychoacousticRange);
-
-    return std::clamp(adaptiveStiffness, kMinStiffness * 0.5f, kMaxStiffness * 2.5f);
-}
-
-}
-
-float resolveAdaptiveSmoothingAmount(const float baseSmoothingAmount,
-                                     const SmoothingSignalFeatures& features) {
-    const float baseStiffness = smoothingAmountToBaseStiffness(baseSmoothingAmount);
-    const float adaptiveStiffness = applyAdaptiveStiffness(baseStiffness, features);
-    return baseStiffnessToSmoothingAmount(adaptiveStiffness);
-}
-
-SpringSmoother::SpringSmoother(const float stiffness, const float damping, const float mass)
-	: m_stiffness(stiffness), m_baseStiffness(stiffness), m_damping(damping), m_mass(mass), m_rgbCacheDirty(true) {
-    initialiseToDefaults();
-}
-
-void SpringSmoother::initialiseToDefaults() {
-    m_channels[0] = {50.0f, 0.0f, 50.0f};
-    m_channels[1] = {0.0f, 0.0f, 0.0f};
-    m_channels[2] = {0.0f, 0.0f, 0.0f};
-
-    m_currentRGB[0] = m_currentRGB[1] = m_currentRGB[2] = 0.5f;
-}
-
-void SpringSmoother::reset(const float r, const float g, const float b) {
-    float X = 0.0f;
-    float Y = 0.0f;
-    float Z = 0.0f;
-    float L = 0.0f;
-    float a = 0.0f;
-    float b_comp = 0.0f;
-    ColourCore::RGBtoXYZ(r, g, b, X, Y, Z, ColourCore::ColourSpace::Rec2020);
-    ColourCore::XYZtoOklab(X, Y, Z, L, a, b_comp);
-
-    resetOklab(L, a, b_comp);
-}
-
-void SpringSmoother::resetOklab(const float L, const float a, const float b_comp) {
-    m_channels[0] = {L, 0.0f, L};
-    m_channels[1] = {a, 0.0f, a};
-    m_channels[2] = {b_comp, 0.0f, b_comp};
-
-    float r = 0.0f;
-    float g = 0.0f;
-    float b = 0.0f;
-    float X = 0.0f;
-    float Y = 0.0f;
-    float Z = 0.0f;
-    ColourCore::OklabtoXYZ(L, a, b_comp, X, Y, Z);
-    ColourCore::XYZtoRGB(X, Y, Z, r, g, b, ColourCore::ColourSpace::Rec2020, true, true);
-    m_currentRGB[0] = r;
-    m_currentRGB[1] = g;
-    m_currentRGB[2] = b;
-    m_rgbCacheDirty = false;
-}
-
-void SpringSmoother::setTargetColour(const float r, const float g, const float b) {
-    float L, a, b_comp;
-    float X = 0.0f;
-    float Y = 0.0f;
-    float Z = 0.0f;
-    ColourCore::RGBtoXYZ(r, g, b, X, Y, Z, ColourCore::ColourSpace::Rec2020);
-    ColourCore::XYZtoOklab(X, Y, Z, L, a, b_comp);
-
-    setTargetOklab(L, a, b_comp);
-}
-
-void SpringSmoother::setTargetOklab(const float L, const float a, const float b_comp) {
-    m_channels[0].targetPosition = L;
-    m_channels[1].targetPosition = a;
-    m_channels[2].targetPosition = b_comp;
-}
-
-bool SpringSmoother::update(float deltaTime) {
-    deltaTime = std::min(deltaTime, MAX_DELTA_TIME);
-    bool significantMovement = false;
-
-    for (int i = 0; i < 3; ++i) {
-        SpringState& channel = m_channels[i];
-        
-        const float displacement = channel.position - channel.targetPosition;
-        const float springForce = -m_stiffness * displacement;
-        const float dampingForce = -m_damping * channel.velocity;
-        const float acceleration = (springForce + dampingForce) / m_mass;
-
-        const float prevVelocity = channel.velocity;
-        const float prevPosition = channel.position;
-
-        channel.velocity += acceleration * deltaTime;
-        channel.position += channel.velocity * deltaTime;
-
-        if (i == 0) {
-            channel.position = std::clamp(channel.position, LAB_L_MIN, LAB_L_MAX);
-        } else {
-            channel.position = std::clamp(channel.position, LAB_AB_MIN, LAB_AB_MAX);
-        }
-
-        const float positionDelta = std::abs(channel.position - prevPosition);
-        const float velocityDelta = std::abs(channel.velocity - prevVelocity);
-
-        if (positionDelta > MIN_DELTA || velocityDelta > MIN_DELTA) {
-            significantMovement = true;
+    double slope = 0.0, confidence = 0.0;
+    if (total >= .06 - 1e-9) {
+        const double varianceT = sumTT - sumT*sumT/total;
+        const double varianceL = sumLL - sumL*sumL/total;
+        const double covariance = sumTL - sumT*sumL/total;
+        if (varianceT > 1e-12 && varianceL > 1e-8) {
+            slope = covariance / varianceT;
+            confidence = std::clamp(covariance*covariance/(varianceT*varianceL), 0.0, 1.0);
         }
     }
-
-    if (significantMovement) {
-        m_rgbCacheDirty = true;
+    const double monotonicity = variation > 0.0 ? std::abs(level - firstLevel) / variation : 0.0;
+    const auto smoothWeight = [](double value, double start, double end) {
+        const double fraction = std::clamp((value - start) / (end - start), 0.0, 1.0);
+        return fraction * fraction * (3.0 - 2.0 * fraction);
+    };
+    const double trendWeight = smoothWeight(confidence, .7, .9) * smoothWeight(monotonicity, .9, .99);
+    const bool trend = trendWeight > 0.0;
+    const double noise = std::isfinite(features.spectralFlatness) ? std::clamp(static_cast<double>(features.spectralFlatness), 0.0, 1.0) : 0.0;
+    double desired = std::lerp(.4, .75, noise);
+    constexpr double response95 = 2.995732273553991;
+    constexpr double decibelsPerNeper = 8.685889638065037;
+    constexpr double trackingError = .25;
+    if (trend && std::abs(slope) > 3.0) {
+        const double sourceTimeConstant = decibelsPerNeper / std::abs(slope);
+        const double trackingRatio = trackingError / (1.0 + trackingError);
+        desired = std::lerp(desired, std::clamp(response95 * sourceTimeConstant * trackingRatio, .08, desired), trendWeight);
     }
-
-    return significantMovement;
-}
-
-void SpringSmoother::updateRGBCache() const {
-    float r, g, b;
-    float X = 0.0f;
-    float Y = 0.0f;
-    float Z = 0.0f;
-    ColourCore::OklabtoXYZ(m_channels[0].position, m_channels[1].position,
-                           m_channels[2].position, X, Y, Z);
-    ColourCore::XYZtoRGB(X, Y, Z, r, g, b, ColourCore::ColourSpace::Rec2020, true, true);
-
-    m_currentRGB[0] = std::clamp(r, 0.0f, 1.0f);
-    m_currentRGB[1] = std::clamp(g, 0.0f, 1.0f);
-    m_currentRGB[2] = std::clamp(b, 0.0f, 1.0f);
-    m_rgbCacheDirty = false;
-}
-
-void SpringSmoother::getCurrentColour(float& r, float& g, float& b) const {
-    if (m_rgbCacheDirty) {
-        updateRGBCache();
+    const bool earlyAttack = abruptAttack && !previousAbruptAttack_;
+    const bool confirmedAttack = features.onsetDetected && !previousOnset_;
+    const bool accepted = (earlyAttack || (confirmedAttack && !earlyAttackPending_)) &&
+        level > -70.0 &&
+        (!std::isfinite(lastAttack_) || time - lastAttack_ >= .08 - 1e-9);
+    attackDetected_ = accepted;
+    if (accepted) {
+        if (earlyAttack) earlyAttackPending_ = true;
+        if (std::isfinite(lastAttack_)) {
+            const double interval = time - lastAttack_;
+            if (interval > 1.0) intervals_.clear();
+            else { intervals_.push_back(interval); if (intervals_.size() > 6) intervals_.pop_front(); }
+        }
+        lastAttack_ = time;
+        attackResponse_ = trend && slope > 3.0 ?
+            std::clamp(response95 * decibelsPerNeper / slope * trackingError / (1.0 + trackingError), .06, .08) : .06;
+        attackUntil_ = time + .06;
     }
-
-    r = m_currentRGB[0];
-    g = m_currentRGB[1];
-    b = m_currentRGB[2];
+    if (confirmedAttack || (!abruptAttack && features.spectralFlux <= 0.0f)) earlyAttackPending_ = false;
+    previousOnset_ = features.onsetDetected;
+    previousAbruptAttack_ = abruptAttack;
+    if (time <= attackUntil_ + 1e-9) desired = std::min(desired, attackResponse_);
+    if (intervals_.size() >= 3) {
+        auto intervals = intervals_;
+        std::sort(intervals.begin(), intervals.end());
+        const double interval = (intervals[(intervals.size()-1)/2] + intervals[intervals.size()/2]) * .5;
+        if (time - lastAttack_ < std::min(1.0, 2.0*interval) && intervals.back() < 1.5*intervals.front())
+            desired = std::clamp(desired, .08, std::clamp(interval, .12, .4));
+    }
+    double minimumLevel = level, maximumLevel = level;
+    int reversals = 0, direction = 0;
+    for (std::size_t i = 1; i < modulationLevels_.size(); ++i) {
+        minimumLevel = std::min(minimumLevel, modulationLevels_[i].second);
+        maximumLevel = std::max(maximumLevel, modulationLevels_[i].second);
+        const double difference = modulationLevels_[i].second - modulationLevels_[i - 1].second;
+        const int nextDirection = difference > .05 ? 1 : difference < -.05 ? -1 : 0;
+        if (nextDirection != 0) {
+            if (direction != 0 && nextDirection != direction) ++reversals;
+            direction = nextDirection;
+        }
+    }
+    if (!modulationLevels_.empty() && time - modulationLevels_.front().first >= .5 - 1e-9 &&
+        reversals >= 3 && maximumLevel - minimumLevel > 1.0 && maximumLevel - minimumLevel < 24.0)
+        desired = std::max(desired, .22);
+    if (accepted) response_ = desired;
+    else response_ += -std::expm1(-dt / (desired < response_ ? .02 : .15)) * (desired - response_);
+    previousTime_ = time;
+    return static_cast<float>(response_);
 }
 
-void SpringSmoother::getCurrentOklab(float& L, float& a, float& b) const {
-    L = m_channels[0].position;
-    a = m_channels[1].position;
-    b = m_channels[2].position;
-}
-
-void SpringSmoother::setSmoothingAmount(float smoothingAmount) {
-    smoothingAmount = std::clamp(smoothingAmount, 0.0f, 1.0f);
-
-    m_baseStiffness = smoothingAmountToBaseStiffness(smoothingAmount);
-    m_stiffness = m_baseStiffness;
-    m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * 0.5f;
-}
-
-float SpringSmoother::getSmoothingAmount() const {
-    return baseStiffnessToSmoothingAmount(m_baseStiffness);
-}
-
-// Stowell & Plumbley (2007) - adaptive whitening for improved onset detection
-// Adaptive smoothing with perceptual cues
-bool SpringSmoother::update(const float deltaTime, const SmoothingSignalFeatures& features) {
-    const float adaptiveStiffness = applyAdaptiveStiffness(m_baseStiffness, features);
-    const float loudness = std::clamp(features.loudnessNormalised, 0.0f, 1.0f);
-
-    m_stiffness = adaptiveStiffness;
-    constexpr float BASE_DAMPING_RATIO = 0.65f;
-    constexpr float DAMPING_RANGE = 0.25f;
-    // Spectral rolloff → damping: bright timbre (high rolloff) = more responsive colour;
-    // warm timbre (low rolloff) = more sluggish, smoother transitions
-    constexpr float ROLLOFF_DAMPING_RANGE = 0.15f;
-    const float rolloffDampingOffset = (0.5f - features.spectralRolloffNorm) * ROLLOFF_DAMPING_RANGE;
-    const float phaseDampingOffset =
-        features.phaseInstabilityNorm * 0.12f -
-        features.phaseCoherenceNorm * 0.05f -
-        features.phaseTransientNorm * 0.04f;
-    const float dampingRatio = std::clamp(
-        BASE_DAMPING_RATIO + (1.0f - loudness) * DAMPING_RANGE + rolloffDampingOffset + phaseDampingOffset,
-        0.45f, 0.95f);
-    m_damping = 2.0f * std::sqrt(m_stiffness * m_mass) * dampingRatio;
-
-    return update(deltaTime);
-}
-
-bool SpringSmoother::update(const float deltaTime, const bool onsetDetected,
-                            const float spectralFlux, const float spectralFlatness) {
-    SmoothingSignalFeatures features{};
-    features.onsetDetected = onsetDetected;
-    features.spectralFlux = spectralFlux;
-    features.spectralFlatness = spectralFlatness;
-    features.spectralRolloffNorm = 0.5f;  // neutral: no damping offset when rolloff is unavailable
-    return update(deltaTime, features);
+void AudioResponseTracker::shiftLevel(double decibels) {
+    if (!std::isfinite(decibels) || decibels == 0) return;
+    for (auto& level : levels_) level.second += decibels;
+    for (auto& level : modulationLevels_) level.second += decibels;
 }

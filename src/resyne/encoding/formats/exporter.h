@@ -8,11 +8,13 @@
 #include <memory>
 
 #include "resyne/encoding/formats/rsyn_asset.h"
+#include "audio/analysis/fft/bass_analyser.h"
 
 struct AudioColourSample {
 	std::vector<std::vector<float>> magnitudes;
 	std::vector<std::vector<float>> phases;
 	std::vector<std::vector<float>> frequencies;
+    std::vector<std::shared_ptr<const AudioAnalysis::BassSpectrum>> bass;
 	double timestamp;
 	float sampleRate;
 	float loudnessLUFS = std::numeric_limits<float>::quiet_NaN();
@@ -25,6 +27,8 @@ struct AudioMetadata {
     int fftSize = 0;
     int hopSize = 0;
     double durationSeconds = 0.0;
+    std::uint64_t originalSampleCount = 0;
+    std::uint32_t analysisLeadingSamples = 0;
     std::string windowType = "hann";
     size_t numFrames = 0;
     size_t numBins = 0;

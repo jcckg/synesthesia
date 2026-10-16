@@ -62,7 +62,7 @@ ImTextureID textureIdFromHandle(const bgfx::TextureHandle handle) {
     return static_cast<ImTextureID>(handle.idx);
 }
  
-} // namespace
+}
 
 class PresentationResources::SampledTexture {
 public:
@@ -335,12 +335,14 @@ ImTextureID PresentationResources::updateTimelineTexture(
     const float visibleEnd,
     const int width,
     const ColourCore::ColourSpace colourSpace,
-    const bool applyGamutMapping) {
-    if (!initialised_ || timelineTexture_ == nullptr || samples.empty() || width <= 0) {
+    const bool applyGamutMapping,
+    const ColourPresentation::ColourTrack* track,
+    double duration) {
+    if (!initialised_ || timelineTexture_ == nullptr || (samples.empty() && (track == nullptr || track->size() == 0)) || width <= 0) {
         return ImTextureID_Invalid;
     }
 
-    const auto safeWidth = static_cast<std::uint16_t>(std::clamp(width, 1, static_cast<int>(std::numeric_limits<std::uint16_t>::max())));
+    const auto safeWidth = static_cast<std::uint16_t>(std::clamp(width, 1, static_cast<int>(std::min<std::uint32_t>(bgfx::getCaps()->limits.maxTextureSize, std::numeric_limits<std::uint16_t>::max()))));
     const bool canReuseCachedTexture =
         sampleRevision > 0 &&
         timelineTexture_->textureId() != ImTextureID_Invalid &&
@@ -350,7 +352,8 @@ ImTextureID PresentationResources::updateTimelineTexture(
         timelineTextureCacheKey_.visibleStart == visibleStart &&
         timelineTextureCacheKey_.visibleEnd == visibleEnd &&
         timelineTextureCacheKey_.colourSpace == colourSpace &&
-        timelineTextureCacheKey_.applyGamutMapping == applyGamutMapping;
+        timelineTextureCacheKey_.applyGamutMapping == applyGamutMapping &&
+        timelineTextureCacheKey_.duration == duration;
     if (canReuseCachedTexture) {
         return timelineTexture_->textureId();
     }
@@ -363,7 +366,7 @@ ImTextureID PresentationResources::updateTimelineTexture(
         safeWidth,
         colourSpace,
         applyGamutMapping,
-        timelinePixels_);
+        timelinePixels_, track, duration);
 
     if (!timelineTexture_->update(timelinePixels_, safeWidth, 1, sampledTextureFormat_)) {
         return ImTextureID_Invalid;
@@ -376,7 +379,8 @@ ImTextureID PresentationResources::updateTimelineTexture(
         visibleStart,
         visibleEnd,
         colourSpace,
-        applyGamutMapping
+        applyGamutMapping,
+        duration
     };
 
     return timelineTexture_->textureId();

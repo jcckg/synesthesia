@@ -50,6 +50,10 @@ void appendNamedValueMessages(osc::OutboundPacketStream& packet, const OSCFrameD
     appendFloatValue(packet, kFrameColourCIEXAddress, frame.colour.cieX);
     appendFloatValue(packet, kFrameColourCIEYAddress, frame.colour.cieY);
     appendFloatValue(packet, kFrameColourCIEZAddress, frame.colour.cieZ);
+    appendFloatValue(packet, kFrameMeasurementCIE2015XAddress, frame.colour.measurementXYZ.X);
+    appendFloatValue(packet, kFrameMeasurementCIE2015YAddress, frame.colour.measurementXYZ.Y);
+    appendFloatValue(packet, kFrameMeasurementCIE2015ZAddress, frame.colour.measurementXYZ.Z);
+    appendBoolValue(packet, kFrameMeasurementAvailableAddress, frame.colour.measurementAvailable);
     appendFloatValue(packet, kFrameColourOklabLAddress, frame.colour.oklabL);
     appendFloatValue(packet, kFrameColourOklabAAddress, frame.colour.oklabA);
     appendFloatValue(packet, kFrameColourOklabBAddress, frame.colour.oklabB);
@@ -63,6 +67,7 @@ void appendNamedValueMessages(osc::OutboundPacketStream& packet, const OSCFrameD
     appendFloatValue(packet, kFrameAnalysisSpectralFluxAddress, frame.spectral.spectralFlux);
 
     appendFloatValue(packet, kFrameAnalysisLoudnessDbAddress, frame.loudness.loudnessDb);
+    appendBoolValue(packet, kFrameLoudnessIsLufsAddress, frame.loudness.loudnessIsLufs);
     appendFloatValue(packet, kFrameAnalysisLoudnessNormalisedAddress, frame.loudness.loudnessNormalised);
     appendFloatValue(packet, kFrameAnalysisFrameLoudnessDbAddress, frame.loudness.frameLoudnessDb);
     appendFloatValue(packet, kFrameAnalysisMomentaryLoudnessAddress, frame.loudness.momentaryLoudnessLUFS);

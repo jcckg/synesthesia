@@ -63,8 +63,6 @@ bool Recorder::ensureRsynSamplesLoaded(RecorderState& state) {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         state.metadata = std::move(metadata);
         state.samples = std::move(loadedSamples);
-        state.timelinePreviewCache.clear();
-        state.timelinePreviewCacheDirty = true;
     }
 
     return true;
@@ -106,7 +104,6 @@ bool Recorder::ensurePlaybackAudioLoaded(RecorderState& state) {
                 std::lock_guard<std::mutex> lock(state.samplesMutex);
                 state.metadata = std::move(metadata);
                 state.playbackAudio = std::move(playbackAudio);
-                state.timelinePreviewCacheDirty = true;
             }
 
             ensureRsynSamplesLoaded(state);

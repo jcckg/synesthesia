@@ -114,15 +114,10 @@ jobs:
       - name: Package for macOS (Apple Silicon)
         run: |
           cd build
-          # Create a temporary directory for DMG contents
           mkdir -p dmg_contents
           cp -R Synesthesia.app dmg_contents/
           ln -s /Applications dmg_contents/Applications
-          
-          # Create the DMG with the contents directory
           hdiutil create -volname "Synesthesia" -srcfolder dmg_contents -ov -format UDZO synesthesia-mac-arm.dmg
-          
-          # Clean up temporary directory
           rm -rf dmg_contents
 
       - name: Upload macOS artifact
@@ -239,21 +234,17 @@ jobs:
       - name: Get version from commit
         id: get-version
         run: |
-          # Extract version from commit message (can be customized as needed)
           VERSION=$(echo "${{ github.event.head_commit.message }}" | grep -oP '(?<=--release\s*)[^\s]+' || echo "v$(date +'%Y.%m.%d')")
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Generate changelog
         id: changelog
         run: |
-          # Find the last release commit
           LAST_RELEASE_COMMIT=$(git log --grep="--release" --format="%H" | sed -n 2p)
           
           if [ -z "$LAST_RELEASE_COMMIT" ]; then
-            # If no previous release found, use all commits
             CHANGELOG=$(git log --pretty=format:"- %s (%h) by %an%n" ${{ github.sha }})
           else
-            # Get commits between last release and current commit (excluding the last release commit)
             CHANGELOG=$(git log --pretty=format:"- %s (%h) by %an%n" $LAST_RELEASE_COMMIT..${{ github.sha }} | grep -v "\-\-release")
           fi
           

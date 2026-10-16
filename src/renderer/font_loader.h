@@ -6,4 +6,4 @@ namespace Renderer {
 
 bool loadFonts(ImGuiIO& io, float dpiScale);
 
-} // namespace Renderer
+}
