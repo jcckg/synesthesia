@@ -16,25 +16,18 @@ inline std::vector<double> contributionDensity(std::span<const float> contributi
     const double minimum = ColourPresentation::contributionMinimumFrequency;
     const double maximum = ColourPresentation::contributionMaximumFrequency;
     const double octaveWidth = std::log2(maximum / minimum) / static_cast<double>(contributions.size()-1);
-    double total = 0.0;
-    for (const float contribution : contributions)
-        if (std::isfinite(contribution) && contribution > 0.0f) total += contribution;
-    // Show relative colour presence; the soft floor lets quiet contributions fade instead of normalising silence upwards.
-    constexpr double silenceReference = .01;
-    const double normalising = total + silenceReference;
     for (std::size_t i = 0; i < contributions.size(); ++i) {
         const double value = std::isfinite(contributions[i]) ? static_cast<double>(std::max(0.0f,contributions[i])) : 0.0;
         const double width = octaveWidth * (i == 0 || i+1 == contributions.size() ? .5 : 1.0);
         // The shared contribution grid already contains the bass detail; a full-rate FFT blur would erase it again.
-        density[i] = value / (normalising * width);
+        density[i] = value / width;
     }
     return density;
 }
 
 inline double displayHeight(double density) {
     density = std::max(0.0,density);
-    // Leave headroom for transient changes after normalising the colour mix.
-    constexpr double halfHeightDensity = 2.0;
+    constexpr double halfHeightDensity = .5;
     return density / (halfHeightDensity+density);
 }
 

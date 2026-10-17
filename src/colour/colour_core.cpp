@@ -10,6 +10,7 @@
 
 #include "audio/analysis/phase/phase_features.h"
 #include "colour/cie_2015.h"
+#include "audio/analysis/loudness/k_weighting.h"
 
 namespace {
 
@@ -337,6 +338,45 @@ float calculateLoudnessDbFromSpectrum(std::span<const float> magnitudes, const C
     }
 
     return static_cast<float>(10.0 * std::log10(meanSquare));
+}
+
+// https://www.itu.int/dms_pubrec/itu-r/rec/bs/R-REC-BS.1770-5-202311-I!!PDF-E.pdf
+float calculateBrightnessDb(std::span<const float> magnitudes, std::span<const float> frequencies,
+    float sampleRate, const ColourCore::SpectrumLayout* layout) {
+    if (layout && layout->kWeightedMagnitudes.size() >= 2 &&
+        std::all_of(layout->kWeightedMagnitudes.begin(), layout->kWeightedMagnitudes.end(),
+            [](float value) { return std::isfinite(value) && value >= 0.0f; })) {
+        const float gain = std::isfinite(layout->brightnessPowerGain) ? layout->brightnessPowerGain : 1.0f;
+        return gain > 0.0f ? -.691f + calculateLoudnessDbFromSpectrum(layout->kWeightedMagnitudes, nullptr) +
+            10.0f * std::log10(gain) : -std::numeric_limits<float>::infinity();
+    }
+    struct Cache {
+        float sampleRate = 0.0f;
+        std::vector<float> frequencies;
+        std::vector<double> weights;
+    };
+    thread_local Cache cache;
+    if (cache.sampleRate != sampleRate || cache.frequencies.size() != frequencies.size() ||
+        !std::equal(frequencies.begin(), frequencies.end(), cache.frequencies.begin())) {
+        cache.sampleRate = sampleRate;
+        cache.frequencies.assign(frequencies.begin(), frequencies.end());
+        cache.weights.resize(frequencies.size());
+        const auto sections = AudioAnalysis::kWeighting(sampleRate);
+        for (std::size_t i = 0; i < frequencies.size(); ++i)
+            cache.weights[i] = std::isfinite(frequencies[i]) && frequencies[i] >= 0 && frequencies[i] <= sampleRate * .5f ?
+                AudioAnalysis::kWeightingPower(sections, frequencies[i], sampleRate) : 0.0;
+    }
+    double power = 0.0;
+    for (std::size_t i = 0; i < magnitudes.size(); ++i) {
+        const double weight = layout && layout->powerWeights.size() == magnitudes.size() ?
+            layout->powerWeights[i] : (i == 0 || i + 1 == magnitudes.size() ? 1.0 : .5);
+        const double magnitude = magnitudes[i];
+        power += magnitude * magnitude * weight * cache.weights[i];
+    }
+    const auto fftSize = layout && layout->fftSize > 0 ? layout->fftSize : 2 * (magnitudes.size() - 1);
+    if (fftSize > 2) power /= .375 * static_cast<double>(fftSize - 1) / fftSize;
+    if (layout && std::isfinite(layout->brightnessPowerGain)) power *= std::max(0.0f, layout->brightnessPowerGain);
+    return power > 0 ? static_cast<float>(-.691 + 10 * std::log10(power)) : -std::numeric_limits<float>::infinity();
 }
 
 float relativeLoudnessStrength(const float loudnessDb) {
@@ -1075,6 +1115,8 @@ FrameResult analyseSpectrum(std::span<const float> magnitudes,
         }
     }
     const float computedLoudnessDb = calculateLoudnessDbFromSpectrum(cleanMagnitudes, layout);
+    const float brightnessLoudnessDb = clampLoudnessDb(
+        calculateBrightnessDb(cleanMagnitudes, effectiveFrequencies, sampleRate, layout));
 
     for (size_t i = 0; i < cleanMagnitudes.size(); ++i) {
         if (!std::isfinite(effectiveFrequencies[i]) ||
@@ -1101,9 +1143,6 @@ FrameResult analyseSpectrum(std::span<const float> magnitudes,
     const float loudnessDb = result.loudnessIsLufs ? overrideLoudnessDb : computedLoudnessDb;
     const float clampedLoudnessDb = clampLoudnessDb(loudnessDb);
     const float loudnessNormalised = std::clamp(normaliseLoudness(clampedLoudnessDb), 0.0f, 1.0f);
-    const float transientMix = 0.0f;
-    const float brightnessLoudnessDb = clampedLoudnessDb;
-
     if (std::isfinite(outputSettings.pascalsPerDigitalUnit) && outputSettings.pascalsPerDigitalUnit > 0.0f) {
         result.estimatedSPL = computedLoudnessDb + soundPressureLevel(outputSettings.pascalsPerDigitalUnit);
     }
@@ -1137,7 +1176,6 @@ FrameResult analyseSpectrum(std::span<const float> magnitudes,
     result.brightnessLoudnessDb = brightnessLoudnessDb;
     result.loudnessNormalised = loudnessNormalised;
     result.brightnessNormalised = brightnessGain;
-    result.transientMix = transientMix;
     ColourCore::XYZtoLab(result.X, result.Y, result.Z, result.L, result.a, result.b_comp);
     ColourCore::XYZtoRGB(result.X, result.Y, result.Z,
                          result.r, result.g, result.b,

@@ -9,8 +9,6 @@
 #include <vector>
 
 #include "audio_processor.h"
-#include "dc_filter.h"
-#include "noise_gate.h"
 #include "fft_processor.h"
 
 class AudioInput {
@@ -53,8 +51,6 @@ public:
 private:
 	PaStream* stream;
 	AudioProcessor processor;
-	DCFilter dcFilter;
-	NoiseGate noiseGate;
 	float sampleRate;
 	int channelCount;
 	std::atomic<int> activeChannel;

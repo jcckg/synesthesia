@@ -17,7 +17,6 @@ constexpr float kCrestLogScale = 4.0f;
 
 SmoothingSignalFeatures buildSignalFeatures(const ColourCore::FrameResult& result) {
     SmoothingSignalFeatures features{};
-    features.frameLevelDb = result.frameLoudnessDb;
     features.spectralFlatness = result.spectralFlatness;
     features.loudnessNormalised = std::clamp(result.loudnessNormalised, 0.0f, 1.0f);
     features.brightnessNormalised = std::clamp(result.brightnessNormalised, 0.0f, 1.0f);

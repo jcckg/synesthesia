@@ -136,14 +136,12 @@ void renderViewTabs(RenderArgs& args) {
 void renderVisualisationSections(const RenderArgs& args,
                                  const bool liveInputActive,
                                  const bool showEQControls) {
-    Controls::renderVisualiserSettingsPanel(
+    Controls::renderColourSmoothingPanel(
         args.uiState.visualSettings.colourSmoothingSpeed,
         args.uiState.visualSettings.manualSmoothing,
         args.uiState.visibility.showSpectrumAnalyser,
         args.layout.width,
         args.layout.padding,
-        args.layout.labelWidth,
-        args.layout.controlWidth,
         args.layout.buttonHeight,
         &args.uiState.resyneState.recorderState, args.uiState.presentationResponseSeconds, args.uiState.presentationResponseRange);
 

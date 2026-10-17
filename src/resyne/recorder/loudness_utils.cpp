@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <numbers>
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/analysis/loudness/loudness_meter.h"
@@ -91,20 +92,49 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
     const auto channels = deinterleaveChannels(reconstructionResult.audioSamples, reconstructionResult.numChannels);
     std::vector<LoudnessMeter> meters(channels.size());
     std::vector<AudioAnalysis::BassAnalyser> bass(channels.size());
-    std::size_t processedSamples = 0;
+    AudioAnalysis::RealFFT transform(static_cast<std::size_t>(fftSize));
+    std::vector<float> hann(static_cast<std::size_t>(fftSize)), window(hann.size()), filtered;
+    std::vector<kiss_fft_cpx> bins(hann.size() / 2 + 1);
+    std::vector<std::vector<float>> weightedWindows(channels.size(), std::vector<float>(hann.size()));
+    for (std::size_t i = 0; i < hann.size(); ++i)
+        hann[i] = .5f * (1.0f - std::cos(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) / (fftSize - 1)));
+    std::size_t processedSamples = 0, previousEnd = 0;
     for (auto& sample : samples) {
         const double availableTime = sample.timestamp + static_cast<double>(fftSize) * .5 / metadata.sampleRate;
         const double position = std::isfinite(availableTime) ? availableTime * metadata.sampleRate : 0.0;
         const auto end = static_cast<std::size_t>(std::clamp(std::round(position),
             static_cast<double>(processedSamples), static_cast<double>(channels.front().size())));
+        const auto logicalEnd = static_cast<std::size_t>(std::clamp(std::round(position),
+            static_cast<double>(previousEnd), static_cast<double>(channels.front().size() + fftSize)));
+        sample.kWeightedMagnitudes.resize(channels.size());
         for (std::size_t ch = 0; ch < channels.size(); ++ch) {
+            filtered.resize(end - processedSamples);
             meters[ch].processSamples(std::span<const float>(channels[ch]).subspan(processedSamples, end - processedSamples),
-                metadata.sampleRate);
+                metadata.sampleRate, filtered);
+            auto& weighted = weightedWindows[ch];
+            if (filtered.size() >= weighted.size())
+                std::copy(filtered.end() - static_cast<std::ptrdiff_t>(weighted.size()), filtered.end(), weighted.begin());
+            else if (!filtered.empty()) {
+                std::move(weighted.begin() + static_cast<std::ptrdiff_t>(filtered.size()), weighted.end(), weighted.begin());
+                std::copy(filtered.begin(), filtered.end(), weighted.end() - static_cast<std::ptrdiff_t>(filtered.size()));
+            }
+            const auto padding = std::min(weighted.size(), logicalEnd - previousEnd - filtered.size());
+            if (padding > 0) {
+                std::move(weighted.begin() + static_cast<std::ptrdiff_t>(padding), weighted.end(), weighted.begin());
+                std::fill(weighted.end() - static_cast<std::ptrdiff_t>(padding), weighted.end(), 0.0f);
+            }
+            for (std::size_t i = 0; i < window.size(); ++i) window[i] = weighted[i] * hann[i];
+            transform.forward(window, bins);
+            auto& magnitudes = sample.kWeightedMagnitudes[ch];
+            magnitudes.resize(bins.size());
+            for (std::size_t i = 0; i < bins.size(); ++i)
+                magnitudes[i] = std::hypot(bins[i].r, bins[i].i) * (i == 0 || i + 1 == bins.size() ? 1.0f : 2.0f) / fftSize;
             bass[ch].process(std::span<const float>(channels[ch]).subspan(processedSamples,end-processedSamples),metadata.sampleRate);
         }
         sample.bass.resize(channels.size());
         for (std::size_t ch = 0; ch < channels.size(); ++ch) sample.bass[ch] = bass[ch].spectrum();
         processedSamples = end;
+        previousEnd = logicalEnd;
         const bool valid = std::isfinite(sample.loudnessLUFS) && sample.loudnessLUFS > -200.0f && sample.loudnessLUFS < 20.0f;
         if (valid && !replaceExisting) continue;
         std::vector<float> levels;

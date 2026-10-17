@@ -198,6 +198,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
         }
         if (pendingSettings.colourSmoothingSpeed.has_value()) {
             state.visualSettings.colourSmoothingSpeed = *pendingSettings.colourSmoothingSpeed;
+            state.visualSettings.manualSmoothing = true;
         }
         if (pendingSettings.colourSpace.has_value()) {
             state.visualSettings.colourSpace = *pendingSettings.colourSpace;

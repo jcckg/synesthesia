@@ -59,7 +59,8 @@ void sendOSCFrame(const std::vector<float>& magnitudes,
                   const float displayG,
                   const float displayB,
                   const Synesthesia::OSC::OSCAnalysisSignals& analysisSignals,
-                  const Synesthesia::OSC::OSCSmoothingSignals& smoothingSignals) {
+                  const Synesthesia::OSC::OSCSmoothingSignals& smoothingSignals,
+                  const ColourCore::XYZ& presentedXYZ, double timestamp) {
     Synesthesia::OSC::OSCFrameUpdate update{};
     update.magnitudes = std::span<const float>(magnitudes.data(), magnitudes.size());
     update.phases = std::span<const float>(frame.phases.data(), frame.phases.size());
@@ -68,6 +69,8 @@ void sendOSCFrame(const std::vector<float>& magnitudes,
     update.displayColour = ColourCore::RGB{displayR, displayG, displayB};
     update.analysisSignals = analysisSignals;
     update.smoothingSignals = smoothingSignals;
+    update.presentedXYZ = presentedXYZ;
+    update.sourceTimestamp = timestamp;
 
     auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
     osc.updateFrameData(update);
@@ -202,7 +205,7 @@ void processPlaybackState(AudioInput& audioInput,
             currentDisplayG,
             currentDisplayB,
             analysisSignals,
-            smoothingSignals);
+            smoothingSignals, ctx.displayXYZ, time);
     }
 #endif
 
@@ -237,10 +240,10 @@ void processLiveAudioState(AudioInput& audioInput,
     const auto& live = spectralData.presentation;
     if (!live) return;
     auto displayedContributions = live->frame.presentedContributions;
+    double displayedTimestamp = live->frame.timestamp;
     const auto& colourResult = live->frame.analysis;
     const auto& analysisMagnitudes = live->prepared.analysisMagnitudes;
     auto liveFeatures = ::UI::Smoothing::buildSignalFeatures(colourResult);
-    liveFeatures.audioTimeSeconds = live->frame.timestamp;
     liveFeatures.onsetDetected = live->frame.smoothingSignals.onsetDetected;
     liveFeatures.spectralFlux = live->frame.smoothingSignals.spectralFlux;
     state.presentationResponseSeconds = live->frame.responseSeconds;
@@ -256,6 +259,7 @@ void processLiveAudioState(AudioInput& audioInput,
         const auto presentation = ReSyne::recorderPresentation(recorderState);
         if (presentation && presentation->colours->size() > 0) {
             const double time = presentation->colours->endTime();
+            displayedTimestamp = time;
             const auto xyz = presentation->colours->xyzAt(time);
             const auto recordedRgb = presentation->colours->rgbAt(time, state.visualSettings.colourSpace,
                 state.visualSettings.gamutMappingEnabled);
@@ -294,7 +298,7 @@ void processLiveAudioState(AudioInput& audioInput,
         currentDisplayG,
         currentDisplayB,
         analysisSignals,
-        smoothingSignals);
+        smoothingSignals, ctx.displayXYZ, displayedTimestamp);
 #endif
 
     ReSyne::updateFromFFT(

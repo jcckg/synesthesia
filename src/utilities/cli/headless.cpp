@@ -170,7 +170,7 @@ void HeadlessInterface::displayFrequencyInfo() {
         if (pending.colourSpace) oscColourSpace = *pending.colourSpace;
         if (pending.gamutMappingEnabled) oscGamutMappingEnabled = *pending.gamutMappingEnabled;
         if (pending.smoothingEnabled) smoothingEnabled = *pending.smoothingEnabled;
-        if (pending.colourSmoothingSpeed) colourSmoothingSpeed = *pending.colourSmoothingSpeed;
+        if (pending.colourSmoothingSpeed) { colourSmoothingSpeed = *pending.colourSmoothingSpeed; manualSmoothing = true; }
     }
 #endif
     RSYNPresentationSettings settings;
@@ -206,6 +206,8 @@ void HeadlessInterface::displayFrequencyInfo() {
         update.sampleRate = spectralData.sampleRate;
         update.colourResult = colourResult;
         update.displayColour = {currentR, currentG, currentB};
+        update.presentedXYZ = {xyz[0], xyz[1], xyz[2]};
+        update.sourceTimestamp = live->frame.timestamp;
         update.analysisSignals = Synesthesia::OSC::buildAnalysisSignals(spectralData.momentaryLoudnessLUFS,
             features.spectralFlux, features.onsetDetected);
         update.smoothingSignals = Synesthesia::OSC::buildSmoothingSignals(features);

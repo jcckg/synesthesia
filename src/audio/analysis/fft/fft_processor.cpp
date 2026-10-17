@@ -14,6 +14,9 @@ FFTProcessor::FFTProcessor()
 	  hannWindow(FFT_SIZE),
 	  windowBuffer(FFT_SIZE, 0.0f),
 	  inputAccumulator(HOP_SIZE, 0.0f),
+      weightedAccumulator(HOP_SIZE, 0.0f),
+      weightedWindow(FFT_SIZE, 0.0f),
+      weightedMagnitudes(FFT_SIZE / 2 + 1, 0.0f),
 	  accumulatedSamples(0),
 	  analysisHopSize(HOP_SIZE),
 	  overlapSize(FFT_SIZE - HOP_SIZE),
@@ -29,6 +32,7 @@ FFTProcessor::FFTProcessor()
 	for (auto& frame : frameRingBuffer) {
 		frame.magnitudes.resize(FFT_SIZE / 2 + 1);
 		frame.phases.resize(FFT_SIZE / 2 + 1);
+        frame.kWeightedMagnitudes.resize(FFT_SIZE / 2 + 1);
 	}
 
 	// https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.windows.hann.html
@@ -56,6 +60,7 @@ void FFTProcessor::setHopSize(const int hopSize) {
 	analysisHopSize = clampedHop;
 	overlapSize = FFT_SIZE - analysisHopSize;
 	inputAccumulator.assign(analysisHopSize, 0.0f);
+	weightedAccumulator.assign(analysisHopSize, 0.0f);
 	windowBuffer.assign(FFT_SIZE, 0.0f);
 	resetState();
 }
@@ -109,7 +114,8 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
 			const float value = buffer[bufferPos + i];
 			incoming[i] = std::isfinite(value) ? value : 0.0f;
 		}
-		loudnessMeter.processSamples(incoming, sampleRate);
+		loudnessMeter.processSamples(incoming, sampleRate,
+            std::span(weightedAccumulator).subspan(accumulatedSamples, samplesToCopy));
         bassAnalyser.process(incoming, sampleRate);
 		accumulatedSamples += samplesToCopy;
 		bufferPos += samplesToCopy;
@@ -125,6 +131,7 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
                 frame.sampleRate = sampleRate;
                 frame.loudnessLUFS = momentaryLoudnessLUFS;
                 frame.bass = bassSpectrum;
+                frame.kWeightedMagnitudes = weightedMagnitudes;
                 completedFrames->push_back(std::move(frame));
             }
 			accumulatedSamples = 0;
@@ -145,6 +152,7 @@ std::vector<FFTProcessor::FFTFrame> FFTProcessor::finish() {
     while (remaining > 0) {
         const size_t count = std::min(remaining, analysisHopSize - accumulatedSamples);
         std::fill_n(inputAccumulator.begin() + static_cast<std::ptrdiff_t>(accumulatedSamples), count, 0.0f);
+        std::fill_n(weightedAccumulator.begin() + static_cast<std::ptrdiff_t>(accumulatedSamples), count, 0.0f);
         accumulatedSamples += count;
         remaining -= count;
         if (accumulatedSamples == analysisHopSize) {
@@ -205,6 +213,15 @@ void FFTProcessor::processOverlappingWindow(const float sampleRate) {
 
 	calculateMagnitudes(rawMagnitudes, sampleRate, frameMaxMagnitude, frameTotalEnergy);
 	calculatePhases();
+
+    if (overlapSize > 0)
+        std::memmove(weightedWindow.data(), weightedWindow.data() + analysisHopSize, overlapSize * sizeof(float));
+    std::copy(weightedAccumulator.begin(), weightedAccumulator.end(), weightedWindow.begin() + static_cast<std::ptrdiff_t>(overlapSize));
+    applyWindow(weightedWindow);
+    transform.forward(fft_in, fft_out);
+    normaliseFFTOutput();
+    for (std::size_t i = 0; i < fft_out.size(); ++i)
+        weightedMagnitudes[i] = std::hypot(fft_out[i].r, fft_out[i].i);
 
 	updateSpectralData(rawMagnitudes, sampleRate, frameMaxMagnitude, frameTotalEnergy);
 
@@ -316,6 +333,9 @@ void FFTProcessor::resetState() {
 	loudnessMeter.reset();
     bassAnalyser.reset();
     bassSpectrum.reset();
+    std::ranges::fill(weightedAccumulator, 0.0f);
+    std::ranges::fill(weightedWindow, 0.0f);
+    std::ranges::fill(weightedMagnitudes, 0.0f);
 	momentaryLoudnessLUFS = -200.0f;
 
 	frameBufferHead = 0;
@@ -345,6 +365,7 @@ void FFTProcessor::pushFrameToBuffer(const std::vector<float>& mags, const std::
 	frame.sampleRate = sampleRate;
 	frame.loudnessLUFS = momentaryLoudnessLUFS;
     frame.bass = bassSpectrum;
+    frame.kWeightedMagnitudes = weightedMagnitudes;
 
 	frameBufferHead = nextHead;
 }

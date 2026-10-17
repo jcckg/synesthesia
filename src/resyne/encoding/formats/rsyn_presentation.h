@@ -18,6 +18,7 @@ public:
     RSYNPresentationFrame process(const AudioColourSample& sample, SpectralPresentation::PreparedFrame* prepared = nullptr);
     RSYNPresentationFrame processAnalysed(const RSYNPresentationFrame& frame);
     void seedPresentation(const RSYNPresentationFrame& frame);
+    void setEqualiserSettings(float low, float mid, float high);
     void setOutputSettings(ColourCore::ColourSpace colourSpace, bool gamutMapping);
     void setSmoothingSettings(bool enabled, bool manual, float amount);
 private:

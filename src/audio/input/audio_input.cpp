@@ -584,8 +584,6 @@ bool shouldUseMonoCoreAudioInput(const PaDeviceInfo&) {
 
 AudioInput::AudioInput()
 	: stream(nullptr),
-	  dcFilter(0.995f),
-	  noiseGate(0.0001f),
 	  sampleRate(44100.0f),
 	  channelCount(1),
 	  activeChannel(0),
@@ -663,7 +661,6 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 	}
 
 	activeChannel = 0;
-	dcFilter.setChannelCount(static_cast<size_t>(channelCount));
 
 	PaStreamParameters inputParameters{};
 	inputParameters.device = deviceIndex;

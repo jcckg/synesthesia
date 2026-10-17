@@ -1,5 +1,4 @@
 #include "resyne/encoding/formats/format_rsyn.h"
-#include "resyne/recorder/loudness_utils.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -188,16 +187,6 @@ bool loadFromRsynShell(const std::string& filepath,
         return false;
     }
 
-    if (metadata.presentationData && metadata.presentationData->settings.pipelineId != RSYN_PRESENTATION_PIPELINE_ID) {
-
-        std::vector<AudioColourSample> spectra;
-        metadata.lazyAsset->rebuildAnalysis = true;
-        if (!hydrateRsynSamples(metadata, spectra)) return false;
-        auto settings = metadata.presentationData->settings;
-        settings.pipelineId = RSYN_PRESENTATION_PIPELINE_ID;
-        metadata.presentationData = RSYNPresentation::buildPresentationData(spectra, settings);
-    }
-
     emitProgress(progress, 1.0f);
     return true;
 }
@@ -216,7 +205,7 @@ bool hydrateRsynSamples(AudioMetadata& metadata,
         !RSYNSerialisation::decodeSamples(
             spectralPayload,
             samples,
-            metadata.lazyAsset->rebuildAnalysis ? SequenceFrameCallback{} : onFrameDecoded,
+            onFrameDecoded,
             [&](const float value) {
                 emitProgress(progress, value);
             })) {
@@ -232,10 +221,6 @@ bool hydrateRsynSamples(AudioMetadata& metadata,
     if (metadata.channels == 0 && !samples.empty()) {
         metadata.channels = samples.front().channels;
     }
-
-    if (metadata.lazyAsset->rebuildAnalysis)
-        ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, metadata, true);
-    if (metadata.lazyAsset->rebuildAnalysis && onFrameDecoded) onFrameDecoded(samples, samples.size());
 
     return true;
 }

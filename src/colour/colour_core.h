@@ -89,7 +89,6 @@ struct FrameResult {
     float brightnessLoudnessDb = 0.0f;
     float loudnessNormalised = 0.0f;
     float brightnessNormalised = 0.0f;
-    float transientMix = 0.0f;
     float estimatedSPL = std::numeric_limits<float>::quiet_NaN();
     float luminanceCdM2 = std::numeric_limits<float>::quiet_NaN();
     float phaseInstabilityNorm = 0.0f;
@@ -172,6 +171,8 @@ struct EmissionSpectrum {
 struct SpectrumLayout {
     std::size_t fftSize = 0;
     std::span<const float> powerWeights{};
+    float brightnessPowerGain = 1.0f;
+    std::span<const float> kWeightedMagnitudes{};
 };
 
 FrameResult analyseSpectrum(std::span<const float> magnitudes,

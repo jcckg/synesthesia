@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <limits>
+#include <cmath>
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/processing/audio_processor.h"
@@ -65,7 +66,7 @@ bool Recorder::hasLoadedAudio(RecorderState& state) {
 }
 
 void Recorder::clearLoadedAudio(RecorderState& state) {
-    if (state.isRecording && state.recordingProcessor != nullptr) state.recordingProcessor->cancelRecordingAnalysis();
+    if (state.recordingProcessor != nullptr) state.recordingProcessor->cancelRecordingAnalysis();
     state.recordingProcessor = nullptr;
     state.isRecording = false;
     state.recordingCountdownActive = false;
@@ -127,7 +128,6 @@ void appendRecordingFrames(RecorderState& state, AudioProcessor::BufferedFrames 
     for (size_t frameIndex = 0; frameIndex < frameCount; ++frameIndex) {
         const auto& frame = channelFrames[0][frameIndex];
         if (state.samples.size() >= RecorderState::MAX_RECORDING_SAMPLES) {
-            state.isRecording = false;
             return;
         }
 
@@ -141,6 +141,7 @@ void appendRecordingFrames(RecorderState& state, AudioProcessor::BufferedFrames 
 	        sample.magnitudes.resize(numChannels);
 	        sample.phases.resize(numChannels);
             sample.bass.resize(numChannels);
+            sample.kWeightedMagnitudes.resize(numChannels);
 	        sample.channels = static_cast<uint32_t>(numChannels);
 	        sample.sampleRate = frame.sampleRate;
         sample.loudnessLUFS = frame.loudnessLUFS;
@@ -157,6 +158,7 @@ void appendRecordingFrames(RecorderState& state, AudioProcessor::BufferedFrames 
 	            sample.magnitudes[ch] = channelFrame.magnitudes;
 	            sample.phases[ch] = channelFrame.phases;
                 sample.bass[ch] = channelFrame.bass;
+                sample.kWeightedMagnitudes[ch] = channelFrame.kWeightedMagnitudes;
 	        }
 
         if (!channelsAligned) {
@@ -184,7 +186,15 @@ void appendRecordingFrames(RecorderState& state, AudioProcessor::BufferedFrames 
 void Recorder::updateFromFFTProcessor(RecorderState& state, AudioProcessor& audioProcessor,
                                       float r, float g, float b) {
     (void)r; (void)g; (void)b;
-    if (state.isRecording) appendRecordingFrames(state, audioProcessor.consumeRecordingFrames());
+    if (state.isRecording) {
+        appendRecordingFrames(state, audioProcessor.consumeRecordingFrames());
+        bool limitReached;
+        {
+            std::lock_guard lock(state.samplesMutex);
+            limitReached = state.samples.size() >= RecorderState::MAX_RECORDING_SAMPLES;
+        }
+        if (limitReached) stopRecording(state);
+    }
 }
 
 void Recorder::startRecording(RecorderState& state,
@@ -201,7 +211,6 @@ void Recorder::startRecording(RecorderState& state,
     state.recordingProcessor = &audioProcessor;
     state.isRecording = true;
     state.metadata.analysisLeadingSamples = fftSize - hopSize;
-    state.metadata.version = "3.0.0";
     state.metadata.sampleRate = 0.0f;
     state.metadata.fftSize = fftSize;
     state.metadata.hopSize = hopSize;
@@ -215,6 +224,9 @@ void Recorder::stopRecording(RecorderState& state) {
         float rate = 0.0f;
         auto frames = state.recordingProcessor->finishRecordingAnalysis(sampleCount, rate);
         appendRecordingFrames(state, std::move(frames));
+        if (state.samples.size() >= RecorderState::MAX_RECORDING_SAMPLES)
+            sampleCount = std::min(sampleCount, static_cast<std::uint64_t>(std::max(0.0, std::round(
+                state.samples.back().timestamp * state.metadata.sampleRate + state.metadata.fftSize * .5))));
         state.metadata.originalSampleCount = sampleCount;
         state.metadata.durationSeconds = rate > 0.0f ? sampleCount / static_cast<double>(rate) : 0.0;
         state.recordingProcessor = nullptr;

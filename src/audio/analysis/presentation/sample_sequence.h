@@ -18,9 +18,4 @@ PreparedFrame prepareSampleFrame(const AudioColourSample& sample,
                                  const AudioColourSample* previousSample = nullptr,
                                  float fallbackDeltaTimeSeconds = kFallbackDeltaTimeSeconds);
 
-ColourCore::FrameResult buildSampleColourResult(const AudioColourSample& sample,
-                                                const Settings& settings,
-                                                const AudioColourSample* previousSample = nullptr,
-                                                float fallbackDeltaTimeSeconds = kFallbackDeltaTimeSeconds);
-
 }

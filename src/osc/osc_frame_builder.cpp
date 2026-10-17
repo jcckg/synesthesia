@@ -120,7 +120,8 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
         update.sampleRate);
     frame.meta.sampleRate = static_cast<int32_t>(update.sampleRate);
     frame.meta.fftSize = resolveFftSize(update.magnitudes);
-    frame.meta.frameTimestamp = currentTimestampMicros();
+    frame.meta.frameTimestamp = std::isfinite(update.sourceTimestamp)
+        ? static_cast<int64_t>(update.sourceTimestamp * 1e6) : currentTimestampMicros();
 
     frame.signal.dominantFrequencyHz = update.colourResult.dominantFrequency;
     frame.signal.dominantWavelengthNm = update.colourResult.dominantWavelength;
@@ -137,9 +138,9 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.colour.displayR = update.displayColour.r;
     frame.colour.displayG = update.displayColour.g;
     frame.colour.displayB = update.displayColour.b;
-    frame.colour.cieX = update.colourResult.X;
-    frame.colour.cieY = update.colourResult.Y;
-    frame.colour.cieZ = update.colourResult.Z;
+    frame.colour.cieX = std::isfinite(update.presentedXYZ.X) ? update.presentedXYZ.X : update.colourResult.X;
+    frame.colour.cieY = std::isfinite(update.presentedXYZ.Y) ? update.presentedXYZ.Y : update.colourResult.Y;
+    frame.colour.cieZ = std::isfinite(update.presentedXYZ.Z) ? update.presentedXYZ.Z : update.colourResult.Z;
     ColourCore::XYZtoOklab(frame.colour.cieX, frame.colour.cieY, frame.colour.cieZ,
         frame.colour.oklabL, frame.colour.oklabA, frame.colour.oklabB);
     frame.colour.measurementXYZ = update.colourResult.spectral.xyz;
@@ -163,7 +164,6 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.loudness.luminanceCdM2 = update.colourResult.luminanceCdM2;
     frame.loudness.brightnessNormalised = update.colourResult.brightnessNormalised;
 
-    frame.transient.transientMix = update.colourResult.transientMix;
     frame.transient.onsetDetected = update.analysisSignals.onsetDetected;
 
     frame.phase.instabilityNorm = update.colourResult.phaseInstabilityNorm;

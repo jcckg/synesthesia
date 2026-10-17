@@ -143,7 +143,6 @@ struct PresentationWorker::Impl {
             latest.preview == request.preview &&
             latest.count >= request.count && sameAnalysis(latest.settings, request.settings) &&
             sameSmoothing(latest.settings, request.settings) &&
-            latest.settings.pipelineId == request.settings.pipelineId &&
             latest.settings.colourSpace == request.settings.colourSpace &&
             latest.settings.applyGamutMapping == request.settings.applyGamutMapping;
     }
@@ -191,8 +190,7 @@ struct PresentationWorker::Impl {
             if (published && published->sourceGeneration == request.generation && published->preview == request.preview)
                 snapshot = std::make_shared<PresentationSnapshot>(*published);
         }
-        if (!snapshot && request.metadata.presentationData &&
-            request.metadata.presentationData->settings.pipelineId == RSYN_PRESENTATION_PIPELINE_ID) {
+        if (!snapshot && request.metadata.presentationData) {
             snapshot = std::make_shared<PresentationSnapshot>();
             const auto& stored = *request.metadata.presentationData;
             snapshot->colours = RSYNPresentation::colourTrack(stored, stored.settings.smoothingEnabled);
@@ -231,7 +229,7 @@ struct PresentationWorker::Impl {
         }
         const bool newSource = cachedGeneration != request.generation || cachedPreview != request.preview ||
             cachedSourceRevision != request.sourceRevision;
-        if (newSource || !sameAnalysis(analysisSettings, request.settings) || analysisSettings.pipelineId != request.settings.pipelineId) {
+        if (newSource || !sameAnalysis(analysisSettings, request.settings)) {
             analysed = {};
             analysisSettings = request.settings;
             auto rawSettings = request.settings;
@@ -242,11 +240,6 @@ struct PresentationWorker::Impl {
             cachedSourceRevision = request.sourceRevision;
             cachedPreview = request.preview;
             colourReplay.reset();
-        }
-        if (analysed.empty() && request.metadata.presentationData &&
-            sameAnalysis(request.metadata.presentationData->settings, request.settings) &&
-            request.metadata.presentationData->settings.pipelineId == request.settings.pipelineId) {
-            for (const auto& frame : request.metadata.presentationData->frames) analysed.append(frame);
         }
         if (!colourReplay || !sameSmoothing(smoothingSettings, request.settings)) {
             smoothingSettings = request.settings;

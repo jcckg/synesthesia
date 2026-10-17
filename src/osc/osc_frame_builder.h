@@ -6,6 +6,8 @@
 #include "ui/smoothing/smoothing.h"
 
 #include <span>
+#include <cmath>
+#include <limits>
 
 namespace Synesthesia::OSC {
 
@@ -23,6 +25,8 @@ struct OSCFrameUpdate {
     float sampleRate = 0.0f;
     ColourCore::FrameResult colourResult{};
     ColourCore::RGB displayColour{};
+    ColourCore::XYZ presentedXYZ{NAN, NAN, NAN};
+    double sourceTimestamp = std::numeric_limits<double>::quiet_NaN();
     OSCAnalysisSignals analysisSignals{};
     OSCSmoothingSignals smoothingSignals{};
 };

@@ -18,13 +18,11 @@ namespace ReSyne {
 namespace Controls {
     void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyne::RecorderState& recorderState);
     
-    void renderVisualiserSettingsPanel(float& smoothingAmount,
+    void renderColourSmoothingPanel(float& smoothingAmount,
                                      bool& manualSmoothing,
                                      bool& showSpectrumAnalyser,
                                      float sidebarWidth,
                                      float sidebarPadding,
-                                     float labelWidth,
-                                     float controlWidth,
                                      float buttonHeight,
                                      ReSyne::RecorderState* recorder = nullptr, float effectiveResponseSeconds = 0.0f, ColourPresentation::ResponseRange responseRange = {});
 

@@ -6,6 +6,7 @@ set(SOURCES
     ${SRC_DIR}/audio/analysis/presentation/sample_sequence.cpp
     ${SRC_DIR}/audio/analysis/presentation/live_presentation.cpp
     ${SRC_DIR}/audio/analysis/presentation/contribution_history.cpp
+    ${SRC_DIR}/audio/analysis/presentation/spectral_envelope.cpp
     ${SRC_DIR}/colour/colour_core.cpp
     ${SRC_DIR}/colour/colour_track.cpp
     ${SRC_DIR}/colour/colour_presentation.cpp
@@ -16,18 +17,12 @@ set(SOURCES
     ${SRC_DIR}/audio/output/audio_output.cpp
     ${SRC_DIR}/audio/output/playback_equaliser.cpp
     ${SRC_DIR}/audio/processing/audio_processor.cpp
-    ${SRC_DIR}/audio/processing/dc_filter/dc_filter.cpp
-    ${SRC_DIR}/audio/processing/noise_gate/noise_gate.cpp
     ${SRC_DIR}/resyne/encoding/spectral/colour_native_codec.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/phase_wrapping.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/transient_detection.cpp
-    ${SRC_DIR}/resyne/encoding/reconstruction/phase_locking.cpp
-    ${SRC_DIR}/resyne/encoding/reconstruction/phase_vocoder.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/pghi.cpp
-    ${SRC_DIR}/resyne/encoding/reconstruction/edit_detection.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/boundary_phase_interpolation.cpp
     ${SRC_DIR}/resyne/encoding/reconstruction/spectral_resampling.cpp
-    ${SRC_DIR}/resyne/encoding/reconstruction/varispeed.cpp
     ${SRC_DIR}/resyne/encoding/formats/exporter.cpp
     ${SRC_DIR}/resyne/encoding/formats/rsyn_container.cpp
     ${SRC_DIR}/resyne/encoding/formats/rsyn_presentation.cpp
@@ -157,8 +152,6 @@ function(configure_include_directories)
         ${SRC_DIR}/audio/input
         ${SRC_DIR}/audio/output
         ${SRC_DIR}/audio/processing
-        ${SRC_DIR}/audio/processing/dc_filter
-        ${SRC_DIR}/audio/processing/noise_gate
         ${SRC_DIR}/resyne/encoding
         ${SRC_DIR}/resyne/encoding/spectral
         ${SRC_DIR}/resyne/encoding/reconstruction

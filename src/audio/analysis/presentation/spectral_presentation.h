@@ -27,6 +27,9 @@ struct Frame {
     std::vector<float> phases;
     std::vector<float> frequencies;
     float sampleRate = 0.0f;
+    float brightnessPowerGain = 1.0f;
+    std::vector<float> observationShapes;
+    std::vector<float> kWeightedMagnitudes;
     std::shared_ptr<const AudioAnalysis::BassSpectrum> bass;
     std::vector<float> measurementMagnitudes;
     std::vector<float> measurementFrequencies;
@@ -45,7 +48,8 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
                   const std::vector<std::vector<float>>& phases,
                   const std::vector<std::vector<float>>& frequencies,
                   std::uint32_t channels,
-                  float sampleRate);
+                  float sampleRate,
+                  const std::vector<std::vector<float>>& kWeightedMagnitudes = {});
 
 std::vector<float> buildSharedMagnitudes(const Frame& frame,
                                          const Settings& settings);
@@ -64,14 +68,5 @@ PreparedFrame prepareFrame(const Frame& frame,
 PreparedFrame prepareFrame(const Frame& frame,
                            const Settings& settings,
                            float loudnessDb);
-
-std::array<float, 3> displayRGBFromXYZ(float X,
-                                       float Y,
-                                       float Z,
-                                       const Settings& settings);
-
-ColourCore::FrameResult buildColourResult(const Frame& frame,
-                                          const Settings& settings,
-                                          float loudnessDb);
 
 }

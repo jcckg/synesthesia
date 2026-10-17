@@ -429,7 +429,7 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 
 		sample.sampleRate = sampleRate;
 		sample.timestamp = (sampleRate > EPSILON && hopSize > 0)
-			? static_cast<double>(frame * static_cast<size_t>(hopSize)) /
+			? (static_cast<double>(frame) * hopSize + fftSize * .5 - image.metadata.analysisLeadingSamples) /
 				static_cast<double>(sampleRate)
 			: 0.0;
 

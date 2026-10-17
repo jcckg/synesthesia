@@ -178,7 +178,6 @@ bool importAudioFile(
     metadata.numFrames = 0;
     metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
     metadata.channels = numChannels;
-    metadata.version = "3.0.0";
     metadata.sourceData.reset();
     metadata.presentationData.reset();
     metadata.lazyAsset.reset();
@@ -208,6 +207,7 @@ bool importAudioFile(
             sample.magnitudes.resize(numChannels);
             sample.phases.resize(numChannels);
             sample.bass.resize(numChannels);
+            sample.kWeightedMagnitudes.resize(numChannels);
             sample.channels = numChannels;
 
             bool channelsAligned = true;
@@ -219,6 +219,7 @@ bool importAudioFile(
                 sample.magnitudes[ch] = std::move(channelFrames[ch][f].magnitudes);
                 sample.phases[ch] = std::move(channelFrames[ch][f].phases);
                 sample.bass[ch] = channelFrames[ch][f].bass;
+                sample.kWeightedMagnitudes[ch] = std::move(channelFrames[ch][f].kWeightedMagnitudes);
                 if (ch == 0) {
                     sample.sampleRate = channelFrames[ch][f].sampleRate;
                     sample.loudnessLUFS = channelFrames[ch][f].loudnessLUFS;

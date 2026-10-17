@@ -15,6 +15,7 @@ struct AudioColourSample {
 	std::vector<std::vector<float>> phases;
 	std::vector<std::vector<float>> frequencies;
     std::vector<std::shared_ptr<const AudioAnalysis::BassSpectrum>> bass;
+    std::vector<std::vector<float>> kWeightedMagnitudes;
 	double timestamp;
 	float sampleRate;
 	float loudnessLUFS = std::numeric_limits<float>::quiet_NaN();
@@ -33,7 +34,6 @@ struct AudioMetadata {
     size_t numFrames = 0;
     size_t numBins = 0;
     std::uint32_t channels = 1;
-    std::string version = "3.0.0";
     std::shared_ptr<RSYNSourceData> sourceData;
     std::shared_ptr<RSYNPresentationData> presentationData;
     std::shared_ptr<RSYNLazyAsset> lazyAsset;

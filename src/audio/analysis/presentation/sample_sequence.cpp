@@ -11,7 +11,8 @@ Frame buildFrame(const AudioColourSample& sample) {
         sample.phases,
         sample.frequencies,
         sample.channels,
-        sample.sampleRate);
+        sample.sampleRate,
+        sample.kWeightedMagnitudes);
     const auto channels = static_cast<std::size_t>(sample.channels);
     if (channels > 0 && sample.bass.size() == channels && sample.bass.front()) {
         auto mixed = std::make_shared<AudioAnalysis::BassSpectrum>(*sample.bass.front());
@@ -60,13 +61,6 @@ PreparedFrame prepareSampleFrame(const AudioColourSample& sample,
         loudnessOverride,
         previousFramePtr,
         resolveDeltaTimeSeconds(previousSample, sample, fallbackDeltaTimeSeconds));
-}
-
-ColourCore::FrameResult buildSampleColourResult(const AudioColourSample& sample,
-                                                const Settings& settings,
-                                                const AudioColourSample* previousSample,
-                                                const float fallbackDeltaTimeSeconds) {
-    return prepareSampleFrame(sample, settings, previousSample, fallbackDeltaTimeSeconds).colourResult;
 }
 
 }

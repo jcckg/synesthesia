@@ -120,7 +120,6 @@ std::shared_ptr<const ColourPresentation::ColourTrack> prepareColourTrack(
     settings.midGain = options.midGain;
     settings.highGain = options.highGain;
     if (const auto& stored = metadata.presentationData; stored && !stored->frames.empty() &&
-        stored->settings.pipelineId == RSYN_PRESENTATION_PIPELINE_ID &&
         stored->settings.lowGain == settings.lowGain && stored->settings.midGain == settings.midGain &&
         stored->settings.highGain == settings.highGain) {
         const auto& previous = stored->settings;

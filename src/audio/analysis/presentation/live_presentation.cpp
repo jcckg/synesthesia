@@ -1,5 +1,4 @@
 #include "live_presentation.h"
-#include <stdexcept>
 
 namespace SpectralPresentation {
 
@@ -9,12 +8,9 @@ void LivePresentation::restart() {
 }
 
 void LivePresentation::setSettings(const RSYNPresentationSettings& settings) {
-    if (settings.pipelineId != RSYN_PRESENTATION_PIPELINE_ID) throw std::invalid_argument("Unsupported presentation pipeline.");
-    const bool changed = settings_.lowGain != settings.lowGain || settings_.midGain != settings.midGain ||
-        settings_.highGain != settings.highGain;
     settings_ = settings;
-    if (changed) restart();
-    else if (replay_) {
+    if (replay_) {
+        replay_->setEqualiserSettings(settings.lowGain, settings.midGain, settings.highGain);
         replay_->setOutputSettings(settings_.colourSpace, settings_.applyGamutMapping);
         replay_->setSmoothingSettings(settings_.smoothingEnabled, settings_.manualSmoothing, settings_.smoothingAmount);
     }

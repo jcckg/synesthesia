@@ -4,6 +4,7 @@
 #include <cmath>
 #include <stdexcept>
 #include "audio/analysis/presentation/contribution_history.h"
+#include "audio/analysis/presentation/spectral_envelope.h"
 #include "colour/colour_track.h"
 
 #include "audio/analysis/presentation/sample_sequence.h"
@@ -41,25 +42,18 @@ RSYNSmoothingSignals copySignals(const SmoothingSignalFeatures& features) {
     return output;
 }
 
-std::array<float, 3> xyzToOklab(const ColourCore::FrameResult& result) {
-    std::array<float, 3> oklab{};
-    ColourCore::XYZtoOklab(result.X, result.Y, result.Z, oklab[0], oklab[1], oklab[2]);
-    return oklab;
-}
-
 }
 
 struct ReplayState::Impl {
     RSYNPresentationSettings settings;
     SpectralPresentation::Settings presentationSettings;
     SpectralPresentation::ContributionHistory contributions;
-    AudioColourSample previous;
+    SpectralPresentation::SpectralEnvelope envelope;
+    SpectralPresentation::Frame previous;
+    double previousTimestamp = 0;
     bool hasPrevious = false;
     explicit Impl(const RSYNPresentationSettings& config)
-        : settings(config), presentationSettings(buildPresentationSettings(config)) {
-        if (config.pipelineId != RSYN_PRESENTATION_PIPELINE_ID)
-            throw std::invalid_argument("Unsupported presentation pipeline.");
-    }
+        : settings(config), presentationSettings(buildPresentationSettings(config)) {}
 };
 
 ReplayState::ReplayState(const RSYNPresentationSettings& settings)
@@ -68,18 +62,51 @@ ReplayState::~ReplayState() = default;
 
 RSYNPresentationFrame ReplayState::analyse(const AudioColourSample& sample, SpectralPresentation::PreparedFrame* preparedOutput) {
     auto& s = *state;
-    auto prepared = SpectralPresentation::SampleSequence::prepareSampleFrame(
-        sample, s.presentationSettings, s.hasPrevious ? &s.previous : nullptr);
+    auto source = SpectralPresentation::SampleSequence::buildFrame(sample);
+    auto prepared = SpectralPresentation::prepareFrame(source, s.presentationSettings,
+        std::isfinite(sample.loudnessLUFS) ? sample.loudnessLUFS : ColourCore::LOUDNESS_DB_UNSPECIFIED,
+        s.hasPrevious ? &s.previous : nullptr,
+        s.hasPrevious ? static_cast<float>(sample.timestamp - s.previousTimestamp) :
+            SpectralPresentation::SampleSequence::kFallbackDeltaTimeSeconds);
     RSYNPresentationFrame frame{};
     frame.timestamp = sample.timestamp;
     frame.analysis = prepared.colourResult;
     frame.contributionTargets = prepared.contributions;
     frame.frequencyResolution = prepared.frequencyResolution;
-    frame.targetOklab = xyzToOklab(prepared.colourResult);
+    const auto estimatedSource = s.envelope.process(source, sample.timestamp, s.presentationSettings);
+    auto estimated = SpectralPresentation::prepareFrame(estimatedSource, s.presentationSettings, sample.loudnessLUFS);
+    auto automatic = std::make_shared<ColourPresentation::SpectralContributions>(*estimated.contributions);
+    const auto& responses = s.envelope.responses();
+    double weightedResponse = 0, presence = 0;
+    for (auto& band : *automatic) {
+        const double frequency = ColourPresentation::contributionBandFrequency(band.band);
+        double times = 0, mass = 0;
+        std::size_t first = 0, last = responses.size();
+        if (estimatedSource.frequencies.size() != responses.size() && prepared.frequencyResolution > 0) {
+            const double position = std::floor(frequency / prepared.frequencyResolution);
+            first = static_cast<std::size_t>(std::clamp(position - 2, 0.0, static_cast<double>(last)));
+            last = static_cast<std::size_t>(std::clamp(position + 3, 0.0, static_cast<double>(last)));
+        }
+        for (std::size_t index = first; index < last; ++index) {
+            const double sourceFrequency = estimatedSource.frequencies.size() == responses.size() ?
+                estimatedSource.frequencies[index] : index * static_cast<double>(prepared.frequencyResolution);
+            const double weight = estimatedSource.magnitudes[index] * std::max(0.0,
+                1 - std::abs(sourceFrequency - frequency) / prepared.frequencyResolution);
+            times += weight * responses[index];
+            mass += weight;
+        }
+        band.responseSeconds = mass > 0 ? static_cast<float>(times / mass) : 0;
+        const double size = std::abs(band.xyz[0]) + std::abs(band.xyz[1]) + std::abs(band.xyz[2]);
+        weightedResponse += size * band.responseSeconds;
+        presence += size;
+    }
+    frame.automaticContributions = std::move(automatic);
+    frame.automaticResponseSeconds = presence > 0 ? static_cast<float>(weightedResponse / presence) : 0;
     auto features = UI::Smoothing::buildSignalFeatures(prepared.colourResult);
     frame.smoothingSignals = copySignals(features);
     if (preparedOutput) *preparedOutput = std::move(prepared);
-    s.previous = sample;
+    s.previous = std::move(source);
+    s.previousTimestamp = sample.timestamp;
     s.hasPrevious = true;
     return frame;
 }
@@ -95,15 +122,18 @@ RSYNPresentationFrame ReplayState::processAnalysed(const RSYNPresentationFrame& 
         static_cast<double>(frame.analysis.Y), static_cast<double>(frame.analysis.Z)}, s.settings.colourSpace, s.settings.applyGamutMapping);
     frame.analysis.r = rawRgb.r; frame.analysis.g = rawRgb.g; frame.analysis.b = rawRgb.b;
     if (!frame.contributionTargets) throw std::runtime_error("Spectral contributions are unavailable for this presentation.");
-    const auto& presented = s.contributions.process(*frame.contributionTargets, frame.timestamp,
-        s.settings.smoothingEnabled, s.settings.manualSmoothing, s.settings.smoothingAmount, frame.analysis.spectralFlatness, frame.frequencyResolution);
-    frame.presentedContributions = std::make_shared<const ColourPresentation::SpectralContributions>(presented);
+    const bool automatic = s.settings.smoothingEnabled && !s.settings.manualSmoothing;
+    if (automatic && !frame.automaticContributions)
+        throw std::runtime_error("Source spectra are required to rebuild automatic smoothing.");
+    const auto& targets = automatic ? *frame.automaticContributions : *frame.contributionTargets;
+    const auto& presented = s.contributions.process(targets, frame.timestamp,
+        s.settings.smoothingEnabled, s.settings.manualSmoothing, s.settings.smoothingAmount, frame.frequencyResolution);
+    frame.presentedContributions = automatic ? frame.automaticContributions :
+        std::make_shared<const ColourPresentation::SpectralContributions>(presented);
     frame.presentedXYZ = s.contributions.xyz();
-    frame.responseSeconds = s.contributions.responseSeconds();
+    frame.responseSeconds = automatic ? frame.automaticResponseSeconds : s.contributions.responseSeconds();
     frame.smoothingSignals.spectralFlux = s.contributions.spectralFlux();
     frame.smoothingSignals.onsetDetected = s.contributions.onsetDetected();
-    ColourCore::XYZtoOklab(frame.presentedXYZ[0], frame.presentedXYZ[1], frame.presentedXYZ[2],
-        frame.smoothedOklab[0], frame.smoothedOklab[1], frame.smoothedOklab[2]);
     ColourCore::XYZtoLab(frame.presentedXYZ[0], frame.presentedXYZ[1], frame.presentedXYZ[2],
         frame.smoothedLab[0], frame.smoothedLab[1], frame.smoothedLab[2]);
     const auto rgb = ColourPresentation::projectXYZ(ColourPresentation::toColourTriple(frame.presentedXYZ),
@@ -116,6 +146,12 @@ void ReplayState::setSmoothingSettings(bool enabled, bool manual, float amount) 
     state->settings.smoothingEnabled = enabled;
     state->settings.manualSmoothing = manual;
     state->settings.smoothingAmount = amount;
+}
+
+void ReplayState::setEqualiserSettings(float low, float mid, float high) {
+    state->settings.lowGain = state->presentationSettings.lowGain = low;
+    state->settings.midGain = state->presentationSettings.midGain = mid;
+    state->settings.highGain = state->presentationSettings.highGain = high;
 }
 
 void ReplayState::setOutputSettings(ColourCore::ColourSpace colourSpace, bool gamutMapping) {
@@ -142,8 +178,6 @@ double durationSeconds(const AudioMetadata& metadata, double lastTimestamp) {
 
 std::shared_ptr<const ColourPresentation::ColourTrack> colourTrack(const RSYNPresentationData& presentation,
                                                                   bool smoothed) {
-    if (presentation.settings.pipelineId != RSYN_PRESENTATION_PIPELINE_ID)
-        throw std::invalid_argument("Unsupported presentation pipeline.");
     ColourPresentation::ColourTrack track;
     for (const auto& frame : presentation.frames) {
         ColourPresentation::TrackPoint point{frame.timestamp};

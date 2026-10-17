@@ -419,7 +419,6 @@ bool loadFromTIFF(const std::string& filepath,
 	colourImage.metadata.numBins = binCount;
 	colourImage.metadata.channels = inferredChannels;
 	colourImage.metadata.windowType = "hann";
-	colourImage.metadata.version = "3.0.0";
 
     metadata = colourImage.metadata;
 	auto decodeProgress = [&](float value) {
@@ -465,7 +464,6 @@ bool loadFromTIFF(const std::string& filepath,
 	metadata.numFrames = samples.size();
 	metadata.numBins = binCount;
 	metadata.channels = inferredChannels;
-	metadata.version = "3.0.0";
 
 	if (progress) {
 		progress(0.99f);

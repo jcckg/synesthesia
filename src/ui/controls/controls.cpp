@@ -97,21 +97,18 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyn
     ImGui::Spacing();
 }
 
-void renderVisualiserSettingsPanel(float& smoothingAmount, bool& manualSmoothing,
+void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
                                  bool& showSpectrumAnalyser, float sidebarWidth,
-                                 float sidebarPadding, float labelWidth,
-                                 float controlWidth, float buttonHeight,
+                                 float sidebarPadding, float buttonHeight,
                                  ReSyne::RecorderState* recorder, float effectiveResponseSeconds, ColourPresentation::ResponseRange responseRange) {
-    (void)labelWidth;
-    (void)controlWidth;
-    if (!ImGui::CollapsingHeader("Colour smoothing")) return;
+    if (!ImGui::CollapsingHeader("Colour Smoothing")) return;
     ImGui::Indent(10.0f);
     const float contentWidth = std::max(40.0f, sidebarWidth - sidebarPadding * 2.0f - 10.0f);
     int mode = manualSmoothing ? 1 : 0;
     ImGui::SetNextItemWidth(contentWidth);
     if (ImGui::Combo("##ColourResponseMode", &mode, "Automatic\0Manual\0")) manualSmoothing = mode == 1;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-        "Automatic follows local frequency contributions, attacks, decay and texture.\n"
+        "Automatic follows musical changes while stabilising uncertain spectral measurements.\n"
         "Manual lets you choose the base response and follows local colour contribution changes.");
     if (manualSmoothing) {
         float responseMs = manualResponseTime(smoothingAmount) * 1000.0f;
@@ -124,11 +121,11 @@ void renderVisualiserSettingsPanel(float& smoothingAmount, bool& manualSmoothing
             "Base settling response; faster colour motion shortens the effective response.\n"
             "This control is used only in manual mode.");
     } else {
-        ImGui::TextWrapped("Audio-driven attack and release");
+        ImGui::TextWrapped("Local audio-driven response");
     }
     float effectiveMs = effectiveResponseSeconds * 1000.0f;
     const auto presentation = recorder ? ReSyne::recorderPresentation(*recorder) : nullptr;
-    if (presentation && presentation->colours->size() > 0 &&
+    if (!manualSmoothing && presentation && presentation->colours->size() > 0 &&
         (recorder->isRecording || (recorder->audioOutput && recorder->audioOutput->getTotalFrames() > 0))) {
         const double time = recorder->isRecording ? presentation->colours->endTime()
             : recorder->audioOutput && recorder->metadata.sampleRate > 0.0f
@@ -137,51 +134,20 @@ void renderVisualiserSettingsPanel(float& smoothingAmount, bool& manualSmoothing
         const auto point = presentation->colours->pointAt(time);
         effectiveMs = point.responseSeconds * 1000.0f;
         if (presentation->analysis) responseRange = ColourPresentation::responseRange(presentation->analysis->contributionsAt(time));
-        const auto target = presentation->targets->rgbAt(time, ColourCore::ColourSpace::SRGB,
-                                                       presentation->settings.applyGamutMapping);
-        const auto output = presentation->colours->rgbAt(time, ColourCore::ColourSpace::SRGB,
-                                                       presentation->settings.applyGamutMapping);
-        ImGui::ColorButton("Target colour", {target.r, target.g, target.b, 1.0f}, ImGuiColorEditFlags_NoTooltip, {24, 18});
-        ImGui::SameLine(); ImGui::TextUnformatted("Target");
-        ImGui::SameLine();
-        ImGui::ColorButton("Displayed colour", {output.r, output.g, output.b, 1.0f}, ImGuiColorEditFlags_NoTooltip, {24, 18});
-        ImGui::SameLine(); ImGui::TextUnformatted("Output");
-        ImGui::TextUnformatted("Lightness response");
-        const auto origin = ImGui::GetCursorScreenPos();
-        const ImVec2 extent{contentWidth, 60.0f};
-        auto* draw = ImGui::GetWindowDrawList();
-        draw->AddRectFilled(origin, {origin.x + extent.x, origin.y + extent.y}, IM_COL32(25, 25, 25, 255));
-        const double end = std::clamp(time, 0.0, presentation->colours->endTime());
-        const double start = std::max(0.0, end - 1.5);
-        ImVec2 previousTarget{}, previousOutput{};
-        for (int i = 0; i < 64; ++i) {
-            const double sampleTime = std::lerp(start, end, static_cast<double>(i) / 63.0);
-            const auto raw = presentation->targets->xyzAt(sampleTime);
-            const auto smooth = presentation->colours->xyzAt(sampleTime);
-            float rawL, rawA, rawB, smoothL, smoothA, smoothB;
-            ColourCore::XYZtoLab(static_cast<float>(raw[0]), static_cast<float>(raw[1]), static_cast<float>(raw[2]), rawL, rawA, rawB);
-            ColourCore::XYZtoLab(static_cast<float>(smooth[0]), static_cast<float>(smooth[1]), static_cast<float>(smooth[2]), smoothL, smoothA, smoothB);
-            const float x = origin.x + extent.x * static_cast<float>(i) / 63.0f;
-            const ImVec2 targetPoint{x, origin.y + extent.y * (1.0f - std::clamp(rawL / 100.0f, 0.0f, 1.0f))};
-            const ImVec2 outputPoint{x, origin.y + extent.y * (1.0f - std::clamp(smoothL / 100.0f, 0.0f, 1.0f))};
-            if (i > 0) {
-                draw->AddLine(previousTarget, targetPoint, IM_COL32(140, 140, 140, 255));
-                draw->AddLine(previousOutput, outputPoint, IM_COL32(100, 210, 240, 255), 1.5f);
-            }
-            previousTarget = targetPoint; previousOutput = outputPoint;
-        }
-        ImGui::Dummy(extent);
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Last 1.5 seconds up to the playhead.\nGrey: target lightness. Blue: computed output lightness.");
         if (!presentation->message.empty()) ImGui::TextWrapped("%s", presentation->message.c_str());
-        if (presentation->message.empty() && ((manualSmoothing && presentation->settings.smoothingAmount != smoothingAmount) || presentation->settings.manualSmoothing != manualSmoothing))
+        if (presentation->message.empty() && presentation->settings.manualSmoothing != manualSmoothing)
             ImGui::TextDisabled("Updating colour response...");
     }
-    if (recorder && !recorder->presentationSmoothingEnabled) ImGui::TextDisabled("Smoothing off");
-    else if (responseRange.maximum > 0.0f)
-        ImGui::Text("Local responses: %.0f–%.0f ms", static_cast<double>(responseRange.minimum * 1000.0f),
-            static_cast<double>(responseRange.maximum * 1000.0f));
-    else if (effectiveMs > 0.0f) ImGui::Text("Average response: %.0f ms", static_cast<double>(effectiveMs));
-    else ImGui::TextDisabled("Stored response");
+    if (!manualSmoothing) {
+        if (recorder && !recorder->presentationSmoothingEnabled) ImGui::TextDisabled("Smoothing off");
+        else if (responseRange.maximum > 0.0f)
+            ImGui::Text("Spectral integration: %.0f–%.0f ms", static_cast<double>(responseRange.minimum * 1000.0f),
+                static_cast<double>(responseRange.maximum * 1000.0f));
+        else if (effectiveMs > 0.0f) ImGui::Text("Spectral integration: %.0f ms", static_cast<double>(effectiveMs));
+        else ImGui::TextDisabled("Stored response");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
+            "Indicative integration time for spectral levels. Musical changes and combined intensity can respond faster.");
+    }
     if (manualSmoothing && ImGui::Button("Reset response", {contentWidth, buttonHeight})) {
         smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
     }

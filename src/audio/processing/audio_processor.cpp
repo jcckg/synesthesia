@@ -189,11 +189,13 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
         sample.magnitudes.resize(buffer.numChannels);
         sample.phases.resize(buffer.numChannels);
         sample.bass.resize(buffer.numChannels);
+        sample.kWeightedMagnitudes.resize(buffer.numChannels);
         std::vector<float> levels(buffer.numChannels);
         for (std::size_t ch = 0; ch < buffer.numChannels; ++ch) {
             sample.magnitudes[ch] = std::move(presentationFrames[ch][i].magnitudes);
             sample.phases[ch] = std::move(presentationFrames[ch][i].phases);
             sample.bass[ch] = presentationFrames[ch][i].bass;
+            sample.kWeightedMagnitudes[ch] = std::move(presentationFrames[ch][i].kWeightedMagnitudes);
             levels[ch] = presentationFrames[ch][i].loudnessLUFS;
         }
         sample.loudnessLUFS = LoudnessMeter::combineChannelLoudness(levels);

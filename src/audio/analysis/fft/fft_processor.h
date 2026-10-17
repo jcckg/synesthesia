@@ -36,6 +36,7 @@ public:
 	struct FFTFrame {
 		std::vector<float> magnitudes;
 		std::vector<float> phases;
+        std::vector<float> kWeightedMagnitudes;
 		uint64_t frameCounter;
 		float sampleRate;
 		float loudnessLUFS;
@@ -90,6 +91,9 @@ private:
 	std::vector<float> hannWindow;
 	std::vector<float> windowBuffer;
 	std::vector<float> inputAccumulator;
+    std::vector<float> weightedAccumulator;
+    std::vector<float> weightedWindow;
+    std::vector<float> weightedMagnitudes;
 	size_t accumulatedSamples;
 	size_t analysisHopSize;
 	size_t overlapSize;
