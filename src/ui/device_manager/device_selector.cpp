@@ -1,4 +1,5 @@
 #include "device_selector.h"
+#include "ui/styling/styling.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -70,12 +71,14 @@ ImVec4 levelColour(const float normalisedPosition) {
 void drawMeterBar(ImDrawList* drawList, const ImVec2 min, const ImVec2 max, const float level) {
     const ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
     const bool lightMode = textColour.x + textColour.y + textColour.z < 1.5f;
-    const ImU32 backgroundColour = lightMode
-        ? ImGui::GetColorU32(ImVec4(0.96f, 0.965f, 0.975f, 1.0f))
-        : ImGui::GetColorU32(ImVec4(0.16f, 0.16f, 0.17f, 0.75f));
-    const ImU32 borderColour = lightMode
-        ? ImGui::GetColorU32(ImVec4(0.76f, 0.78f, 0.82f, 0.55f))
-        : ImGui::GetColorU32(ImVec4(0.06f, 0.06f, 0.07f, 0.95f));
+    const ImU32 backgroundColour = ImGui::GetColorU32(ImGuiCol_FrameBgHovered);
+    ImVec4 border = ImGui::GetStyleColorVec4(ImGuiCol_Border);
+    if (!lightMode) {
+        border.x *= 0.65f;
+        border.y *= 0.65f;
+        border.z *= 0.65f;
+    }
+    const ImU32 borderColour = ImGui::GetColorU32(border);
     drawList->AddRectFilled(min, max, backgroundColour, 0.0f);
 
     const float clampedLevel = std::clamp(std::isfinite(level) ? level : 0.0f, 0.0f, 1.0f);
@@ -194,7 +197,7 @@ bool renderCombo(const char* label, int& selectedIndex, std::span<const Item> it
 
     ImGui::SetNextItemWidth(comboWidth);
     ImGui::SetNextWindowSizeConstraints(ImVec2(desiredPopupWidth, 0.0f), ImVec2(FLT_MAX, FLT_MAX));
-    const bool open = ImGui::BeginCombo(label, nullptr);
+    const bool open = UIStyler::beginCombo(label, nullptr);
 
     bool changed = false;
     if (open) {

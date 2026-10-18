@@ -1,6 +1,7 @@
 #include "device_manager.h"
 #include "device_selector.h"
 #include <imgui.h>
+#include "ui/styling/styling.h"
 #include <portaudio.h>
 #include <algorithm>
 #include <array>
@@ -124,7 +125,7 @@ void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
                                          const std::vector<AudioInput::DeviceInfo>& devices,
                                          const AudioInputLevelMonitor& inputLevelMonitor,
                                          const bool deferProtectedInputCapture) {
-    ImGui::Text("INPUT DEVICE");
+    ImGui::TextDisabled("INPUT DEVICE");
     
     if (!deviceState.deviceNames.empty()) {
         const bool selectedActive =
@@ -150,8 +151,6 @@ void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
         if (deviceState.streamError) {
             ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "%s",
                               deviceState.streamErrorMessage.c_str());
-        } else if (deviceState.selectedDeviceIndex < 0) {
-            ImGui::TextDisabled("Select an audio device");
         }
     } else {
         ImGui::TextDisabled("No audio input devices found.");
@@ -163,7 +162,7 @@ void DeviceManager::renderOutputDeviceSelection(DeviceState& deviceState,
                                                const std::vector<AudioOutput::DeviceInfo>&,
                                                const bool outputDeviceActive,
                                                const std::array<float, 2>& outputLevels) {
-    ImGui::Text("OUTPUT DEVICE");
+    ImGui::TextDisabled("OUTPUT DEVICE");
 
     if (!deviceState.outputDeviceNames.empty()) {
         const std::vector<DeviceSelector::Item> items = buildSelectorItems(
@@ -192,7 +191,7 @@ void DeviceManager::renderChannelSelection(DeviceState& deviceState,
 
         ImGui::Text("CHANNEL");
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::Combo("##channel", &deviceState.selectedChannelIndex,
+        if (UIStyler::combo("##channel", &deviceState.selectedChannelIndex,
                         deviceState.channelNames.data(),
                         static_cast<int>(deviceState.channelNames.size()))) {
             selectChannel(deviceState, audioInput, deviceState.selectedChannelIndex);

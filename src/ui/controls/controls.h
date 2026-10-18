@@ -16,7 +16,10 @@ namespace ReSyne {
 }
 
 namespace Controls {
-    void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyne::RecorderState& recorderState);
+    enum class SectionLayer { Primary, Secondary };
+
+    bool renderSectionHeader(const char* label, ImGuiTreeNodeFlags flags = 0, SectionLayer layer = SectionLayer::Primary);
+    void renderFrequencyInfoPanel(AudioInput& audioInput, ReSyne::RecorderState& recorderState);
     
     void renderColourSmoothingPanel(float& smoothingAmount,
                                      bool& manualSmoothing,

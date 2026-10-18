@@ -1,7 +1,6 @@
 #include "resyne/ui/toolbar/toolbar.h"
 
 #include "imgui.h"
-#include "ui/styling/system_theme/system_theme_detector.h"
 #include <cstdio>
 
 namespace ReSyne::UI::Utilities {
@@ -11,28 +10,16 @@ bool drawToolButton(const char* label,
                     bool active,
                     bool enabled,
                     float height,
-                    float opticalOffsetX) {
-    const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
-
-    ImVec4 baseColour;
-    ImVec4 hoveredColour;
-    ImVec4 activeColour;
-    ImVec4 textColour;
-
-    if (isLightMode) {
-        baseColour = ImVec4(0.9f, 0.9f, 0.9f, 1.0f);
-        hoveredColour = ImVec4(0.82f, 0.82f, 0.82f, 1.0f);
-        activeColour = ImVec4(0.72f, 0.72f, 0.72f, 1.0f);
-        textColour = ImVec4(0.18f, 0.18f, 0.18f, 1.0f);
-    } else {
-        baseColour = ImGui::GetStyleColorVec4(ImGuiCol_Button);
-        hoveredColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
-        activeColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-        textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-    }
+                    float opticalOffsetX,
+                    bool destructive) {
+    const ImVec4 baseColour = ImGui::GetStyleColorVec4(ImGuiCol_Button);
+    const ImVec4 hoveredColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
+    const ImVec4 activeColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+    ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
 
     ImVec4 buttonColour = active ? activeColour : baseColour;
     ImVec4 buttonHovered = active ? activeColour : hoveredColour;
+    if (destructive) buttonHovered = ImVec4(1.0f, 56.0f / 255.0f, 60.0f / 255.0f, 1.0f);
 
     if (!enabled) {
         buttonColour.w *= 0.45f;

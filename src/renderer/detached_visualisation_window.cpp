@@ -1,5 +1,7 @@
 #include "renderer/detached_visualisation_window.h"
 
+#include <array>
+
 #include "audio/input/audio_input.h"
 #include "imgui.h"
 #include "renderer/presentation_resources.h"
@@ -109,15 +111,19 @@ void DetachedVisualisationWindow::renderFrame(UIState& state) {
     UI::AudioVisualisation::SurfaceLayout layout;
     layout.displaySize = ImGui::GetIO().DisplaySize;
 
-    UI::AudioVisualisation::renderSpectrumOverlay(
-        state,
-        layout,
-        UI::AudioVisualisation::hasPlaybackSession(recorderState)
-    );
+    const bool loadingTrack = recorderState.importPhase != 0;
+    if (!loadingTrack) {
+        UI::AudioVisualisation::renderSpectrumOverlay(
+            state,
+            layout,
+            UI::AudioVisualisation::hasPlaybackSession(recorderState)
+        );
+    }
 
     uiContext_.endFrame();
 
-    const auto clearColour = UI::AudioVisualisation::currentVisualisationClearColour(state);
+    const auto clearColour = loadingTrack ? std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}
+        : UI::AudioVisualisation::currentVisualisationClearColour(state);
     bgfx::setViewFrameBuffer(kClearViewId, frameBuffer_);
     bgfx::setViewRect(
         kClearViewId,

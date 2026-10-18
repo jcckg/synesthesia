@@ -82,7 +82,7 @@ bool updateRecordingCountdown(RecorderState& state, float deltaSeconds) {
 
 const char* recordingStartButtonLabel(const RecorderState& state) {
     if (!state.recordingCountdownActive) {
-        return "Start";
+        return "Record";
     }
 
     static char label[16];

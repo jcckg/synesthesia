@@ -4,6 +4,7 @@
 #include <vector>
 #include <mutex>
 #include <limits>
+#include <string>
 
 #include "audio/analysis/fft/fft_processor.h"
 #include "audio/input/audio_input.h"
@@ -19,7 +20,67 @@
 #include "renderer/presentation_resources.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 
+#ifdef __APPLE__
+#include "imgui_internal.h"
+#include "renderer/styling/platform_styling.h"
+#endif
+
 namespace ReSyne {
+
+namespace {
+
+bool drawCornerButton(const char* label, const ImVec2& size, bool bottomLeft) {
+    const std::string buttonLabel = std::string(label) + (bottomLeft ? "###Record" : "###Export");
+#ifdef __APPLE__
+    const auto* viewport = ImGui::GetWindowViewport();
+    const auto outerRadius = Renderer::Styling::windowBottomCornerRadius(
+        static_cast<GLFWwindow*>(viewport->PlatformHandle), bottomLeft);
+    const ImVec2 position = ImGui::GetCursorScreenPos();
+    const float horizontalPadding = bottomLeft ? position.x - viewport->Pos.x
+        : viewport->Pos.x + viewport->Size.x - position.x - size.x;
+    const float padding = std::max(horizontalPadding,
+                                   viewport->Pos.y + viewport->Size.y - position.y - size.y);
+    const float radius = outerRadius
+        ? std::clamp(*outerRadius - padding, 0.0f, std::min(size.x, size.y) * 0.5f) : 0.0f;
+    const auto& style = ImGui::GetStyle();
+    if (radius > style.FrameRounding) {
+        auto* window = ImGui::GetCurrentWindow();
+        if (window->SkipItems) return false;
+        const ImGuiID id = window->GetID(buttonLabel.c_str());
+        const ImRect bounds(position, ImVec2(position.x + size.x, position.y + size.y));
+        ImGui::ItemSize(size, style.FramePadding.y);
+        if (!ImGui::ItemAdd(bounds, id)) return false;
+        bool hovered = false, held = false;
+        const bool pressed = ImGui::ButtonBehavior(bounds, id, &hovered, &held);
+        const ImU32 colour = ImGui::GetColorU32(held && hovered ? ImGuiCol_ButtonActive
+            : hovered ? ImGuiCol_ButtonHovered : ImGuiCol_Button);
+        const float rounding = style.FrameRounding;
+        const float leftRadius = bottomLeft ? radius : rounding;
+        const float rightRadius = bottomLeft ? rounding : radius;
+        auto* drawList = window->DrawList;
+        drawList->PathArcToFast(ImVec2(bounds.Min.x + rounding, bounds.Min.y + rounding), rounding, 6, 9);
+        drawList->PathArcToFast(ImVec2(bounds.Max.x - rounding, bounds.Min.y + rounding), rounding, 9, 12);
+        drawList->PathArcTo(ImVec2(bounds.Max.x - rightRadius, bounds.Max.y - rightRadius), rightRadius, 0.0f, IM_PI * 0.5f);
+        drawList->PathArcTo(ImVec2(bounds.Min.x + leftRadius, bounds.Max.y - leftRadius), leftRadius, IM_PI * 0.5f, IM_PI);
+        drawList->PathFillConvex(colour);
+        ImGui::RenderNavCursor(bounds, id);
+        const ImVec2 labelSize = ImGui::CalcTextSize(label);
+        ImGui::RenderTextClipped(ImVec2(bounds.Min.x + style.FramePadding.x, bounds.Min.y + style.FramePadding.y),
+            ImVec2(bounds.Max.x - style.FramePadding.x, bounds.Max.y - style.FramePadding.y),
+            label, nullptr, &labelSize, style.ButtonTextAlign, &bounds);
+        return pressed;
+    }
+    if (outerRadius.has_value()) {
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
+        const bool pressed = ImGui::Button(buttonLabel.c_str(), size);
+        ImGui::PopStyleVar();
+        return pressed;
+    }
+#endif
+    return ImGui::Button(buttonLabel.c_str(), size);
+}
+
+}
 
 void Recorder::drawFullWindow(RecorderState& state,
                               AudioInput& audioInput,
@@ -33,8 +94,13 @@ void Recorder::drawFullWindow(RecorderState& state,
                               float currentB) {
     ImGui::SetNextWindowPos(ImVec2(windowX, windowY));
     ImGui::SetNextWindowSize(ImVec2(windowWidth, windowHeight));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(9.0f, 9.0f));
+    constexpr float WINDOW_PADDING = 6.0f;
+    constexpr float HEADER_PADDING = 9.0f;
+    constexpr float TOOLBAR_PADDING = WINDOW_PADDING;
+    constexpr float BUTTON_HEIGHT = 26.0f;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(WINDOW_PADDING, TOOLBAR_PADDING));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 4.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
 
     ImGui::Begin("##ResyneFullWindow",
                  nullptr,
@@ -42,14 +108,15 @@ void Recorder::drawFullWindow(RecorderState& state,
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    ImGui::BeginDisabled(state.importPhase != 0);
+    ImGui::SetCursorPosY(HEADER_PADDING);
+    const bool controlsEnabled = state.importPhase == 0 && !state.exportRunning.load(std::memory_order_acquire);
 
     if (state.focusRequested) {
         ImGui::SetWindowFocus();
         state.focusRequested = false;
     }
 
-    constexpr float CONTROL_HEIGHT = 30.0f;
+    constexpr float CONTROL_HEIGHT = BUTTON_HEIGHT + TOOLBAR_PADDING;
     size_t sampleCount = 0;
     double duration = 0.0;
     bool hasData = false;
@@ -66,7 +133,8 @@ void Recorder::drawFullWindow(RecorderState& state,
         duration = presentation->duration;
     }
 
-    const char* statusText = state.importPhase != 0 ? "LOADING" : state.isRecording ? "RECORDING" : "IDLE";
+    const bool isPlaying = state.audioOutput && state.audioOutput->isPlaying();
+    const char* statusText = state.importPhase != 0 ? "LOADING" : state.isRecording ? "RECORDING" : isPlaying ? "PLAYING" : "IDLE";
     const int displayedFft = fftSize > 0 ? fftSize : state.fallbackFftSize;
     const int displayedHop = hopSize > 0 ? hopSize : state.fallbackHopSize;
     const float displayedRate = sampleRate > 0.0f ? sampleRate : state.fallbackSampleRate;
@@ -88,22 +156,28 @@ void Recorder::drawFullWindow(RecorderState& state,
         snprintf(rateStr, sizeof(rateStr), "--");
     }
 
-    char statusBar[512];
-    snprintf(statusBar, sizeof(statusBar),
-             "STATUS: %s  |  RGB: %.3f %.3f %.3f  |  FRAMES: %zu  |  DURATION: %.2fs  |  FFT: %s  |  HOP: %s  |  RATE: %s",
-             statusText,
+    char statusDetails[512];
+    snprintf(statusDetails, sizeof(statusDetails),
+             "  |  RGB: %.3f %.3f %.3f  |  FRAMES: %zu  |  DURATION: %.2fs  |  FFT: %s  |  HOP: %s  |  RATE: %s",
              static_cast<double>(currentR), static_cast<double>(currentG), static_cast<double>(currentB),
              sampleCount,
              duration,
              fftStr, hopStr, rateStr);
 
-    const float statusBarWidth = ImGui::CalcTextSize(statusBar).x;
+    const float statusBarWidth = ImGui::CalcTextSize("STATUS: ").x + ImGui::CalcTextSize(statusText).x +
+        ImGui::CalcTextSize(statusDetails).x;
     const float availableWidth = ImGui::GetContentRegionAvail().x;
     const float rightAlignX = std::max(0.0f, availableWidth - statusBarWidth);
 
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + rightAlignX);
-    ImGui::Text("%s", statusBar);
+    ImGui::TextUnformatted("STATUS: ");
+    ImGui::SameLine(0.0f, 0.0f);
+    const ImVec4 statusColour = UI::activityStatusColour(state, audioInput, presentation.get());
+    ImGui::TextColored(statusColour, "%s", statusText);
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::TextUnformatted(statusDetails);
     ImGui::Spacing();
+    ImGui::BeginDisabled(!controlsEnabled);
 
     const float availableHeight = ImGui::GetContentRegionAvail().y - CONTROL_HEIGHT;
     const ImVec2 gradientSize(ImGui::GetContentRegionAvail().x, availableHeight);
@@ -121,11 +195,11 @@ void Recorder::drawFullWindow(RecorderState& state,
             state.importColourSpace,
             presentation->settings.applyGamutMapping,
             state.importPhase == 0 ? RecorderUI::computePlaybackNormalisedPosition(state) : std::nullopt,
-            state.importPhase == 0,
+            controlsEnabled,
             false,
-            state.importPhase == 0,
-            state.importPhase == 0 && !state.timeline.trackScrubber,
-            state.importPhase == 0 && !state.timeline.trackScrubber,
+            controlsEnabled,
+            controlsEnabled && !state.timeline.trackScrubber,
+            controlsEnabled && !state.timeline.trackScrubber,
             &state.toolState,
             &state.trackpadInput,
             state.presentationResources,
@@ -216,8 +290,8 @@ void Recorder::drawFullWindow(RecorderState& state,
     }
 
     const bool windowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    if (state.importPhase == 0) Recorder::handleKeyboardShortcuts(state, windowFocused, hasData && !state.isRecording);
-    if (!canStartRecording && state.recordingCountdownActive) {
+    if (controlsEnabled) Recorder::handleKeyboardShortcuts(state, windowFocused, hasData && !state.isRecording);
+    if ((!canStartRecording || !controlsEnabled) && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
     if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
@@ -225,7 +299,6 @@ void Recorder::drawFullWindow(RecorderState& state,
     }
 
     constexpr float BUTTON_WIDTH = 80.0f;
-    constexpr float BUTTON_HEIGHT = 26.0f;
     constexpr float BUTTON_SPACING = 8.0f;
 
     const int toolbarButtonCount = 3;
@@ -245,10 +318,12 @@ void Recorder::drawFullWindow(RecorderState& state,
         visualisationToExportSpacing + BUTTON_HEIGHT + clearToExportSpacing + BUTTON_WIDTH;
     const float rightGroupWidth = toolbarWidth + controlsSpacing + utilityControlsWidth;
 
+    ImGui::SetCursorPos(ImVec2(WINDOW_PADDING, windowHeight - TOOLBAR_PADDING - BUTTON_HEIGHT));
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(4.0f, 0.0f));
     if (ImGui::BeginTable("RecorderFullControls",
                           3,
-                          ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody)) {
+                          ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody,
+                          ImVec2(windowWidth - WINDOW_PADDING * 2.0f, 0.0f))) {
         ImGui::TableSetupColumn("Recorder", ImGuiTableColumnFlags_WidthFixed,
                                 BUTTON_WIDTH * 3.0f + BUTTON_SPACING * 2.0f + 8.0f);
         ImGui::TableSetupColumn("Transport", ImGuiTableColumnFlags_WidthStretch);
@@ -260,8 +335,8 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::BeginDisabled(state.isRecording || !canStartRecording);
         const char* startLabel = state.recordingCountdownActive
             ? RecorderUI::recordingStartButtonLabel(state)
-            : "START";
-        if (ImGui::Button(startLabel, ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
+            : "RECORD";
+        if (drawCornerButton(startLabel, ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT), true)) {
             if (state.recordingCountdownActive) {
                 RecorderUI::cancelRecordingCountdown(state);
             } else {
@@ -295,15 +370,13 @@ void Recorder::drawFullWindow(RecorderState& state,
         const float centreOffset = std::max(0.0f, (centreColumnWidth - playbackWidth) * 0.5f);
         ImGui::SetCursorPosX(centreCursorStart + centreOffset);
 
-        const bool isPlaying = state.audioOutput && state.audioOutput->isPlaying();
         const char* playPauseIcon = isPlaying ? ICON_FA_PAUSE : ICON_FA_PLAY;
-
-        ImGui::BeginDisabled(!hasData || state.isRecording);
+        const bool transportEnabled = controlsEnabled && hasData && !state.isRecording;
         
         if (UI::Utilities::drawToolButton(ICON_FA_REPEAT, 
                                           state.loopEnabled ? "Loop enabled" : "Loop disabled",
                                           state.loopEnabled,
-                                          true,
+                                          transportEnabled,
                                           BUTTON_HEIGHT,
                                           0.5f)) {
             state.loopEnabled = !state.loopEnabled;
@@ -314,20 +387,19 @@ void Recorder::drawFullWindow(RecorderState& state,
 
         ImGui::SameLine(0.0f, transportSpacing);
 
-        if (UI::Utilities::drawToolButton(ICON_FA_BACKWARD_STEP, "Jump to start", false, true, BUTTON_HEIGHT, -0.5f)) {
+        if (UI::Utilities::drawToolButton(ICON_FA_BACKWARD_STEP, "Jump to start", false, transportEnabled, BUTTON_HEIGHT, -0.5f)) {
             Recorder::seekPlayback(state, 0.0f);
         }
 
         ImGui::SameLine(0.0f, transportSpacing);
 
-        if (UI::Utilities::drawToolButton(playPauseIcon, isPlaying ? "Pause" : "Play", false, true, BUTTON_HEIGHT, 1.0f)) {
+        if (UI::Utilities::drawToolButton(playPauseIcon, isPlaying ? "Pause" : "Play", false, transportEnabled, BUTTON_HEIGHT, 1.0f)) {
             if (isPlaying) {
                 pausePlayback(state);
             } else {
                 startPlayback(state);
             }
         }
-        ImGui::EndDisabled();
 
         ImGui::TableSetColumnIndex(2);
         const float rightColumnWidth = ImGui::GetColumnWidth(2);
@@ -335,20 +407,21 @@ void Recorder::drawFullWindow(RecorderState& state,
         const float rightOffset = std::max(0.0f, rightColumnWidth - rightGroupWidth);
         ImGui::SetCursorPosX(rightCursorStart + rightOffset);
 
+        const bool timelineControlsEnabled = controlsEnabled && hasData;
         UI::Utilities::ToolbarRenderContext toolbarContext;
-        toolbarContext.enabled = hasData;
+        toolbarContext.enabled = timelineControlsEnabled;
         toolbarContext.buttonHeight = BUTTON_HEIGHT;
         toolbarContext.allowGrabTool = hasData && !state.timeline.trackScrubber;
         UI::Utilities::renderToolbar(state.toolState, toolbarContext);
 
         ImGui::SameLine(0.0f, controlsSpacing);
-        ImGui::BeginDisabled(!hasData);
+        ImGui::BeginDisabled(!timelineControlsEnabled);
 
         const bool trackingActive = state.timeline.trackScrubber;
         if (UI::Utilities::drawToolButton(ICON_FA_CROSSHAIRS, 
                                           trackingActive ? "Click to stop tracking" : "Click to follow scrubber",
                                           trackingActive,
-                                          hasData,
+                                          timelineControlsEnabled,
                                           BUTTON_HEIGHT)) {
             state.timeline.trackScrubber = !state.timeline.trackScrubber;
             if (state.timeline.trackScrubber) {
@@ -360,7 +433,7 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::SameLine(0.0f, lockToVisualisationSpacing);
 
         const bool detachedVisualisationEnabled =
-            hasData &&
+            timelineControlsEnabled &&
             state.detachedVisualisation.available &&
             !state.detachedVisualisation.isOpen;
         if (UI::Utilities::drawToolButton(
@@ -384,20 +457,22 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::SameLine(0.0f, visualisationToExportSpacing);
 
         const bool clearTimelineEnabled =
-            hasData && !state.isRecording && !state.recordingCountdownActive &&
+            timelineControlsEnabled && !state.isRecording && !state.recordingCountdownActive &&
             !state.importRunning.load(std::memory_order_acquire);
         if (UI::Utilities::drawToolButton(
                 ICON_FA_TRASH,
                 "Clear timeline",
                 false,
                 clearTimelineEnabled,
-                BUTTON_HEIGHT)) {
+                BUTTON_HEIGHT,
+                0.0f,
+                true)) {
             RecorderUI::requestTimelineClear(state);
         }
 
         ImGui::SameLine(0.0f, clearToExportSpacing);
 
-        if (ImGui::Button("Export", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
+        if (drawCornerButton("Export", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT), false)) {
             state.showExportDialog = true;
         }
         if (ImGui::IsItemHovered()) {
@@ -410,15 +485,12 @@ void Recorder::drawFullWindow(RecorderState& state,
     }
     ImGui::PopStyleVar();
 
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 9.0f);
-
     ImGui::EndDisabled();
-    drawLoadingDialog(state);
+    drawProgressIndicator(state);
     ImGui::End();
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
 
     drawExportDialog(state);
-    drawExportingDialog(state);
     RecorderUI::drawClearTimelineDialog(state);
 }
 

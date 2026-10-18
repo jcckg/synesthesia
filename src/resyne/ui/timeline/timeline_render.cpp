@@ -51,12 +51,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const ImVec2 size = context.size;
     const ImVec2 regionMax(cursorPos.x + size.x, cursorPos.y + size.y);
 
-    const float minTopBarHeight = 18.0f;
-    const float maxTopBarHeight = 28.0f;
-    float topBarHeight = std::clamp(size.y * 0.18f, minTopBarHeight, maxTopBarHeight);
-    if (size.y - topBarHeight < 18.0f) {
-        topBarHeight = std::max(minTopBarHeight, size.y - 18.0f);
-    }
+    const float topBarHeight = std::min(RULER_HEIGHT, std::max(size.y - 12.0f, 0.0f));
     const float gradientHeight = std::max(size.y - topBarHeight, 12.0f);
 
     const ImVec2 topMin = cursorPos;
@@ -279,15 +274,14 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     }
 
     const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
-    const ImU32 frameColour = isLightMode ? IM_COL32(235, 235, 235, 255) : IM_COL32(12, 12, 12, 255);
-    const ImU32 topBarColour = isLightMode ? IM_COL32(225, 225, 225, 255) : IM_COL32(18, 18, 18, 255);
-    const ImU32 gradientBgColour = isLightMode ? IM_COL32(240, 240, 240, 255) : IM_COL32(14, 14, 14, 255);
-    const ImU32 frameBorderColour = isLightMode ? IM_COL32(215, 215, 215, 255) : IM_COL32(46, 46, 46, 255);
+    const ImU32 frameColour = ImGui::GetColorU32(ImGuiCol_WindowBg);
+    const ImU32 topBarColour = ImGui::GetColorU32(ImGuiCol_Header);
+    const ImU32 gradientBgColour = ImGui::GetColorU32(ImGuiCol_FrameBg);
+    const ImU32 frameBorderColour = ImGui::GetColorU32(ImGuiCol_Border);
 
-    drawList->AddRectFilled(cursorPos, regionMax, frameColour, 4.0f);
+    drawList->AddRectFilled(cursorPos, regionMax, frameColour, 4.0f, ImDrawFlags_RoundCornersTop);
     drawList->AddRectFilled(topMin, topMax, topBarColour, 4.0f, ImDrawFlags_RoundCornersTop);
     drawList->AddRectFilled(gradientMin, gradientMax, gradientBgColour);
-    drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f);
 
     if (context.availableDurationSeconds.has_value()) {
         const double loaded = context.durationSeconds > 0.0
@@ -329,23 +323,40 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
 
     if (context.availableDurationSeconds.has_value()) drawList->PopClipRect();
 
-    drawList->AddLine(ImVec2(gradientMin.x, gradientMin.y),
-                      ImVec2(gradientMax.x, gradientMin.y),
-                      isLightMode ? IM_COL32(215, 215, 215, 255) : IM_COL32(58, 58, 58, 255),
+    const float dividerY = topMax.y - 1.0f;
+    drawList->AddLine(ImVec2(gradientMin.x, dividerY),
+                      ImVec2(gradientMax.x, dividerY),
+                      frameBorderColour,
                       1.0f);
-    drawList->AddRect(gradientMin, gradientMax, isLightMode ? IM_COL32(210, 210, 210, 255) : IM_COL32(38, 38, 38, 255));
+    drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f, 1.0f, ImDrawFlags_RoundCornersTop);
 
     const double duration = std::max(context.durationSeconds, 0.0);
     const double viewSpanNormalised = static_cast<double>(viewEnd - viewStart);
     const double visibleDuration = std::max(viewSpanNormalised * duration, 1e-6);
 
-    const double majorStep = Labels::chooseMajorTickStep(visibleDuration);
-    const double epsilon = majorStep * 0.05;
-    const int minorDivisions = 4;
-    const double minorStep = minorDivisions > 0 ? majorStep / static_cast<double>(minorDivisions) : majorStep;
-
     const double visibleStartSeconds = static_cast<double>(viewStart) * duration;
     const double visibleEndSeconds = static_cast<double>(viewEnd) * duration;
+    const bool showHours = visibleEndSeconds >= 3600.0;
+    ImFont* labelFont = ImGui::GetFont();
+    const float labelFontSize = std::max(10.0f, std::round(ImGui::GetFontSize() * 0.85f));
+    const auto referenceLabel = Labels::formatTickLabel(visibleEndSeconds,
+        Labels::chooseMajorTickStep(visibleDuration), showHours);
+    const float labelSpacing = std::max(72.0f,
+        labelFont->CalcTextSizeA(labelFontSize, FLT_MAX, 0.0f, referenceLabel.c_str()).x + 24.0f);
+    const double maximumTicks = static_cast<double>(std::clamp(std::floor(size.x / labelSpacing), 1.0f, 16.0f));
+    const double majorStep = Labels::chooseMajorTickStep(visibleDuration, maximumTicks);
+    const double epsilon = majorStep * 1e-6;
+    const double majorSpacing = majorStep / visibleDuration * static_cast<double>(size.x);
+    const int minorDivisions = Labels::chooseMinorTickDivisions(majorStep, majorSpacing);
+    const double minorStep = majorStep / static_cast<double>(minorDivisions);
+    const float tickBottom = dividerY - 3.0f;
+    const ImU32 majorTickColour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    const ImU32 minorTickColour = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.6f);
+    const ImU32 labelColour = ImGui::GetColorU32(ImGuiCol_Text, 0.85f);
+    const auto tickX = [&](double time) {
+        const float local = static_cast<float>((time - visibleStartSeconds) / visibleDuration);
+        return std::clamp(std::floor(topMin.x + local * size.x) + 0.5f, topMin.x + 0.5f, topMax.x - 0.5f);
+    };
 
     if (duration > 0.0 && visibleDuration > 0.0) {
         double firstMajor = std::floor((visibleStartSeconds) / majorStep) * majorStep;
@@ -353,18 +364,23 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
             firstMajor = 0.0;
         }
 
+        float previousLabelRight = topMin.x - 12.0f;
+        drawList->PushClipRect(topMin, topMax, true);
         for (double t = firstMajor; t <= visibleEndSeconds + epsilon; t += majorStep) {
-            if (t < visibleStartSeconds - epsilon) {
-                continue;
+            if (t >= visibleStartSeconds - epsilon) {
+                const float x = tickX(t);
+                drawList->AddLine(ImVec2(x, tickBottom - 5.0f), ImVec2(x, tickBottom), majorTickColour, 1.0f);
+                const auto label = Labels::formatTickLabel(t, majorStep, showHours);
+                const ImVec2 textSize = labelFont->CalcTextSizeA(labelFontSize, FLT_MAX, 0.0f, label.c_str());
+                if (textSize.x + 8.0f <= size.x) {
+                    const ImVec2 textPos(std::floor(std::clamp(x - textSize.x * 0.5f, topMin.x + 4.0f,
+                        topMax.x - textSize.x - 4.0f)), std::floor(topMin.y + 2.0f));
+                    if (textPos.x >= previousLabelRight + 12.0f) {
+                        drawList->AddText(labelFont, labelFontSize, textPos, labelColour, label.c_str());
+                        previousLabelRight = textPos.x + textSize.x;
+                    }
+                }
             }
-
-            const float local = static_cast<float>((t - visibleStartSeconds) / visibleDuration);
-            const float x = topMin.x + std::clamp(local, 0.0f, 1.0f) * size.x;
-
-            drawList->AddLine(ImVec2(x, topMin.y + 2.0f),
-                              ImVec2(x, topMax.y),
-                              isLightMode ? IM_COL32(100, 100, 100, 200) : IM_COL32(180, 180, 180, 220),
-                              1.0f);
 
             if (minorDivisions > 1 && majorStep > 0.0) {
                 const double segmentEnd = t + majorStep;
@@ -376,21 +392,16 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                     if (minorTime < visibleStartSeconds - epsilon) {
                         continue;
                     }
-                    const float minorLocal = static_cast<float>((minorTime - visibleStartSeconds) / visibleDuration);
-                    const float mx = topMin.x + std::clamp(minorLocal, 0.0f, 1.0f) * size.x;
-                    drawList->AddLine(ImVec2(mx, topMax.y - topBarHeight * 0.45f),
-                                      ImVec2(mx, topMax.y - 2.0f),
-                                      isLightMode ? IM_COL32(140, 140, 140, 160) : IM_COL32(90, 90, 90, 180),
-                                      1.0f);
+                    const float mx = tickX(minorTime);
+                    const bool intermediate = i * 2 == minorDivisions ||
+                        (minorDivisions >= 10 && minorDivisions % 5 == 0 && i % 5 == 0);
+                    const float tickHeight = intermediate ? 3.0f : 2.0f;
+                    drawList->AddLine(ImVec2(mx, tickBottom - tickHeight), ImVec2(mx, tickBottom),
+                        intermediate ? majorTickColour : minorTickColour, 1.0f);
                 }
             }
-
-            std::string label = Labels::formatTickLabel(t, majorStep);
-            ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
-            ImVec2 textPos(x - textSize.x * 0.5f, topMin.y + 4.0f);
-            textPos.x = std::clamp(textPos.x, topMin.x + 4.0f, topMax.x - textSize.x - 4.0f);
-            drawList->AddText(textPos, isLightMode ? IM_COL32(60, 60, 60, 255) : IM_COL32(215, 215, 215, 255), label.c_str());
         }
+        drawList->PopClipRect();
     }
 
     if (ImGui::IsMouseHoveringRect(topMin, topMax, ImGuiHoveredFlags_None) && context.allowScrubbing) {
@@ -399,11 +410,11 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
 
     const float scrubberLocal = (state.scrubberNormalisedPosition - viewStart) / viewSpan;
     const float clampedLocal = std::clamp(scrubberLocal, 0.0f, 1.0f);
-    const float scrubberX = topMin.x + clampedLocal * size.x;
+    const float scrubberX = std::floor(topMin.x + clampedLocal * size.x) + 0.5f;
 
     if (state.zoomFactor > Viewport::MIN_ZOOM_FACTOR + 1e-3f) {
-        const float indicatorHeight = std::clamp(topBarHeight * 0.2f, 2.0f, 6.0f);
-        const float indicatorBottom = topMax.y - 2.0f;
+        const float indicatorHeight = std::min(2.0f, topBarHeight * 0.1f);
+        const float indicatorBottom = topMax.y - 1.0f;
         const float indicatorTop = indicatorBottom - indicatorHeight;
         const float indicatorStart = topMin.x + std::clamp(viewStart, 0.0f, 1.0f) * size.x;
         const float indicatorEnd = topMin.x + std::clamp(viewEnd, 0.0f, 1.0f) * size.x;
@@ -412,33 +423,29 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         if (barMax > barMin) {
             drawList->AddRectFilled(ImVec2(barMin, indicatorTop),
                                     ImVec2(barMax, indicatorBottom),
-                                    IM_COL32(90, 90, 90, 180),
-                                    2.0f);
-            drawList->AddRect(ImVec2(barMin, indicatorTop),
-                              ImVec2(barMax, indicatorBottom),
-                              IM_COL32(140, 140, 140, 200),
-                              2.0f);
+                                    isLightMode ? IM_COL32(110, 110, 110, 200) : IM_COL32(140, 140, 140, 180),
+                                    1.0f);
         }
     }
 
-    const float handleHalfWidth = 5.0f;
+    const float handleHalfWidth = 4.0f;
     const float handleHeight = std::max(topBarHeight - 6.0f, 10.0f);
     ImVec2 handleMin(scrubberX - handleHalfWidth, topMin.y + 3.0f);
     ImVec2 handleMax(scrubberX + handleHalfWidth, handleMin.y + handleHeight);
 
-    const ImU32 scrubberShadow = isLightMode ? IM_COL32(0, 0, 0, 60) : IM_COL32(0, 0, 0, 140);
+    const ImU32 scrubberShadow = isLightMode ? IM_COL32(0, 0, 0, 40) : IM_COL32(0, 0, 0, 100);
     const ImU32 scrubberLight = IM_COL32(255, 255, 255, 240);
-    drawList->AddLine(ImVec2(scrubberX, topMax.y),
+    drawList->AddLine(ImVec2(scrubberX, handleMax.y),
                       ImVec2(scrubberX, gradientMax.y),
                       scrubberShadow,
-                      4.0f);
-    drawList->AddLine(ImVec2(scrubberX, topMax.y),
+                      2.0f);
+    drawList->AddLine(ImVec2(scrubberX, handleMax.y),
                       ImVec2(scrubberX, gradientMax.y),
                       scrubberLight,
-                      2.0f);
+                      1.0f);
 
-    drawList->AddRectFilled(handleMin, handleMax, isLightMode ? IM_COL32(230, 230, 230, 255) : IM_COL32(200, 200, 200, 235), 3.0f);
-    drawList->AddRect(handleMin, handleMax, isLightMode ? IM_COL32(160, 160, 160, 255) : IM_COL32(60, 60, 60, 255), 3.0f);
+    drawList->AddRectFilled(handleMin, handleMax, isLightMode ? IM_COL32(230, 230, 230, 255) : IM_COL32(200, 200, 200, 235), 2.0f);
+    drawList->AddRect(handleMin, handleMax, isLightMode ? IM_COL32(160, 160, 160, 255) : IM_COL32(60, 60, 60, 255), 2.0f);
 
     const float overlayAlpha = context.showDropOverlay ? state.hoverOverlayAlpha * 0.3f : 0.0f;
     const float combinedAlpha = overlayAlpha + context.dropFlashAlpha * 0.6f;

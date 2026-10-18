@@ -1,8 +1,10 @@
 #include "import_handler.h"
 #include "ui.h"
 #include "imgui_internal.h"
+#include "resyne/encoding/formats/rsyn_presentation.h"
 #include "resyne/recorder/presentation_worker.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <exception>
 #include <memory>
@@ -66,12 +68,18 @@ void ImportHandler::processFileImport(UIState& state) {
         });
         recorder.importPhase = 3;
     } else if (recorder.importPhase == 3) {
-        recorder.loadingProgress = recorder.loadingProgressAtomic.load(std::memory_order_acquire);
-        if (!recorder.importComplete.load(std::memory_order_acquire)) {
-            ReSyne::recorderPresentation(recorder);
+        const bool importComplete = recorder.importComplete.load(std::memory_order_acquire);
+        const auto presentation = ReSyne::recorderPresentation(recorder);
+        double duration = 0.0;
+        {
+            std::lock_guard lock(recorder.samplesMutex);
+            duration = RSYNPresentation::durationSeconds(recorder.previewMetadata);
+        }
+        recorder.loadingProgress = presentation && presentation->colours && duration > 0.0
+            ? static_cast<float>(std::clamp(presentation->colours->endTime() / duration, 0.0, 1.0)) : 0.0f;
+        if (!importComplete) {
             return;
         }
-        const auto presentation = ReSyne::recorderPresentation(recorder);
 
         bool success = false;
         std::size_t frameCount = 0;
@@ -87,9 +95,6 @@ void ImportHandler::processFileImport(UIState& state) {
         if (success && (!presentation || presentation->sourceRevision != recorder.presentationPreviewRevision ||
             presentation->processedFrames < frameCount) &&
             (!presentation || presentation->message.empty())) {
-            const float fraction = presentation && frameCount > 0
-                ? static_cast<float>(presentation->processedFrames) / static_cast<float>(frameCount) : 0.0f;
-            recorder.loadingProgress = 0.95f + fraction * 0.04f;
             ReSyne::setLoadingOperationStatus(recorder, "Preparing colours...");
             return;
         }

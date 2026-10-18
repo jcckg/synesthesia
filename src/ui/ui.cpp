@@ -495,6 +495,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		};
 
 		Sidebar::render(sidebarArgs);
+		recorderState.progressIndicatorOnLeft = !state.visibility.sidebarOnLeft;
 
 		if (state.visualSettings.activeView == UIState::View::Visualisation) {
 			UI::AudioVisualisation::SurfaceLayout layout;

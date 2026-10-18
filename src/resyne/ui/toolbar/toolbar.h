@@ -21,7 +21,8 @@ bool drawToolButton(const char* label,
                     bool active,
                     bool enabled,
                     float height,
-                    float opticalOffsetX = 0.0f);
+                    float opticalOffsetX = 0.0f,
+                    bool destructive = false);
 
 ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& context);
 

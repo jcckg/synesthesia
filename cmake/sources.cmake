@@ -73,8 +73,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/ui/recorder/bottom_panel.cpp
     ${SRC_DIR}/resyne/ui/recorder/full_window.cpp
     ${SRC_DIR}/resyne/ui/recorder/export_dialog.cpp
-    ${SRC_DIR}/resyne/ui/recorder/loading_dialog.cpp
-    ${SRC_DIR}/resyne/ui/recorder/exporting_dialog.cpp
+    ${SRC_DIR}/resyne/ui/recorder/progress_indicator.cpp
     ${SRC_DIR}/resyne/ui/recorder/utils.cpp
     ${SRC_DIR}/resyne/ui/recorder/shared_components.cpp
     ${SRC_DIR}/resyne/ui/recorder/timeline_actions.cpp

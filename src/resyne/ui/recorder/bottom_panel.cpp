@@ -39,7 +39,8 @@ void Recorder::drawBottomPanel(RecorderState& state,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    ImGui::BeginDisabled(state.importPhase != 0);
+    const bool controlsEnabled = state.importPhase == 0 && !state.exportRunning.load(std::memory_order_acquire);
+    ImGui::BeginDisabled(!controlsEnabled);
 
     if (state.focusRequested) {
         ImGui::SetWindowFocus();
@@ -76,11 +77,11 @@ void Recorder::drawBottomPanel(RecorderState& state,
             state.importColourSpace,
             presentation->settings.applyGamutMapping,
             state.importPhase == 0 ? RecorderUI::computePlaybackNormalisedPosition(state) : std::nullopt,
-            state.importPhase == 0,
+            controlsEnabled,
             false,
-            state.importPhase == 0,
-            state.importPhase == 0 && !state.timeline.trackScrubber,
-            state.importPhase == 0 && !state.timeline.trackScrubber,
+            controlsEnabled,
+            controlsEnabled && !state.timeline.trackScrubber,
+            controlsEnabled && !state.timeline.trackScrubber,
             &state.toolState,
             &state.trackpadInput,
             state.presentationResources,
@@ -139,8 +140,8 @@ void Recorder::drawBottomPanel(RecorderState& state,
     ImGui::Spacing();
 
     const bool panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    if (state.importPhase == 0) Recorder::handleKeyboardShortcuts(state, panelFocused, hasData && !state.isRecording);
-    if (!canStartRecording && state.recordingCountdownActive) {
+    if (controlsEnabled) Recorder::handleKeyboardShortcuts(state, panelFocused, hasData && !state.isRecording);
+    if ((!canStartRecording || !controlsEnabled) && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
     if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
@@ -270,14 +271,15 @@ void Recorder::drawBottomPanel(RecorderState& state,
         const float rightOffset = std::max(0.0f, rightColumnWidth - rightGroupWidth);
         ImGui::SetCursorPosX(rightCursorStart + rightOffset);
 
+        const bool timelineControlsEnabled = controlsEnabled && hasData;
         UI::Utilities::ToolbarRenderContext toolbarContext;
-        toolbarContext.enabled = hasData;
+        toolbarContext.enabled = timelineControlsEnabled;
         toolbarContext.buttonHeight = transportButtonSize;
         toolbarContext.allowGrabTool = hasData && !state.timeline.trackScrubber;
         UI::Utilities::renderToolbar(state.toolState, toolbarContext);
 
         ImGui::SameLine(0.0f, controlsSpacing);
-        ImGui::BeginDisabled(!hasData);
+        ImGui::BeginDisabled(!timelineControlsEnabled);
 
         const bool trackingActive = state.timeline.trackScrubber;
         const ImVec4 trackBase = trackingActive
@@ -304,7 +306,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         ImGui::SameLine(0.0f, lockToVisualisationSpacing);
 
         const bool detachedVisualisationEnabled =
-            hasData &&
+            timelineControlsEnabled &&
             state.detachedVisualisation.available &&
             !state.detachedVisualisation.isOpen;
         if (UI::Utilities::drawToolButton(
@@ -328,14 +330,16 @@ void Recorder::drawBottomPanel(RecorderState& state,
         ImGui::SameLine(0.0f, visualisationToExportSpacing);
 
         const bool clearTimelineEnabled =
-            hasData && !state.isRecording && !state.recordingCountdownActive &&
+            timelineControlsEnabled && !state.isRecording && !state.recordingCountdownActive &&
             !state.importRunning.load(std::memory_order_acquire);
         if (UI::Utilities::drawToolButton(
                 ICON_FA_TRASH,
                 "Clear timeline",
                 false,
                 clearTimelineEnabled,
-                transportButtonSize)) {
+                transportButtonSize,
+                0.0f,
+                true)) {
             RecorderUI::requestTimelineClear(state);
         }
 
@@ -356,12 +360,11 @@ void Recorder::drawBottomPanel(RecorderState& state,
     ReSyne::UI::renderStatusMessage(state);
 
     ImGui::EndDisabled();
-    drawLoadingDialog(state);
+    drawProgressIndicator(state);
     ImGui::End();
     ImGui::PopStyleVar();
 
     drawExportDialog(state);
-    drawExportingDialog(state);
     RecorderUI::drawClearTimelineDialog(state);
 }
 

@@ -1,5 +1,6 @@
 #include "midi_device_manager.h"
 #include <imgui.h>
+#include "ui/styling/styling.h"
 
 void MIDIDeviceManager::populateMIDIDeviceNames(MIDIDeviceState& deviceState,
 												const std::vector<MIDIInput::DeviceInfo>& devices) {
@@ -39,7 +40,7 @@ void MIDIDeviceManager::renderMIDIDeviceSelection(MIDIDeviceState& deviceState,
 	ImGui::SetNextItemWidth(-FLT_MIN);
 
 	if (!deviceState.deviceNames.empty()) {
-		if (ImGui::Combo("##mididevice", &deviceState.selectedDeviceIndex,
+		if (UIStyler::combo("##mididevice", &deviceState.selectedDeviceIndex,
 						 deviceState.deviceNames.data(),
 						 static_cast<int>(deviceState.deviceNames.size()))) {
 			selectMIDIDevice(deviceState, midiInput, devices, deviceState.selectedDeviceIndex);

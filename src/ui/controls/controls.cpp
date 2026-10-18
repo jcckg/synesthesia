@@ -1,6 +1,7 @@
 #include "controls.h"
 
 #include <imgui.h>
+#include "ui/styling/styling.h"
 #include <array>
 #include <algorithm>
 #include <cmath>
@@ -71,9 +72,29 @@ const char* backgroundPresentationLabel(const PresentationDiagnostics& diagnosti
 
 namespace Controls {
 
-void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyne::RecorderState& recorderState) {
-    if (!ImGui::CollapsingHeader("Audio and output", ImGuiTreeNodeFlags_DefaultOpen)) return;
-    ImGui::Indent(10);
+bool renderSectionHeader(const char* label, ImGuiTreeNodeFlags flags, SectionLayer layer) {
+    if (layer == SectionLayer::Secondary) {
+        const float shadeOffset = ImGui::GetStyleColorVec4(ImGuiCol_Text).x > 0.5f ? -0.020f : 0.035f;
+        for (ImGuiCol role : {ImGuiCol_Header, ImGuiCol_HeaderHovered, ImGuiCol_HeaderActive}) {
+            ImVec4 colour = ImGui::GetStyleColorVec4(role);
+            colour.x = std::clamp(colour.x + shadeOffset, 0.0f, 1.0f);
+            colour.y = std::clamp(colour.y + shadeOffset, 0.0f, 1.0f);
+            colour.z = std::clamp(colour.z + shadeOffset, 0.0f, 1.0f);
+            ImGui::PushStyleColor(role, colour);
+        }
+    }
+    const ImVec2 position = ImGui::GetCursorScreenPos();
+    const ImVec2 size(ImGui::GetContentRegionAvail().x, ImGui::GetFrameHeight());
+    ImGui::GetWindowDrawList()->AddRectFilled(position, ImVec2(position.x + size.x, position.y + size.y),
+        ImGui::GetColorU32(ImGuiCol_Header), ImGui::GetStyle().FrameRounding);
+    const bool open = ImGui::TreeNodeEx(label, flags | ImGuiTreeNodeFlags_FramePadding | ImGuiTreeNodeFlags_SpanAvailWidth |
+        ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_NoAutoOpenOnLog);
+    if (layer == SectionLayer::Secondary) ImGui::PopStyleColor(3);
+    return open;
+}
+
+void renderFrequencyInfoPanel(AudioInput& audioInput, ReSyne::RecorderState& recorderState) {
+    if (!renderSectionHeader("Audio and output", ImGuiTreeNodeFlags_DefaultOpen)) return;
     ColourCore::FrameResult result{};
     const bool playback = recorderState.audioOutput && recorderState.audioOutput->getTotalFrames() > 0;
     if (playback) {
@@ -87,13 +108,11 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, float* clear_colour, ReSyn
     } else if (const auto live = audioInput.getAudioProcessor().getPresentation()) result = live->frame.analysis;
     if (result.dominantFrequency > 0.0f) {
         ImGui::Text("Spectral centroid: %.1f Hz", static_cast<double>(result.spectralCentroid));
-        ImGui::Text("RGB: (%.2f, %.2f, %.2f)", static_cast<double>(clear_colour[0]),
-            static_cast<double>(clear_colour[1]), static_cast<double>(clear_colour[2]));
+        ImGui::Text("Peak frequency: %.1f Hz", static_cast<double>(result.dominantFrequency));
         if (std::isfinite(result.loudnessDb)) ImGui::Text(result.loudnessIsLufs ? "Loudness: %.1f LUFS" : "Frame level: %.1f dBFS",
             static_cast<double>(result.loudnessDb));
         else ImGui::TextDisabled("Loudness: unavailable");
     } else ImGui::TextDisabled("No significant frequencies");
-    ImGui::Unindent(10);
     ImGui::Spacing();
 }
 
@@ -101,12 +120,11 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
                                  bool& showSpectrumAnalyser, float sidebarWidth,
                                  float sidebarPadding, float buttonHeight,
                                  ReSyne::RecorderState* recorder, float effectiveResponseSeconds, ColourPresentation::ResponseRange responseRange) {
-    if (!ImGui::CollapsingHeader("Colour Smoothing")) return;
-    ImGui::Indent(10.0f);
-    const float contentWidth = std::max(40.0f, sidebarWidth - sidebarPadding * 2.0f - 10.0f);
+    if (!renderSectionHeader("Colour Smoothing")) return;
+    const float contentWidth = std::max(40.0f, sidebarWidth - sidebarPadding * 2.0f);
     int mode = manualSmoothing ? 1 : 0;
     ImGui::SetNextItemWidth(contentWidth);
-    if (ImGui::Combo("##ColourResponseMode", &mode, "Automatic\0Manual\0")) manualSmoothing = mode == 1;
+    if (UIStyler::combo("##ColourResponseMode", &mode, "Automatic\0Manual\0")) manualSmoothing = mode == 1;
     if (ImGui::IsItemHovered()) ImGui::SetTooltip(
         "Automatic follows musical changes while stabilising uncertain spectral measurements.\n"
         "Manual lets you choose the base response and follows local colour contribution changes.");
@@ -153,7 +171,6 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
     }
     if (ImGui::Button(showSpectrumAnalyser ? "Hide spectrum" : "Show spectrum", {contentWidth, buttonHeight}))
         showSpectrumAnalyser = !showSpectrumAnalyser;
-    ImGui::Unindent(10.0f);
     ImGui::Spacing();
 }
 
@@ -167,8 +184,7 @@ void renderEQControlsPanel(float& lowGain,
                           float controlWidth,
                           float buttonHeight,
                           float contentWidth) {
-    if (ImGui::CollapsingHeader("EQ/Gain")) {
-        ImGui::Indent(10);
+    if (renderSectionHeader("EQ/Gain")) {
 
         if (!enabled) {
             ImGui::TextDisabled("Live input only");
@@ -206,7 +222,6 @@ void renderEQControlsPanel(float& lowGain,
             ImGui::EndDisabled();
         }
 
-        ImGui::Unindent(10);
     }
 }
 
@@ -218,9 +233,8 @@ void renderAdvancedSettingsPanel(UIState& state
                                   ) {
     static bool previousSmoothingState = state.visualSettings.smoothingEnabled;
 
-    if (ImGui::CollapsingHeader("Advanced Settings")) {
-        if (ImGui::CollapsingHeader("Appearance")) {
-			ImGui::Indent(10);
+    if (renderSectionHeader("Advanced Settings")) {
+        if (renderSectionHeader("Appearance", 0, SectionLayer::Secondary)) {
             ImGui::Text("Sidebar: %s", state.visibility.sidebarOnLeft ? "Left" : "Right");
             if (ImGui::Button("Swap Sides")) {
                 state.visibility.sidebarOnLeft = !state.visibility.sidebarOnLeft;
@@ -277,7 +291,7 @@ void renderAdvancedSettingsPanel(UIState& state
             }
             const char* colourSpaceLabels[] = {"Rec.2020", "Display P3", "sRGB"};
             ImGui::Text("Working Colour Space");
-            if (ImGui::Combo("##WorkingColourSpace", &colourSpaceIndex, colourSpaceLabels, IM_ARRAYSIZE(colourSpaceLabels))) {
+            if (UIStyler::combo("##WorkingColourSpace", &colourSpaceIndex, colourSpaceLabels, IM_ARRAYSIZE(colourSpaceLabels))) {
                 switch (colourSpaceIndex) {
                     case 0:
                         state.visualSettings.colourSpace = ColourCore::ColourSpace::Rec2020;
@@ -315,12 +329,10 @@ void renderAdvancedSettingsPanel(UIState& state
             renderWrappedStatusText(debugText.data());
             ImGui::PopStyleColor();
 
-			ImGui::Unindent(10);
         }
 
 #ifdef ENABLE_OSC
-        if (ImGui::CollapsingHeader("OSC")) {
-			ImGui::Indent(10);
+        if (renderSectionHeader("OSC", 0, SectionLayer::Secondary)) {
             auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
             const auto stats = osc.getStats();
             const bool transportRunning = osc.isRunning();
@@ -416,18 +428,15 @@ void renderAdvancedSettingsPanel(UIState& state
             }
             ImGui::EndDisabled();
 
-			ImGui::Unindent(10);
         }
 #endif
 
 #ifdef ENABLE_MIDI
         if (midiInput && midiDevices) {
-            if (ImGui::CollapsingHeader("MIDI")) {
-                ImGui::Indent(10);
+            if (renderSectionHeader("MIDI", 0, SectionLayer::Secondary)) {
                 ImGui::Text("MIDI INPUT DEVICE");
                 MIDIDeviceManager::renderMIDIDeviceSelection(state.midiDeviceState, *midiInput, *midiDevices);
 
-                ImGui::Unindent(10);
             }
         }
 #endif

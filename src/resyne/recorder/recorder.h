@@ -73,10 +73,12 @@ struct RecorderState {
     float dropFlashAlpha = 0.0f;
     std::string statusMessage;
     float statusMessageTimer = 0.0f;
+    float statusIntensity = 0.0f;
     bool showClearTimelineDialog = false;
     bool recordingCountdownActive = false;
     float recordingCountdownRemaining = 0.0f;
 
+    bool progressIndicatorOnLeft = false;
     bool showLoadingDialog = false;
     std::string loadingFilename;
     float loadingProgress = 0.0f;
@@ -212,8 +214,7 @@ private:
     static bool ensureRsynSamplesLoaded(RecorderState& state);
     static bool ensurePlaybackAudioLoaded(RecorderState& state);
     static void drawExportDialog(RecorderState& state);
-    static void drawLoadingDialog(RecorderState& state);
-    static void drawExportingDialog(RecorderState& state);
+    static void drawProgressIndicator(RecorderState& state);
     static void handleKeyboardShortcuts(RecorderState& state,
                                         bool windowFocused,
                                         bool hasPlaybackData);

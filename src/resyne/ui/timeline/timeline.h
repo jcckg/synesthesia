@@ -21,6 +21,8 @@ enum class TimelineScrubBehaviour {
 
 namespace ReSyne::Timeline {
 
+inline constexpr float RULER_HEIGHT = 23.0f;
+
 struct TimelineSample {
 	double timestamp = 0.0;
 	ImVec4 colour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);

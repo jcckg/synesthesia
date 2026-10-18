@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #include <imgui.h>
 
@@ -12,7 +13,6 @@
 #include "renderer/presentation_resources.h"
 #include "resyne/recorder/recorder.h"
 #include "resyne/ui/recorder/recorder_constants.h"
-#include "ui/styling/system_theme/system_theme_detector.h"
 
 namespace Sidebar {
 namespace {
@@ -47,7 +47,7 @@ void renderFooter(const RenderArgs& args, bool showHideHint) {
 }
 
 void renderViewTabs(RenderArgs& args) {
-    constexpr float TAB_HEIGHT = 23.0f;
+    constexpr float TAB_HEIGHT = ReSyne::Timeline::RULER_HEIGHT;
     const ImGuiStyle& style = ImGui::GetStyle();
     const float horizontalPadding = args.layout.padding;
     const float availableWidth = args.layout.width - horizontalPadding * 2.0f;
@@ -80,28 +80,10 @@ void renderViewTabs(RenderArgs& args) {
         const bool detachedVisualisationOpen = args.recorderState.detachedVisualisation.isOpen;
         const bool tabEnabled =
             !(detachedVisualisationOpen && tabs[i].view == UIState::View::Visualisation);
-        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
-
-        ImVec4 baseColour;
-        ImVec4 hoverColour;
-        ImVec4 activeColour;
-        ImVec4 textColour;
-
-        if (isLightMode) {
-             baseColour = isActive ? ImVec4(0.85f, 0.85f, 0.85f, 1.0f)
-                                   : ImVec4(0.96f, 0.96f, 0.96f, 1.0f);
-             hoverColour = isActive ? ImVec4(0.80f, 0.80f, 0.80f, 1.0f)
-                                    : ImVec4(0.92f, 0.92f, 0.92f, 1.0f);
-             activeColour = ImVec4(0.75f, 0.75f, 0.75f, 1.0f);
-             textColour = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
-        } else {
-             baseColour = isActive ? ImVec4(0.25f, 0.25f, 0.25f, 1.0f)
-                                   : ImVec4(0.12f, 0.12f, 0.12f, 1.0f);
-             hoverColour = isActive ? ImVec4(0.32f, 0.32f, 0.32f, 1.0f)
-                                    : ImVec4(0.18f, 0.18f, 0.18f, 1.0f);
-             activeColour = ImVec4(0.35f, 0.35f, 0.35f, 1.0f);
-             textColour = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
-        }
+        const ImVec4 baseColour = ImGui::GetStyleColorVec4(isActive ? ImGuiCol_ButtonActive : ImGuiCol_Button);
+        const ImVec4 hoverColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
+        const ImVec4 activeColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
+        const ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
 
         ImGui::PushStyleColor(ImGuiCol_Button, baseColour);
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoverColour);
@@ -166,7 +148,7 @@ void renderReSyneSections(const RenderArgs& args) {
 
     const float contentWidth = args.layout.width - args.layout.padding * 2.0f;
 
-    if (ImGui::CollapsingHeader("Colour Preview")) {
+    if (Controls::renderSectionHeader("Colour Preview")) {
         ImGui::Spacing();
 
         const float squareSize = contentWidth;
@@ -182,8 +164,7 @@ void renderReSyneSections(const RenderArgs& args) {
                                std::clamp(colour[2], 0.0f, 1.0f),
                                1.0f);
 
-        const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
-        const ImU32 borderCol = isLightMode ? IM_COL32(180, 180, 180, 255) : IM_COL32(90, 90, 90, 255);
+        const ImU32 borderCol = ImGui::GetColorU32(ImGuiCol_Border);
 
         ImDrawList* drawList = ImGui::GetWindowDrawList();
         const ImVec2 squareMax(squarePos.x + squareSize, squarePos.y + squareSize);
@@ -216,6 +197,7 @@ void render(RenderArgs& args) {
     ImGui::SetNextWindowPos(ImVec2(sidebarX, 0.0f));
     ImGui::SetNextWindowSize(ImVec2(args.layout.width, args.displaySize.y));
 
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::Begin(
         "Sidebar",
         nullptr,
@@ -224,6 +206,11 @@ void render(RenderArgs& args) {
     renderHeader(args);
 
     renderViewTabs(args);
+
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 8.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 1.0f);
+    ImGui::PushItemWidth(-FLT_MIN);
+    ImGui::BeginDisabled(args.recorderState.exportRunning.load(std::memory_order_acquire));
 
     DeviceManager::renderDeviceSelection(
         args.uiState.deviceState,
@@ -252,7 +239,7 @@ void render(RenderArgs& args) {
 
     if (args.uiState.visualSettings.activeView == UIState::View::ReSyne) {
         if (showFrequencyInfo) {
-            Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.recorderState);
+            Controls::renderFrequencyInfoPanel(args.audioInput, args.recorderState);
         }
         renderReSyneSections(args);
         renderVisualisationSections(args, hasLiveInput, showEQControls);
@@ -263,7 +250,7 @@ void render(RenderArgs& args) {
     }
 
     if (args.uiState.visualSettings.activeView == UIState::View::Visualisation && showFrequencyInfo) {
-        Controls::renderFrequencyInfoPanel(args.audioInput, args.clearColour, args.recorderState);
+        Controls::renderFrequencyInfoPanel(args.audioInput, args.recorderState);
         renderVisualisationSections(args, hasLiveInput, showEQControls);
     }
 
@@ -276,7 +263,21 @@ void render(RenderArgs& args) {
 
     renderFooter(args, args.uiState.visualSettings.activeView != UIState::View::ReSyne);
 
+    ImGui::EndDisabled();
+    ImGui::PopItemWidth();
+    ImGui::PopStyleVar(2);
+
+    const float scale = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+    const float dividerWidth = 1.0f / scale;
+    const ImVec2 position = ImGui::GetWindowPos();
+    const float edge = args.uiState.visibility.sidebarOnLeft ? position.x + args.layout.width : position.x;
+    const float dividerX = std::round(edge * scale) / scale -
+        (args.uiState.visibility.sidebarOnLeft ? dividerWidth : 0.0f);
+    ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(dividerX, position.y),
+        ImVec2(dividerX + dividerWidth, position.y + args.displaySize.y), ImGui::GetColorU32(ImGuiCol_Separator));
+
     ImGui::End();
+    ImGui::PopStyleVar();
 }
 
 }
