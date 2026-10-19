@@ -296,7 +296,6 @@ int AudioOutput::audioCallback(const void* input, void* output,
 								PaStreamCallbackFlags statusFlags,
 								void* userData) {
 	(void)input;
-	(void)statusFlags;
 
 	auto* audioOutput = static_cast<AudioOutput*>(userData);
 	auto* out = static_cast<float*>(output);
@@ -469,22 +468,32 @@ int AudioOutput::audioCallback(const void* input, void* output,
     audioOutput->seekFadeRemaining_ = seekFadeRemaining;
     audioOutput->oldSeekCursor_ = oldSeekCursor;
     if (timeInfo && std::isfinite(timeInfo->outputBufferDacTime) && std::isfinite(timeInfo->currentTime)) {
-        const auto serial = audioOutput->writtenIntervals_.load(std::memory_order_relaxed);
-        auto& interval = audioOutput->outputIntervals_[serial % audioOutput->outputIntervals_.size()];
-        interval.version.store(serial * 2 + 1);
-        const double rate = std::max(1.0f, audioOutput->actualSampleRate_.load());
-        interval.dacTime.store(timeInfo->outputBufferDacTime);
-        interval.position.store(cursorSnapshot);
-        interval.duration.store(static_cast<double>(frameCount) / rate);
-        interval.framesPerSecond.store(rate * step);
-        interval.totalFrames.store(totalFramesDouble);
-        interval.loop.store(loopEnabled);
-        interval.session.store(session);
-        interval.generation.store(snapshot->generation);
-        interval.version.store(serial * 2 + 2);
-        audioOutput->writtenIntervals_.store(serial + 1);
-        audioOutput->clockAvailable_.store(true);
-    } else audioOutput->clockAvailable_.store(false);
+        const double rate = std::max(1.0, static_cast<double>(audioOutput->actualSampleRate_.load()));
+        const bool discontinuity = audioOutput->outputTimelineSession_ != session ||
+            (statusFlags & (paOutputUnderflow | paOutputOverflow)) != 0;
+        const auto timing = audioOutput->outputTimeline_.advance(timeInfo->outputBufferDacTime,
+            static_cast<double>(frameCount) / rate, discontinuity);
+        audioOutput->outputTimelineSession_ = session;
+        if (timing) {
+            const auto serial = audioOutput->writtenIntervals_.load(std::memory_order_relaxed);
+            auto& interval = audioOutput->outputIntervals_[serial % audioOutput->outputIntervals_.size()];
+            interval.version.store(serial * 2 + 1);
+            interval.dacTime.store(timing->time);
+            interval.position.store(cursorSnapshot);
+            interval.duration.store(timing->duration);
+            interval.framesPerSecond.store(static_cast<double>(frameCount) * step / timing->duration);
+            interval.totalFrames.store(totalFramesDouble);
+            interval.loop.store(loopEnabled);
+            interval.session.store(session);
+            interval.generation.store(snapshot->generation);
+            interval.version.store(serial * 2 + 2);
+            audioOutput->writtenIntervals_.store(serial + 1);
+            audioOutput->clockAvailable_.store(true);
+        } else audioOutput->clockAvailable_.store(false);
+    } else {
+        audioOutput->outputTimeline_.reset();
+        audioOutput->clockAvailable_.store(false);
+    }
 
 	if (loopEnabled) {
 		size_t stored = static_cast<size_t>(std::floor(finalCursor));

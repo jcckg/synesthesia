@@ -13,13 +13,13 @@ public:
                             int height = 0,
                             bool trueSize = false,
                             int numWorkers = 1,
-                            int analysisHop = 1024,
+                            int analysisHop = 0,
                             bool disableSmoothing = false);
 
     static int runRsyn(const std::string& inputDir,
                        const std::string& outputDir,
                        int numWorkers = 1,
-                       int analysisHop = 1024,
+                       int analysisHop = 0,
                        int compressionLevel = 0,
                        double storageCutoffGb = 0.0,
                        double skipLargeSeconds = 0.0,

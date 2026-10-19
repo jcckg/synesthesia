@@ -24,7 +24,7 @@ constexpr float DEFAULT_SAMPLE_RATE = 44100.0f;
 constexpr float MIN_SAMPLE_RATE = 8000.0f;
 constexpr float MAX_SAMPLE_RATE = 384000.0f;
 constexpr float MIN_BIN_INTENSITY = 1e-12f;
-constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
+constexpr std::array<size_t, 7> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193, 16385};
 
 bool isCommonBinCount(const size_t binCount) {
 	return std::find(COMMON_BIN_COUNTS.begin(), COMMON_BIN_COUNTS.end(), binCount) !=

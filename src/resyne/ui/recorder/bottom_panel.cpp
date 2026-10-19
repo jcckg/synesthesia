@@ -145,7 +145,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         RecorderUI::cancelRecordingCountdown(state);
     }
     if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
-        startRecording(state, audioProcessor, 2048, 1024);
+        startRecording(state, audioProcessor, 0, 0);
     }
 
     const float toolbarButtonSpacing = 4.0f;

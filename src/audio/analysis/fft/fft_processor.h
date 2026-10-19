@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <span>
 #include <vector>
@@ -23,6 +24,9 @@ class FFTProcessor {
 public:
 	static constexpr int FFT_SIZE = 2048;
 	static constexpr int HOP_SIZE = FFT_SIZE / 2;
+	static constexpr int MAX_FFT_SIZE = 32768;
+	static int fftSizeForSampleRate(float sampleRate);
+	static int hopSizeForSampleRate(float sampleRate, int requestedHopSize = 0);
 	static constexpr float MIN_FREQ = synesthesia::constants::MIN_AUDIO_FREQ;
 	static constexpr float MAX_FREQ = synesthesia::constants::MAX_AUDIO_FREQ;
 	static constexpr float MAGNITUDE_EPSILON = 1e-6f;
@@ -41,6 +45,7 @@ public:
 		float sampleRate;
 		float loudnessLUFS;
         std::shared_ptr<const AudioAnalysis::BassSpectrum> bass;
+		int hopSize = HOP_SIZE;
 
 		FFTFrame() : frameCounter(0), sampleRate(0.0f), loudnessLUFS(-200.0f) {}
 	};
@@ -51,6 +56,7 @@ public:
 		float totalEnergy = 0.0f;
 		float maxMagnitude = 0.0f;
 		int hopSize = HOP_SIZE;
+		int fftSize = FFT_SIZE;
 	};
 
 	FFTProcessor();
@@ -69,6 +75,7 @@ public:
 	std::vector<FFTFrame> finish();
 	void setHopSize(int hopSize);
 	int getHopSize() const;
+	int getFftSize() const;
 
 	std::vector<FFTFrame> getBufferedFrames();
     void discardBufferedFrames();
@@ -79,7 +86,7 @@ public:
 	uint64_t getFrameCounter() const;
 
 private:
-	AudioAnalysis::RealFFT transform{FFT_SIZE};
+	std::unique_ptr<AudioAnalysis::RealFFT> transform = std::make_unique<AudioAnalysis::RealFFT>(FFT_SIZE);
     AudioAnalysis::BassAnalyser bassAnalyser;
     std::shared_ptr<const AudioAnalysis::BassSpectrum> bassSpectrum;
     std::vector<float> magnitudeScratch;
@@ -96,6 +103,7 @@ private:
     std::vector<float> weightedMagnitudes;
 	size_t accumulatedSamples;
 	size_t analysisHopSize;
+	int requestedHopSize = 0;
 	size_t overlapSize;
 	float analysisSampleRate = 0.0f;
     bool finished = false;
@@ -121,6 +129,7 @@ private:
 
 	void applyWindow(std::span<const float> buffer);
 	void resetState();
+	void configureAnalysis(float sampleRate);
 	void processOverlappingWindow(float sampleRate);
 
 	void normaliseFFTOutput();

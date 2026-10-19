@@ -163,7 +163,7 @@ bool loadPresentationForInput(const Arguments& args,
         std::vector<AudioColourSample> spectralSamples;
         if (!ReSyne::ImportHelpers::importAudioFile(
                 loaded.inputPath.string(),
-                std::clamp(args.analysisHop, 1, FFTProcessor::FFT_SIZE),
+                args.analysisHop,
                 spectralSamples,
                 loaded.metadata,
                 errorMessage,

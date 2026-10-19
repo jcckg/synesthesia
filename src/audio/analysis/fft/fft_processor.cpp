@@ -51,22 +51,61 @@ uint64_t FFTProcessor::getFrameCounter() const {
 	return frameCounter;
 }
 
+int FFTProcessor::fftSizeForSampleRate(const float sampleRate) {
+    int size = FFT_SIZE;
+    if (!std::isfinite(sampleRate)) return size;
+    while (size < MAX_FFT_SIZE && static_cast<double>(sampleRate) > 48000.0 * size / FFT_SIZE) size *= 2;
+    return size;
+}
+
+int FFTProcessor::hopSizeForSampleRate(const float sampleRate, const int requestedHopSize) {
+    const int size = fftSizeForSampleRate(sampleRate);
+    return requestedHopSize > 0 ? std::clamp(requestedHopSize, 1, size / 2) : size / 2;
+}
+
+void FFTProcessor::configureAnalysis(const float sampleRate) {
+    const auto size = static_cast<std::size_t>(fftSizeForSampleRate(sampleRate));
+    const auto hop = static_cast<std::size_t>(hopSizeForSampleRate(sampleRate, requestedHopSize));
+    if (fft_in.size() != size) transform = std::make_unique<AudioAnalysis::RealFFT>(size);
+    {
+        std::lock_guard dataLock(dataMutex);
+        std::lock_guard bufferLock(frameBufferMutex);
+        fft_in.assign(size, 0);
+        fft_out.assign(size / 2 + 1, {});
+        hannWindow.resize(size);
+        for (std::size_t i = 0; i < size; ++i)
+            hannWindow[i] = .5f * (1 - std::cos(2 * std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(size - 1)));
+        windowBuffer.assign(size, 0);
+        weightedWindow.assign(size, 0);
+        magnitudeScratch.assign(size / 2 + 1, 0);
+        rawMagnitudesBuffer.assign(size / 2 + 1, 0);
+        phaseBuffer.assign(size / 2 + 1, 0);
+        weightedMagnitudes.assign(size / 2 + 1, 0);
+        inputAccumulator.assign(hop, 0);
+        weightedAccumulator.assign(hop, 0);
+        analysisHopSize = hop;
+        overlapSize = size - hop;
+        for (auto& frame : frameRingBuffer) {
+            frame = {};
+            frame.magnitudes.resize(size / 2 + 1);
+            frame.phases.resize(size / 2 + 1);
+            frame.kWeightedMagnitudes.resize(size / 2 + 1);
+        }
+    }
+    resetState();
+    analysisSampleRate = sampleRate;
+}
+
 void FFTProcessor::setHopSize(const int hopSize) {
-	const size_t clampedHop = static_cast<size_t>(std::clamp(hopSize, 1, FFT_SIZE / 2));
-	std::lock_guard<std::mutex> processingLock(processingMutex);
-	if (clampedHop == analysisHopSize) {
-		return;
-	}
-	analysisHopSize = clampedHop;
-	overlapSize = FFT_SIZE - analysisHopSize;
-	inputAccumulator.assign(analysisHopSize, 0.0f);
-	weightedAccumulator.assign(analysisHopSize, 0.0f);
-	windowBuffer.assign(FFT_SIZE, 0.0f);
-	resetState();
+    std::lock_guard processingLock(processingMutex);
+    const int requested = std::max(0, hopSize);
+    if (requested == requestedHopSize) return;
+    requestedHopSize = requested;
+    configureAnalysis(analysisSampleRate > 0 ? analysisSampleRate : 48000.0f);
 }
 
 void FFTProcessor::applyWindow(const std::span<const float> buffer) {
-	const size_t copySize = std::min(buffer.size(), static_cast<size_t>(FFT_SIZE));
+	const size_t copySize = std::min(buffer.size(), fft_in.size());
 	std::fill(fft_in.begin()+static_cast<std::ptrdiff_t>(copySize),fft_in.end(),0.f);
 
 #ifdef USE_NEON_OPTIMISATIONS
@@ -94,13 +133,12 @@ void FFTProcessor::applyWindow(const std::span<const float> buffer) {
 }
 
 void FFTProcessor::processBuffer(const std::span<const float> buffer, const float sampleRate, std::vector<FFTFrame>* completedFrames) {
-	if (!std::isfinite(sampleRate) || sampleRate < 8000.0f || buffer.empty())
+	if (!std::isfinite(sampleRate) || sampleRate < 8000.0f || sampleRate > 768000.0f || buffer.empty())
 		return;
 	std::lock_guard processingLock(processingMutex);
     if (finished) return;
 	if (analysisSampleRate != sampleRate) {
-		resetState();
-		analysisSampleRate = sampleRate;
+        configureAnalysis(sampleRate);
 	}
 
 	size_t bufferPos = 0;
@@ -132,6 +170,7 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
                 frame.loudnessLUFS = momentaryLoudnessLUFS;
                 frame.bass = bassSpectrum;
                 frame.kWeightedMagnitudes = weightedMagnitudes;
+                frame.hopSize = static_cast<int>(analysisHopSize);
                 completedFrames->push_back(std::move(frame));
             }
 			accumulatedSamples = 0;
@@ -167,7 +206,7 @@ std::vector<FFTProcessor::FFTFrame> FFTProcessor::finish() {
 
 void FFTProcessor::normaliseFFTOutput() {
 
-	constexpr float scaleFactor = 2.0f / FFT_SIZE;
+	const float scaleFactor = 2.0f / static_cast<float>(fft_in.size());
 	for (auto& i : fft_out) {
 		i.r *= scaleFactor;
 		i.i *= scaleFactor;
@@ -204,7 +243,7 @@ void FFTProcessor::processOverlappingWindow(const float sampleRate) {
 			  windowBuffer.begin() + static_cast<std::ptrdiff_t>(overlapSize));
 
 	applyWindow(windowBuffer);
-	transform.forward(fft_in, fft_out);
+	transform->forward(fft_in, fft_out);
 	normaliseFFTOutput();
 
 	auto& rawMagnitudes = magnitudeScratch;
@@ -218,7 +257,7 @@ void FFTProcessor::processOverlappingWindow(const float sampleRate) {
         std::memmove(weightedWindow.data(), weightedWindow.data() + analysisHopSize, overlapSize * sizeof(float));
     std::copy(weightedAccumulator.begin(), weightedAccumulator.end(), weightedWindow.begin() + static_cast<std::ptrdiff_t>(overlapSize));
     applyWindow(weightedWindow);
-    transform.forward(fft_in, fft_out);
+    transform->forward(fft_in, fft_out);
     normaliseFFTOutput();
     for (std::size_t i = 0; i < fft_out.size(); ++i)
         weightedMagnitudes[i] = std::hypot(fft_out[i].r, fft_out[i].i);
@@ -249,6 +288,7 @@ void FFTProcessor::copyRawFrame(std::vector<float>& rawMagnitudes,
 	state.totalEnergy = totalEnergy;
 	state.maxMagnitude = maxMagnitude;
 	state.hopSize = static_cast<int>(analysisHopSize);
+    state.fftSize = static_cast<int>(fft_in.size());
 }
 
 void FFTProcessor::calculateMagnitudes(std::vector<float>& rawMagnitudes, const float sampleRate,
@@ -263,7 +303,7 @@ void FFTProcessor::calculateMagnitudes(std::vector<float>& rawMagnitudes, const 
 			fft_out.data(), fft_out.size());
 
 		for (size_t i = 1; i < fft_out.size() - 1; ++i) {
-			const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
+			const float freq = static_cast<float>(i) * sampleRate / static_cast<float>(fft_in.size());
 			if (freq < MIN_FREQ || freq > MAX_FREQ) {
 				continue;
 			}
@@ -279,7 +319,7 @@ void FFTProcessor::calculateMagnitudes(std::vector<float>& rawMagnitudes, const 
 			fft_out.data(), fft_out.size());
 
 		for (size_t i = 1; i < fft_out.size() - 1; ++i) {
-			const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
+			const float freq = static_cast<float>(i) * sampleRate / static_cast<float>(fft_in.size());
 			if (freq < MIN_FREQ || freq > MAX_FREQ) {
 				continue;
 			}
@@ -292,7 +332,7 @@ void FFTProcessor::calculateMagnitudes(std::vector<float>& rawMagnitudes, const 
 	{
 		for (size_t i = 0; i < fft_out.size(); ++i) {
 			const bool endpoint = i == 0 || i + 1 == fft_out.size();
-			const float freq = static_cast<float>(i) * sampleRate / FFT_SIZE;
+			const float freq = static_cast<float>(i) * sampleRate / static_cast<float>(fft_in.size());
 			const float magnitudeSquared = fft_out[i].r * fft_out[i].r + fft_out[i].i * fft_out[i].i;
 			const float magnitude = std::sqrt(magnitudeSquared);
 			rawMagnitudes[i] = magnitude;
@@ -366,6 +406,7 @@ void FFTProcessor::pushFrameToBuffer(const std::vector<float>& mags, const std::
 	frame.loudnessLUFS = momentaryLoudnessLUFS;
     frame.bass = bassSpectrum;
     frame.kWeightedMagnitudes = weightedMagnitudes;
+    frame.hopSize = static_cast<int>(analysisHopSize);
 
 	frameBufferHead = nextHead;
 }
@@ -399,6 +440,11 @@ std::vector<FFTProcessor::FFTFrame> FFTProcessor::getBufferedFrames() {
 int FFTProcessor::getHopSize() const {
 	std::lock_guard lock(processingMutex);
 	return static_cast<int>(analysisHopSize);
+}
+
+int FFTProcessor::getFftSize() const {
+    std::lock_guard lock(processingMutex);
+    return static_cast<int>(fft_in.size());
 }
 
 void FFTProcessor::discardBufferedFrames() {

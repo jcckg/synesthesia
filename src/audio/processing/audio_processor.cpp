@@ -166,7 +166,7 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
 				const size_t maxIndex = static_cast<size_t>(
 					std::distance(stagingSpectralData.magnitudes[ch].begin(), maxIt));
 				maxDominantFreq = static_cast<float>(maxIndex) * buffer.sampleRate /
-								  static_cast<float>(FFTProcessor::FFT_SIZE);
+								  static_cast<float>(analysis.fftSize);
 			}
 		}
 
@@ -184,8 +184,9 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
         AudioColourSample sample;
         sample.sampleRate = buffer.sampleRate;
         sample.channels = static_cast<std::uint32_t>(buffer.numChannels);
-        sample.timestamp = ((presentationFrames[0][i].frameCounter - 1) * static_cast<double>(primaryAnalysis.hopSize) +
-            primaryAnalysis.hopSize - FFTProcessor::FFT_SIZE * .5) / buffer.sampleRate;
+        const auto& frame = presentationFrames[0][i];
+        const auto fftSize = 2 * (frame.magnitudes.size() - 1);
+        sample.timestamp = (frame.frameCounter * static_cast<double>(frame.hopSize) - fftSize * .5) / buffer.sampleRate;
         sample.magnitudes.resize(buffer.numChannels);
         sample.phases.resize(buffer.numChannels);
         sample.bass.resize(buffer.numChannels);
@@ -255,7 +256,7 @@ void AudioProcessor::beginRecordingAnalysis(const int hopSize) {
     std::lock_guard lock(processorMutex);
     recordingProcessors.clear(); recordingSampleCount = 0; recordingRate = 0.0f;
     recordingPendingFrames.clear();
-    recordingHop = std::clamp(hopSize, 1, FFTProcessor::FFT_SIZE / 2);
+    recordingHop = std::max(0, hopSize);
     recordingAnalysis = true;
 }
 

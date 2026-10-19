@@ -17,8 +17,8 @@ void updateFromFFT(State& state,
     if (sampleRate > 0.0f) {
         state.recorderState.fallbackSampleRate = sampleRate;
     }
-    state.recorderState.fallbackFftSize = FFTProcessor::FFT_SIZE;
-    state.recorderState.fallbackHopSize = FFTProcessor::HOP_SIZE;
+    state.recorderState.fallbackFftSize = FFTProcessor::fftSizeForSampleRate(sampleRate);
+    state.recorderState.fallbackHopSize = FFTProcessor::hopSizeForSampleRate(sampleRate);
 
     Recorder::updateFromFFTProcessor(
         state.recorderState,

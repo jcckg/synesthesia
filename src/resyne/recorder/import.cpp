@@ -95,7 +95,7 @@ bool Recorder::importFromFile(RecorderState& state,
         extension == ".oga") {
         success = ImportHelpers::importAudioFile(
             filepath,
-            FFTProcessor::HOP_SIZE,
+            0,
             importedSamples, metadata, errorMessage,
             [&state](float progress) { state.loadingProgress = progress; },
             nullptr,
@@ -207,7 +207,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         setStatus("Processing audio...");
         success = ImportHelpers::importAudioFile(
             filepath,
-            FFTProcessor::HOP_SIZE,
+            0,
             samples, metadata, errorMessage,
             updateProgress,
             updatePreview,

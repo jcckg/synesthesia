@@ -23,7 +23,7 @@ struct Arguments {
     int numWorkers = 1;
     int gradientWidth  = 0;
     int gradientHeight = 0;
-    int analysisHop = 1024;
+    int analysisHop = 0;
     int rsynCompressionLevel = 0;
     double storageCutoffGb = 0.0;
     double skipLargeSeconds = 0.0;

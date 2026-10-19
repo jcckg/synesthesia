@@ -87,7 +87,7 @@ private:
     SpectralPresentation::LivePresentation livePresentation;
     std::shared_ptr<const SpectralPresentation::LiveResult> latestPresentation;
     bool recordingAnalysis = false;
-    int recordingHop = FFTProcessor::HOP_SIZE;
+    int recordingHop = 0;
     std::vector<std::unique_ptr<FFTProcessor>> recordingProcessors;
     BufferedFrames recordingPendingFrames;
     std::uint64_t recordingSampleCount = 0;

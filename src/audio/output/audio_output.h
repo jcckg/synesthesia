@@ -9,6 +9,7 @@
 #include <memory>
 
 #include "playback_equaliser.h"
+#include "output_timeline.h"
 
 class AudioOutput {
 public:
@@ -87,6 +88,8 @@ private:
     std::atomic<std::uint64_t> writtenIntervals_{0};
     std::atomic<std::uint64_t> clockSession_{1};
     std::atomic<bool> clockAvailable_{false};
+    AudioOutputTimeline outputTimeline_;
+    std::uint64_t outputTimelineSession_ = 0;
 
 	std::atomic<size_t> playbackPosition_;
 	std::atomic<size_t> totalSamples_;

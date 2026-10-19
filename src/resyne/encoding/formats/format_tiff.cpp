@@ -20,7 +20,7 @@
 namespace SequenceExporterInternal {
 
 namespace {
-constexpr std::array<size_t, 6> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193};
+constexpr std::array<size_t, 7> COMMON_BIN_COUNTS = {257, 513, 1025, 2049, 4097, 8193, 16385};
 
 struct DecodedPixels {
     tinydng_context* context;

@@ -295,7 +295,7 @@ void Recorder::drawFullWindow(RecorderState& state,
         RecorderUI::cancelRecordingCountdown(state);
     }
     if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
-        startRecording(state, audioInput.getAudioProcessor(), 2048, 1024);
+        startRecording(state, audioInput.getAudioProcessor(), 0, 0);
     }
 
     constexpr float BUTTON_WIDTH = 80.0f;

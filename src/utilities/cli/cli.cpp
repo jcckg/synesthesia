@@ -210,7 +210,7 @@ void Arguments::printHelp() {
     std::cout << "                          (no temporal interpolation in export)\n";
     std::cout << "  --disable-smoothing     Use analysis colours instead of active presentation smoothing\n";
     std::cout << "  --num-workers <n>       Number of worker threads for batch export (default: 1)\n";
-    std::cout << "  --hop <samples>         Analysis hop size in samples (default: 1024)\n";
+    std::cout << "  --hop <samples>         Analysis hop size in native samples (default: half the analysis window)\n";
     std::cout << "  --compression <0-9>     .rsyn deflate level: 0 off, 1 fastest, 9 highest (default: 0)\n";
     std::cout << "  --storage-cutoff <GB>   Stop scheduling .rsyn exports once output reaches this many GB\n";
     std::cout << "  --randomise-order       Shuffle .rsyn export order before processing\n";

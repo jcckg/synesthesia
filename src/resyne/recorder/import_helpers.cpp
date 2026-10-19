@@ -145,7 +145,8 @@ bool importAudioFile(
         return false;
     }
 
-    const int resolvedHopSize = std::clamp(analysisHopSize, 1, FFTProcessor::FFT_SIZE / 2);
+    const int fftSize = FFTProcessor::fftSizeForSampleRate(static_cast<float>(decoded.sampleRate));
+    const int resolvedHopSize = FFTProcessor::hopSizeForSampleRate(static_cast<float>(decoded.sampleRate), analysisHopSize);
 
     std::vector<std::unique_ptr<FFTProcessor>> processors;
     processors.reserve(numChannels);
@@ -167,16 +168,16 @@ bool importAudioFile(
     bool hitFrameLimit = false;
 
     metadata.sampleRate = sampleRate;
-    metadata.fftSize = FFTProcessor::FFT_SIZE;
+    metadata.fftSize = fftSize;
     metadata.hopSize = resolvedHopSize;
     metadata.originalSampleCount = decoded.channelSamples[0].size();
-    metadata.analysisLeadingSamples = static_cast<std::uint32_t>(FFTProcessor::FFT_SIZE - resolvedHopSize);
+    metadata.analysisLeadingSamples = static_cast<std::uint32_t>(fftSize - resolvedHopSize);
     metadata.durationSeconds = decoded.channelSamples[0].empty()
         ? 0.0
         : static_cast<double>(decoded.channelSamples[0].size()) / static_cast<double>(decoded.sampleRate);
     metadata.windowType = "hann";
     metadata.numFrames = 0;
-    metadata.numBins = static_cast<size_t>(FFTProcessor::FFT_SIZE / 2 + 1);
+    metadata.numBins = static_cast<size_t>(fftSize / 2 + 1);
     metadata.channels = numChannels;
     metadata.sourceData.reset();
     metadata.presentationData.reset();
@@ -239,7 +240,7 @@ bool importAudioFile(
             sample.splDb = std::numeric_limits<float>::quiet_NaN();
 
             sample.timestamp = (static_cast<double>(frameIndex) * static_cast<double>(resolvedHopSize)
-                                + resolvedHopSize - FFTProcessor::FFT_SIZE * 0.5) /
+                                + resolvedHopSize - fftSize * 0.5) /
                                static_cast<double>(decoded.sampleRate);
             samples.push_back(std::move(sample));
             ++frameIndex;

@@ -135,6 +135,10 @@ void appendRecordingFrames(RecorderState& state, AudioProcessor::BufferedFrames 
             state.firstFrameCounter = frame.frameCounter;
             state.metadata.sampleRate = frame.sampleRate;
             state.metadata.channels = static_cast<uint32_t>(numChannels);
+            state.metadata.fftSize = static_cast<int>(2 * (frame.magnitudes.size() - 1));
+            state.metadata.hopSize = frame.hopSize;
+            state.metadata.analysisLeadingSamples = state.metadata.fftSize - frame.hopSize;
+            state.metadata.numBins = frame.magnitudes.size();
         }
 
 	        AudioColourSample sample;
@@ -201,13 +205,15 @@ void Recorder::startRecording(RecorderState& state,
                                          AudioProcessor& audioProcessor,
                                          int fftSize,
                                          int hopSize) {
-    fftSize = FFTProcessor::FFT_SIZE;
-    hopSize = std::clamp(hopSize, 1, fftSize / 2);
+    const auto sampleRate = audioProcessor.getSpectralData().sampleRate;
+    fftSize = FFTProcessor::fftSizeForSampleRate(sampleRate);
+    const int requestedHopSize = std::max(0, hopSize);
+    hopSize = FFTProcessor::hopSizeForSampleRate(sampleRate, requestedHopSize);
     audioProcessor.discardBufferedFrames();
     clearLoadedAudio(state);
 
     std::lock_guard<std::mutex> lock(state.samplesMutex);
-    audioProcessor.beginRecordingAnalysis(hopSize);
+    audioProcessor.beginRecordingAnalysis(requestedHopSize);
     state.recordingProcessor = &audioProcessor;
     state.isRecording = true;
     state.metadata.analysisLeadingSamples = fftSize - hopSize;
