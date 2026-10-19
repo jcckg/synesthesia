@@ -46,10 +46,6 @@ public:
 
 	void setLoopEnabled(bool enabled) { loopEnabled_.store(enabled); }
 	bool isLoopEnabled() const { return loopEnabled_.load(); }
-	float getRequestedSampleRate() const { return requestedSampleRate_.load(); }
-	float getActualSampleRate() const { return actualSampleRate_.load(); }
-	float getPlaybackRateRatio() const;
-	float getPlaybackStep() const { return playbackStep_.load(); }
 	void setPlaybackEQEnabled(bool enabled);
 	void setPlaybackEQGains(float low, float mid, float high);
 
@@ -95,7 +91,6 @@ private:
 	std::atomic<size_t> totalSamples_;
 	std::atomic<bool> isPlaying_;
 	std::atomic<bool> loopEnabled_;
-	std::atomic<float> requestedSampleRate_;
 	std::atomic<float> actualSampleRate_;
 	std::atomic<float> playbackStep_;
 	std::atomic<size_t> channelCount_;

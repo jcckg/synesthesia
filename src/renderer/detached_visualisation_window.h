@@ -28,7 +28,7 @@ public:
 
     bool open(ReSyne::RecorderState& recorderState, bgfx::TextureFormat::Enum colourFormat);
     void close(ReSyne::RecorderState& recorderState);
-    void renderFrame(UIState& state);
+    void renderFrame(UIState& state, const AudioInput& audioInput);
 
     [[nodiscard]] bool isOpen() const;
 

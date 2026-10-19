@@ -104,6 +104,7 @@ struct PresentationWorker::Impl {
         std::uint64_t retainedPreviewGeneration = 0;
         bool preview = false;
         std::size_t count = 0;
+        std::size_t availableFrames = 0;
         AudioMetadata metadata;
         RSYNPresentationSettings settings;
     };
@@ -141,7 +142,8 @@ struct PresentationWorker::Impl {
     bool canContinue(const Request& request) const {
         return latest.generation == request.generation && latest.sourceRevision == request.sourceRevision &&
             latest.preview == request.preview &&
-            latest.count >= request.count && sameAnalysis(latest.settings, request.settings) &&
+            latest.count >= request.count && latest.availableFrames >= request.availableFrames &&
+            sameAnalysis(latest.settings, request.settings) &&
             sameSmoothing(latest.settings, request.settings) &&
             latest.settings.colourSpace == request.settings.colourSpace &&
             latest.settings.applyGamutMapping == request.settings.applyGamutMapping;
@@ -157,8 +159,10 @@ struct PresentationWorker::Impl {
             std::lock_guard lock(mutex);
             if (stopping || !canContinue(request)) return;
             if (published && published->sourceGeneration == request.generation &&
-                published->preview == request.preview && published->sourceRevision != request.sourceRevision &&
+                published->preview == request.preview &&
                 rendered < published->processedFrames) return;
+            if (importHandover && !request.preview && importHandover->sourceGeneration == request.generation &&
+                rendered < importHandover->processedFrames) return;
         }
         auto snapshot = std::make_shared<PresentationSnapshot>();
         colours.prepareProjection(ColourCore::ColourSpace::SRGB, request.settings.applyGamutMapping);
@@ -190,7 +194,8 @@ struct PresentationWorker::Impl {
             if (published && published->sourceGeneration == request.generation && published->preview == request.preview)
                 snapshot = std::make_shared<PresentationSnapshot>(*published);
         }
-        if (!snapshot && request.metadata.presentationData) {
+        if (request.metadata.presentationData &&
+            (!snapshot || snapshot->processedFrames < request.metadata.presentationData->frames.size())) {
             snapshot = std::make_shared<PresentationSnapshot>();
             const auto& stored = *request.metadata.presentationData;
             snapshot->colours = RSYNPresentation::colourTrack(stored, stored.settings.smoothingEnabled);
@@ -302,7 +307,10 @@ struct PresentationWorker::Impl {
                     }
                 }
                 if (chunk.empty()) {
-                    fallback(request, "This presentation has no spectra for the requested adjustment.");
+                    const bool awaitingImport = request.preview && request.metadata.presentationData &&
+                        request.availableFrames < request.count;
+                    fallback(request, awaitingImport ? "" :
+                        "This presentation has no spectra for the requested adjustment.");
                     return;
                 }
                 for (const auto& sample : chunk) analysed.append(analysisReplay->analyse(sample));
@@ -379,6 +387,7 @@ std::shared_ptr<const PresentationSnapshot> PresentationWorker::request() {
             request.settings.smoothingAmount = stored.smoothingAmount;
         }
         request.count = request.preview ? state.previewSamples.size() : state.samples.size();
+        request.availableFrames = request.count;
         if (request.metadata.presentationData &&
             sameAnalysis(request.metadata.presentationData->settings, request.settings))
             request.count = std::max(request.count, request.metadata.presentationData->frames.size());
@@ -389,7 +398,8 @@ std::shared_ptr<const PresentationSnapshot> PresentationWorker::request() {
         request.retainedPreviewGeneration = impl_->retainedPreviewGeneration;
     const auto& previous = impl_->latest;
     if (previous.serial == 0 || request.generation != previous.generation || request.preview != previous.preview ||
-        request.sourceRevision != previous.sourceRevision || request.count != previous.count || !sameAnalysis(request.settings, previous.settings) ||
+        request.sourceRevision != previous.sourceRevision || request.count != previous.count ||
+        request.availableFrames != previous.availableFrames || !sameAnalysis(request.settings, previous.settings) ||
         !sameSmoothing(request.settings, previous.settings) ||
         request.settings.colourSpace != previous.settings.colourSpace ||
         request.settings.applyGamutMapping != previous.settings.applyGamutMapping ||

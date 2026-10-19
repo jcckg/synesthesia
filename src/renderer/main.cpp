@@ -232,7 +232,7 @@ int app_main(int, char**) {
         }
 
         if (recorderState.detachedVisualisation.isOpen) {
-            detachedVisualisationWindow.renderFrame(uiState);
+            detachedVisualisationWindow.renderFrame(uiState, audioInput);
             mainWindowContext.makeCurrent();
         }
 

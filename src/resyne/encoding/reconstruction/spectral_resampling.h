@@ -27,6 +27,4 @@ ResampledSpectrum resampleSpectrum(
 	PhaseState& phaseState
 );
 
-float computeShiftRatio(float decodedFrequency, float expectedFrequency);
-
 }

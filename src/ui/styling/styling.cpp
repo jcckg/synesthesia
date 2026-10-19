@@ -89,6 +89,11 @@ void UIStyler::setDimensions(ImGuiStyle& style) {
     style.WindowPadding = ImVec2(12, 12);
 }
 
+ImVec4 UIStyler::windowBackgroundColour(UITheme theme) {
+    return theme == UITheme::Dark ? ImVec4(0.017f, 0.017f, 0.017f, 1.0f) :
+        ImVec4(0.969f, 0.969f, 0.969f, 1.0f);
+}
+
 void UIStyler::setColours(ImGuiStyle& style, UITheme theme) {
     ImVec4* colours = style.Colors;
     const bool dark = theme == UITheme::Dark;
@@ -96,7 +101,7 @@ void UIStyler::setColours(ImGuiStyle& style, UITheme theme) {
         colours[role] = dark ? darkColour : lightColour;
     };
 
-    set(ImGuiCol_WindowBg, {0.017f, 0.017f, 0.017f, 1.00f}, {0.969f, 0.969f, 0.969f, 1.00f});
+    colours[ImGuiCol_WindowBg] = windowBackgroundColour(theme);
     set(ImGuiCol_Border, {0.260f, 0.260f, 0.260f, 0.60f}, {0.747f, 0.747f, 0.747f, 0.70f});
     colours[ImGuiCol_BorderShadow] = ImVec4(0.0f, 0.0f, 0.0f, 0.0f);
 

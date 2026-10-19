@@ -58,13 +58,6 @@ bool isUsableFrequencyMapping(float expectedFrequency, float decodedFrequency, f
 }
 }
 
-float computeShiftRatio(float decodedFrequency, float expectedFrequency) {
-	if (expectedFrequency < EPSILON || decodedFrequency < EPSILON) {
-		return 1.0f;
-	}
-	return decodedFrequency / expectedFrequency;
-}
-
 ResampledSpectrum resampleSpectrum(
 	const std::vector<float>& magnitudes,
 	const std::vector<float>& phases,

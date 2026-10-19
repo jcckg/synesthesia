@@ -12,7 +12,6 @@ AudioOutput::AudioOutput()
 	  totalSamples_(0),
 	  isPlaying_(false),
 	  loopEnabled_(true),
-	  requestedSampleRate_(0.0f),
 	  actualSampleRate_(0.0f),
 	  playbackStep_(1.0f),
 	  channelCount_(1),
@@ -63,7 +62,6 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 	clockSession_.fetch_add(1);
     clockAvailable_.store(false);
 	outputChannelCount_.store(0);
-	requestedSampleRate_.store(sampleRate);
 	actualSampleRate_.store(sampleRate);
 	playbackStep_.store(1.0f);
 
@@ -269,15 +267,6 @@ double AudioOutput::getPresentationPosition() const {
         }
     }
     return position;
-}
-
-float AudioOutput::getPlaybackRateRatio() const {
-	const float actual = actualSampleRate_.load();
-	const float requested = requestedSampleRate_.load();
-	if (actual <= 0.0f || requested <= 0.0f) {
-		return 1.0f;
-	}
-	return requested / actual;
 }
 
 void AudioOutput::updateStereoLevels(const float left, const float right, const double elapsed) {

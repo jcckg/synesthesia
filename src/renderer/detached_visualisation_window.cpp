@@ -85,7 +85,7 @@ void DetachedVisualisationWindow::close(ReSyne::RecorderState& recorderState) {
     recorderState.detachedVisualisation.openRequested = false;
 }
 
-void DetachedVisualisationWindow::renderFrame(UIState& state) {
+void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& audioInput) {
     auto& recorderState = state.resyneState.recorderState;
     if (!isOpen()) {
         recorderState.detachedVisualisation.isOpen = false;
@@ -112,11 +112,19 @@ void DetachedVisualisationWindow::renderFrame(UIState& state) {
     layout.displaySize = ImGui::GetIO().DisplaySize;
 
     const bool loadingTrack = recorderState.importPhase != 0;
-    if (!loadingTrack) {
+    const bool hasPlaybackSession = UI::AudioVisualisation::hasPlaybackSession(recorderState);
+    const bool hasLiveInput = !hasPlaybackSession && audioInput.isStreamActive() &&
+        state.deviceState.selectedDeviceIndex >= 0 && !state.deviceState.streamError;
+    const bool showIdleBackground = state.styleState.currentTheme == UITheme::Light &&
+        (loadingTrack || (!hasPlaybackSession && !hasLiveInput));
+    if (showIdleBackground) {
+        ImGui::GetBackgroundDrawList()->AddRectFilled(ImVec2(0.0f, 0.0f), layout.displaySize,
+            ImGui::ColorConvertFloat4ToU32(UIStyler::windowBackgroundColour(UITheme::Light)));
+    } else if (!loadingTrack) {
         UI::AudioVisualisation::renderSpectrumOverlay(
             state,
             layout,
-            UI::AudioVisualisation::hasPlaybackSession(recorderState)
+            hasPlaybackSession
         );
     }
 

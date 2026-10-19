@@ -104,6 +104,8 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     }
 
     bool viewChanged = false;
+    const float previousZoom = state.zoomFactor;
+    const float previousViewCentre = state.viewCentreNormalised;
 
     if (context.trackpadInput && context.trackpadInput->pointerValid) {
         const auto& gestures = *context.trackpadInput;
@@ -273,6 +275,21 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         Viewport::computeViewWindow(state, visibleFraction, viewStart, viewEnd, viewSpan);
     }
 
+    const bool navigating = state.zoomFactor != previousZoom ||
+        (!state.trackScrubber && state.viewCentreNormalised != previousViewCentre);
+    const float deltaTime = std::max(context.deltaTime, 0.0f);
+    if (state.zoomFactor > Viewport::MIN_ZOOM_FACTOR + 1e-3f) {
+        state.zoomIndicatorHoldSeconds = navigating ? 1.0f :
+            std::max(0.0f, state.zoomIndicatorHoldSeconds - deltaTime);
+        const float targetAlpha = state.zoomIndicatorHoldSeconds > 0.0f ? 1.0f : 0.0f;
+        const float responseSeconds = targetAlpha > state.zoomIndicatorAlpha ? 0.045f : 0.22f;
+        state.zoomIndicatorAlpha += (targetAlpha - state.zoomIndicatorAlpha) *
+            -std::expm1(-deltaTime / responseSeconds);
+    } else {
+        state.zoomIndicatorAlpha = 0.0f;
+        state.zoomIndicatorHoldSeconds = 0.0f;
+    }
+
     const bool isLightMode = SystemThemeDetector::isSystemInDarkMode() == false;
     const ImU32 frameColour = ImGui::GetColorU32(ImGuiCol_WindowBg);
     const ImU32 topBarColour = ImGui::GetColorU32(ImGuiCol_Header);
@@ -331,15 +348,18 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f, 1.0f, ImDrawFlags_RoundCornersTop);
 
     const double duration = std::max(context.durationSeconds, 0.0);
-    const double viewSpanNormalised = static_cast<double>(viewEnd - viewStart);
+    const double viewSpanNormalised = static_cast<double>(viewSpan);
     const double visibleDuration = std::max(viewSpanNormalised * duration, 1e-6);
 
-    const double visibleStartSeconds = static_cast<double>(viewStart) * duration;
-    const double visibleEndSeconds = static_cast<double>(viewEnd) * duration;
-    const bool showHours = visibleEndSeconds >= 3600.0;
+    const double viewCentre = std::clamp(static_cast<double>(state.viewCentreNormalised),
+        viewSpanNormalised * 0.5, 1.0 - viewSpanNormalised * 0.5);
+    const double visibleCentreSeconds = viewCentre * duration;
+    const double visibleStartSeconds = visibleCentreSeconds - visibleDuration * 0.5;
+    const double visibleEndSeconds = visibleCentreSeconds + visibleDuration * 0.5;
+    const bool showHours = duration >= 3600.0;
     ImFont* labelFont = ImGui::GetFont();
     const float labelFontSize = std::max(10.0f, std::round(ImGui::GetFontSize() * 0.85f));
-    const auto referenceLabel = Labels::formatTickLabel(visibleEndSeconds,
+    const auto referenceLabel = Labels::formatTickLabel(duration,
         Labels::chooseMajorTickStep(visibleDuration), showHours);
     const float labelSpacing = std::max(72.0f,
         labelFont->CalcTextSizeA(labelFontSize, FLT_MAX, 0.0f, referenceLabel.c_str()).x + 24.0f);
@@ -354,8 +374,8 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const ImU32 minorTickColour = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.6f);
     const ImU32 labelColour = ImGui::GetColorU32(ImGuiCol_Text, 0.85f);
     const auto tickX = [&](double time) {
-        const float local = static_cast<float>((time - visibleStartSeconds) / visibleDuration);
-        return std::clamp(std::floor(topMin.x + local * size.x) + 0.5f, topMin.x + 0.5f, topMax.x - 0.5f);
+        return topMin.x + size.x * 0.5f +
+            static_cast<float>((time - visibleCentreSeconds) / visibleDuration * static_cast<double>(size.x));
     };
 
     if (duration > 0.0 && visibleDuration > 0.0) {
@@ -364,8 +384,8 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
             firstMajor = 0.0;
         }
 
-        float previousLabelRight = topMin.x - 12.0f;
         drawList->PushClipRect(topMin, topMax, true);
+        drawList->PushDrawFlag(ImDrawFlags_TextNoPixelSnap, true);
         for (double t = firstMajor; t <= visibleEndSeconds + epsilon; t += majorStep) {
             if (t >= visibleStartSeconds - epsilon) {
                 const float x = tickX(t);
@@ -373,12 +393,11 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                 const auto label = Labels::formatTickLabel(t, majorStep, showHours);
                 const ImVec2 textSize = labelFont->CalcTextSizeA(labelFontSize, FLT_MAX, 0.0f, label.c_str());
                 if (textSize.x + 8.0f <= size.x) {
-                    const ImVec2 textPos(std::floor(std::clamp(x - textSize.x * 0.5f, topMin.x + 4.0f,
-                        topMax.x - textSize.x - 4.0f)), std::floor(topMin.y + 2.0f));
-                    if (textPos.x >= previousLabelRight + 12.0f) {
-                        drawList->AddText(labelFont, labelFontSize, textPos, labelColour, label.c_str());
-                        previousLabelRight = textPos.x + textSize.x;
-                    }
+                    float textX = x - textSize.x * 0.5f;
+                    if (viewSpan >= 0.999f)
+                        textX = std::clamp(textX, topMin.x + 4.0f, topMax.x - textSize.x - 4.0f);
+                    const ImVec2 textPos(textX, std::floor(topMin.y + 2.0f));
+                    drawList->AddText(labelFont, labelFontSize, textPos, labelColour, label.c_str());
                 }
             }
 
@@ -401,6 +420,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
                 }
             }
         }
+        drawList->PopDrawFlag();
         drawList->PopClipRect();
     }
 
@@ -408,11 +428,12 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         drawList->AddRectFilled(topMin, topMax, IM_COL32(255, 255, 255, 18), 4.0f, ImDrawFlags_RoundCornersTop);
     }
 
-    const float scrubberLocal = (state.scrubberNormalisedPosition - viewStart) / viewSpan;
+    const float scrubberLocal = static_cast<float>(0.5 +
+        (static_cast<double>(state.scrubberNormalisedPosition) - viewCentre) / viewSpanNormalised);
     const float clampedLocal = std::clamp(scrubberLocal, 0.0f, 1.0f);
     const float scrubberX = std::floor(topMin.x + clampedLocal * size.x) + 0.5f;
 
-    if (state.zoomFactor > Viewport::MIN_ZOOM_FACTOR + 1e-3f) {
+    if (state.zoomFactor > Viewport::MIN_ZOOM_FACTOR + 1e-3f && state.zoomIndicatorAlpha > 0.01f) {
         const float indicatorHeight = std::min(2.0f, topBarHeight * 0.1f);
         const float indicatorBottom = topMax.y - 1.0f;
         const float indicatorTop = indicatorBottom - indicatorHeight;
@@ -421,9 +442,12 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         const float barMin = std::min(indicatorStart, indicatorEnd);
         const float barMax = std::max(indicatorStart, indicatorEnd);
         if (barMax > barMin) {
+            auto indicatorColour = ImGui::ColorConvertU32ToFloat4(
+                isLightMode ? IM_COL32(95, 95, 95, 200) : IM_COL32(190, 190, 190, 180));
+            indicatorColour.w *= state.zoomIndicatorAlpha;
             drawList->AddRectFilled(ImVec2(barMin, indicatorTop),
                                     ImVec2(barMax, indicatorBottom),
-                                    isLightMode ? IM_COL32(110, 110, 110, 200) : IM_COL32(140, 140, 140, 180),
+                                    ImGui::GetColorU32(indicatorColour),
                                     1.0f);
         }
     }

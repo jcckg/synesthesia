@@ -19,8 +19,8 @@ void drawIndicator(const Timeline::TimelineState& timeline, float fraction, cons
     const float progress = std::isfinite(fraction) ? std::clamp(fraction, 0.0f, 1.0f) : 0.0f;
     ImDrawList* drawList = ImGui::GetWindowDrawList();
     const bool lightMode = ImGui::GetStyleColorVec4(ImGuiCol_Text).x < 0.5f;
-    const ImU32 backgroundColour = lightMode ? ImGui::GetColorU32(ImGuiCol_SliderGrab) : IM_COL32(0, 0, 0, 96);
-    const ImU32 progressColour = lightMode ? ImGui::GetColorU32(ImGuiCol_Button) : IM_COL32_WHITE;
+    const ImU32 backgroundColour = lightMode ? ImGui::GetColorU32(ImGuiCol_Button) : IM_COL32(0, 0, 0, 96);
+    const ImU32 progressColour = lightMode ? ImGui::GetColorU32(ImVec4(0.4f, 0.4f, 0.4f, 1.0f)) : IM_COL32_WHITE;
     drawList->AddRectFilled(ImVec2(min.x, max.y - 3.0f), max,
         backgroundColour);
     drawList->AddRectFilled(ImVec2(min.x, max.y - 3.0f),
@@ -32,7 +32,7 @@ void drawIndicator(const Timeline::TimelineState& timeline, float fraction, cons
     const float width = std::min(ImGui::CalcTextSize(label.c_str()).x + 16.0f, max.x - min.x - 16.0f);
     const ImVec2 badgeMin(alignLeft ? min.x + 8.0f : max.x - width - 8.0f, min.y + 8.0f);
     const ImVec2 badgeMax(badgeMin.x + width, badgeMin.y + ImGui::GetFontSize() + 12.0f);
-    drawList->AddRectFilled(badgeMin, badgeMax, ImGui::GetColorU32(ImGuiCol_WindowBg), 3.0f);
+    drawList->AddRectFilled(badgeMin, badgeMax, ImGui::GetColorU32(ImGuiCol_WindowBg));
     drawList->PushClipRect(badgeMin, badgeMax, true);
     drawList->AddText(ImVec2(badgeMin.x + 8.0f, badgeMin.y + 6.0f),
         ImGui::GetColorU32(ImGuiCol_Text), label.c_str());

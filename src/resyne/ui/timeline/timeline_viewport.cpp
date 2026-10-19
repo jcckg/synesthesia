@@ -65,12 +65,11 @@ void computeViewWindow(TimelineState& state,
         return;
     }
 
-    float centre = std::clamp(state.viewCentreNormalised, minCenter, maxCenter);
-    start = centre - halfSpan;
-    end = centre + halfSpan;
-    constrainView(start, end);
-    span = std::max(end - start, 1e-4f);
-    state.viewCentreNormalised = std::clamp((start + end) * 0.5f, 0.0f, 1.0f);
+    const float centre = std::clamp(state.viewCentreNormalised, minCenter, maxCenter);
+    span = visibleFraction;
+    start = std::clamp(centre - halfSpan, 0.0f, 1.0f - span);
+    end = start + span;
+    state.viewCentreNormalised = centre;
 }
 
 float computeVisibleFraction(float zoomFactor) {

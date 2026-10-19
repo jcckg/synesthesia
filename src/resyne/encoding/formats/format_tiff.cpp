@@ -412,6 +412,12 @@ bool loadFromTIFF(const std::string& filepath,
     colourImage.metadata.analysisLeadingSamples = embeddedMetadata.analysisLeadingSamples;
     colourImage.metadata.originalSampleCount = static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountLow) |
         (static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountHigh) << 32u);
+	const auto availableSamples = static_cast<std::uint64_t>(colourImage.width - 1u) *
+		static_cast<std::uint64_t>(hopSize) + static_cast<std::uint64_t>(fftSize);
+	colourImage.metadata.analysisLeadingSamples = static_cast<std::uint32_t>(std::min<std::uint64_t>(
+		colourImage.metadata.analysisLeadingSamples, availableSamples - 1u));
+	colourImage.metadata.originalSampleCount = std::min(
+		colourImage.metadata.originalSampleCount, availableSamples - colourImage.metadata.analysisLeadingSamples);
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.fftSize = fftSize;
 	colourImage.metadata.hopSize = hopSize;
@@ -440,9 +446,6 @@ bool loadFromTIFF(const std::string& filepath,
 	}
 	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata);
 
-    colourImage.metadata.analysisLeadingSamples = embeddedMetadata.analysisLeadingSamples;
-    colourImage.metadata.originalSampleCount = static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountLow) |
-        (static_cast<std::uint64_t>(embeddedMetadata.originalSampleCountHigh) << 32u);
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.hopSize = hopSize;
 

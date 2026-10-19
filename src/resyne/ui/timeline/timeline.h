@@ -40,6 +40,8 @@ struct TimelineState {
     bool isScrubberDragging = false;
     float scrubberGrabOffset = 0.0f;
     float zoomFactor = 1.0f;
+    float zoomIndicatorAlpha = 0.0f;
+    float zoomIndicatorHoldSeconds = 0.0f;
     bool isZoomGestureActive = false;
     bool isGrabGestureActive = false;
     ImVec2 zoomGestureStart = ImVec2(0.0f, 0.0f);

@@ -2,9 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <fstream>
 #include <limits>
 #include <span>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace SequenceExporterInternal::TiffMetadata {
@@ -13,6 +16,10 @@ namespace {
 
 constexpr std::uint16_t kFirstAudioTag = 65000;
 constexpr std::uint16_t kLongType = 4;
+constexpr std::uint16_t kXmpTag = 700;
+constexpr std::size_t kMaximumXmpBytes = 1024u * 1024u;
+constexpr std::string_view kAudioProperty = "resyne:audioMetadata";
+constexpr std::string_view kAudioNamespace = "urn:resyne:audio:1.0";
 constexpr std::uint64_t kMaximumFields = 4096;
 
 using Entry = std::array<std::uint8_t, 20>;
@@ -121,6 +128,85 @@ std::uint16_t tagFor(const Entry& entry, bool bigEndian) {
     return static_cast<std::uint16_t>(readUnsigned(std::span(entry).first(2), bigEndian));
 }
 
+std::string readXmp(std::istream& input, const Directory& directory) {
+    for (const auto& entry : directory.entries) {
+        const auto bytes = std::span(entry);
+        if (tagFor(entry, directory.bigEndian) != kXmpTag ||
+            readUnsigned(bytes.subspan(2, 2), directory.bigEndian) != 1) continue;
+        const auto length = readUnsigned(bytes.subspan(4, directory.bigTiff ? 8u : 4u), directory.bigEndian);
+        if (length == 0 || length > kMaximumXmpBytes) return {};
+        std::string xmp(static_cast<std::size_t>(length), '\0');
+        if (length <= directory.offsetBytes()) {
+            std::copy_n(entry.begin() + static_cast<std::ptrdiff_t>(directory.valueOffset()), length, xmp.begin());
+        } else if (!readBytes(input, readUnsigned(bytes.subspan(directory.valueOffset(), directory.offsetBytes()),
+                              directory.bigEndian),
+                              {reinterpret_cast<std::uint8_t*>(xmp.data()), xmp.size()}, directory.fileSize)) {
+            return {};
+        }
+        return xmp;
+    }
+    return {};
+}
+
+std::pair<std::size_t, std::size_t> audioPropertyRange(std::string_view xmp) {
+    if (xmp.find(kAudioNamespace) == std::string_view::npos) return {0, 0};
+    auto position = xmp.find(kAudioProperty);
+    if (position == std::string_view::npos) return {0, 0};
+    position += kAudioProperty.size();
+    position = xmp.find_first_not_of(" \t\r\n", position);
+    if (position == std::string_view::npos) return {0, 0};
+    char delimiter = '<';
+    if (xmp[position] == '=') {
+        position = xmp.find_first_not_of(" \t\r\n", position + 1u);
+        if (position == std::string_view::npos || (xmp[position] != '"' && xmp[position] != '\'')) return {0, 0};
+        delimiter = xmp[position];
+    } else if (xmp[position] != '>') {
+        return {0, 0};
+    }
+    const auto end = xmp.find(delimiter, ++position);
+    return end == std::string_view::npos ? std::pair<std::size_t, std::size_t>{0, 0} :
+        std::pair{position, end - position};
+}
+
+std::array<std::uint32_t, 7> xmpAudioFields(std::string_view xmp) {
+    std::array<std::uint32_t, 7> fields{};
+    const auto [start, length] = audioPropertyRange(xmp);
+    auto value = xmp.substr(start, length);
+    for (auto& field : fields) {
+        const auto first = value.find_first_not_of(" \t\r\n");
+        if (first == std::string_view::npos) return {};
+        value.remove_prefix(first);
+        const auto result = std::from_chars(value.data(), value.data() + value.size(), field);
+        if (result.ec != std::errc{}) return {};
+        value.remove_prefix(static_cast<std::size_t>(result.ptr - value.data()));
+        if (!value.empty() && value.find_first_of(" \t\r\n") != 0) return {};
+    }
+    if (value.find_first_not_of(" \t\r\n") != std::string_view::npos) return {};
+    return fields;
+}
+
+std::string withAudioFields(std::string xmp, const std::array<std::uint32_t, 7>& fields) {
+    std::string value;
+    for (const auto field : fields) {
+        if (!value.empty()) value += ' ';
+        value += std::to_string(field);
+    }
+    const auto [start, length] = audioPropertyRange(xmp);
+    if (length > 0) {
+        xmp.replace(start, length, value);
+        return xmp;
+    }
+    if (xmp.empty()) {
+        xmp = "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\"><rdf:RDF "
+            "xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"></rdf:RDF></x:xmpmeta>";
+    }
+    const auto end = xmp.find("</rdf:RDF>");
+    if (end == std::string::npos) return {};
+    xmp.insert(end, "<rdf:Description rdf:about=\"\" xmlns:resyne=\"" + std::string(kAudioNamespace) +
+        "\" " + std::string(kAudioProperty) + "=\"" + value + "\"/>");
+    return xmp;
+}
+
 }
 
 AudioFields read(const std::string& filepath) {
@@ -134,6 +220,8 @@ AudioFields read(const std::string& filepath) {
         &metadata.sampleRate, &metadata.fftSize, &metadata.hopSize, &metadata.channels,
         &metadata.analysisLeadingSamples, &metadata.originalSampleCountLow, &metadata.originalSampleCountHigh
     };
+    const auto xmpFields = xmpAudioFields(readXmp(input, directory));
+    for (std::size_t i = 0; i < fields.size(); ++i) *fields[i] = xmpFields[i];
     for (const auto& entry : directory.entries) {
         const auto bytes = std::span(entry);
         const auto tag = tagFor(entry, directory.bigEndian);
@@ -154,9 +242,10 @@ bool write(const std::string& filepath, const AudioFields& metadata) {
     if (!readDirectory(output, directory)) {
         return false;
     }
+    const auto existingXmp = readXmp(output, directory);
     std::erase_if(directory.entries, [&](const Entry& entry) {
         const auto tag = tagFor(entry, directory.bigEndian);
-        return tag >= kFirstAudioTag && tag < kFirstAudioTag + 7u;
+        return (tag >= kFirstAudioTag && tag < kFirstAudioTag + 7u) || tag == kXmpTag;
     });
     const std::array<std::uint32_t, 7> fields{
         metadata.sampleRate, metadata.fftSize, metadata.hopSize, metadata.channels,
@@ -171,12 +260,22 @@ bool write(const std::string& filepath, const AudioFields& metadata) {
         writeUnsigned(bytes.subspan(directory.valueOffset(), 4), fields[i], directory.bigEndian);
         directory.entries.push_back(entry);
     }
+    const auto xmp = withAudioFields(existingXmp, fields);
+    if (xmp.empty() || xmp.size() > kMaximumXmpBytes) return false;
+    const std::uint64_t alignment = directory.bigTiff ? 8u : 2u;
+    const auto xmpOffset = (directory.fileSize + alignment - 1u) & ~(alignment - 1u);
+    Entry xmpEntry{};
+    writeUnsigned(std::span(xmpEntry).first(2), kXmpTag, directory.bigEndian);
+    writeUnsigned(std::span(xmpEntry).subspan(2, 2), 1, directory.bigEndian);
+    writeUnsigned(std::span(xmpEntry).subspan(4, directory.bigTiff ? 8u : 4u), xmp.size(), directory.bigEndian);
+    writeUnsigned(std::span(xmpEntry).subspan(directory.valueOffset(), directory.offsetBytes()),
+                  xmpOffset, directory.bigEndian);
+    directory.entries.push_back(xmpEntry);
     std::sort(directory.entries.begin(), directory.entries.end(), [&](const Entry& left, const Entry& right) {
         return tagFor(left, directory.bigEndian) < tagFor(right, directory.bigEndian);
     });
 
-    const std::uint64_t alignment = directory.bigTiff ? 8u : 2u;
-    const auto directoryOffset = (directory.fileSize + alignment - 1u) & ~(alignment - 1u);
+    const auto directoryOffset = (xmpOffset + xmp.size() + alignment - 1u) & ~(alignment - 1u);
     const auto directorySize = directory.countBytes() + directory.entries.size() * directory.entryBytes() +
         directory.offsetBytes();
     const auto maximumOffset = directory.bigTiff
@@ -195,6 +294,8 @@ bool write(const std::string& filepath, const AudioFields& metadata) {
         position += directory.entryBytes();
     }
     writeUnsigned(std::span(bytes).subspan(position, directory.offsetBytes()), directory.nextOffset, directory.bigEndian);
+    output.seekp(static_cast<std::streamoff>(xmpOffset));
+    output.write(xmp.data(), static_cast<std::streamsize>(xmp.size()));
     output.seekp(static_cast<std::streamoff>(directoryOffset));
     output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     output.flush();
