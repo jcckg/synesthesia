@@ -1,0 +1,49 @@
+#include "ui/input/shortcuts.h"
+
+#include "imgui.h"
+#include "resyne/recorder/recorder.h"
+
+namespace UI::Input {
+
+void handlePlaybackShortcut(ReSyne::RecorderState& state, bool windowFocused) {
+    if (state.importPhase != 0 || state.isRecording || state.recordingCountdownActive ||
+        ImGui::GetIO().WantTextInput ||
+        ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel) ||
+        !ReSyne::Recorder::hasLoadedAudio(state)) {
+        return;
+    }
+
+    const bool pressed = ImGui::Shortcut(ImGuiKey_Space,
+        ImGuiInputFlags_RouteGlobal | ImGuiInputFlags_RouteOverFocused);
+    if (windowFocused && pressed) {
+        ReSyne::Recorder::togglePlayback(state);
+    }
+}
+
+void handleTimelineShortcuts(ReSyne::RecorderState& state, bool timelineFocused) {
+    if (!timelineFocused || ImGui::GetIO().WantTextInput) return;
+
+    using ReSyne::UI::Utilities::ToolType;
+    const auto pressed = [](ImGuiKey key) {
+        return ImGui::IsKeyPressed(key, false);
+    };
+
+    if (pressed(ImGuiKey_1)) {
+        state.toolState.activeTool = ToolType::Cursor;
+    } else if (pressed(ImGuiKey_2)) {
+        state.toolState.activeTool = ToolType::Zoom;
+    } else if (pressed(ImGuiKey_3) && !state.timeline.trackScrubber) {
+        state.toolState.activeTool = ToolType::Grab;
+    }
+
+    if (pressed(ImGuiKey_0)) {
+        state.timeline.trackScrubber = !state.timeline.trackScrubber;
+        if (state.timeline.trackScrubber) {
+            state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;
+            state.toolState.activeTool = ToolType::Cursor;
+            state.timeline.isGrabGestureActive = false;
+        }
+    }
+}
+
+}

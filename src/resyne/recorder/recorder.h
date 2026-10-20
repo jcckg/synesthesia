@@ -202,6 +202,7 @@ public:
     static void startPlayback(RecorderState& state);
     static void pausePlayback(RecorderState& state);
     static void stopPlayback(RecorderState& state);
+    static void togglePlayback(RecorderState& state);
     static void seekPlayback(RecorderState& state, float normalisedPosition);
     static void reconstructAudio(RecorderState& state);
     static bool refreshPlaybackOutput(RecorderState& state);
@@ -215,9 +216,6 @@ private:
     static bool ensureRsynSamplesLoaded(RecorderState& state);
     static bool ensurePlaybackAudioLoaded(RecorderState& state);
     static void drawExportDialog(RecorderState& state);
-    static void handleKeyboardShortcuts(RecorderState& state,
-                                        bool windowFocused,
-                                        bool hasPlaybackData);
 };
 
 void setLoadingOperationStatus(RecorderState& state, std::string status);

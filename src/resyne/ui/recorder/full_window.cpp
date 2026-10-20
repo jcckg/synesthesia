@@ -11,6 +11,7 @@
 #include "audio/input/audio_input.h"
 #include "imgui.h"
 #include "ui/icons.h"
+#include "ui/input/shortcuts.h"
 #include "resyne/ui/recorder/utils.h"
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
@@ -356,7 +357,7 @@ void Recorder::drawFullWindow(RecorderState& state,
     }
 
     const bool windowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    if (controlsEnabled) Recorder::handleKeyboardShortcuts(state, windowFocused, hasData && !state.isRecording);
+    if (controlsEnabled) ::UI::Input::handleTimelineShortcuts(state, windowFocused);
     if ((!canStartRecording || !controlsEnabled || exportRunning) && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
@@ -461,11 +462,7 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::SameLine(0.0f, transportSpacing);
 
         if (UI::Utilities::drawToolButton(playPauseIcon, isPlaying ? "Pause" : "Play", false, transportEnabled, BUTTON_HEIGHT, 1.0f)) {
-            if (isPlaying) {
-                pausePlayback(state);
-            } else {
-                startPlayback(state);
-            }
+            togglePlayback(state);
         }
 
         ImGui::TableSetColumnIndex(2);

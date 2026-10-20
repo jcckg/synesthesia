@@ -38,6 +38,7 @@ public:
     void realiseForRenderer() const;
 
     [[nodiscard]] bool shouldClose() const;
+    [[nodiscard]] bool isFocused() const;
     [[nodiscard]] GLFWwindow* handle() const;
     [[nodiscard]] FramebufferSize framebufferSize() const;
     [[nodiscard]] bgfx::PlatformData platformData() const;

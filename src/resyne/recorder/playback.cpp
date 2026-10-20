@@ -1,7 +1,7 @@
 #include "resyne/recorder/recorder.h"
 #include "resyne/recorder/embedded_source_utils.h"
 #include "resyne/recorder/reconstruction_utils.h"
-#include "imgui_internal.h"
+#include "imgui.h"
 
 #include <algorithm>
 #include <mutex>
@@ -264,6 +264,15 @@ void Recorder::stopPlayback(RecorderState& state) {
     }
 }
 
+void Recorder::togglePlayback(RecorderState& state) {
+    if (state.importPhase != 0 || state.isRecording || state.recordingCountdownActive) return;
+    if (state.playbackStartPending || (state.audioOutput && state.audioOutput->isPlaying())) {
+        pausePlayback(state);
+    } else {
+        startPlayback(state);
+    }
+}
+
 void Recorder::seekPlayback(RecorderState& state, float normalisedPosition) {
     float clamped = std::clamp(normalisedPosition, 0.0f, 1.0f);
     state.timeline.scrubberNormalisedPosition = clamped;
@@ -278,50 +287,6 @@ void Recorder::seekPlayback(RecorderState& state, float normalisedPosition) {
             size_t framePosition = static_cast<size_t>(clamped * static_cast<float>(totalFrames));
             framePosition = std::min(framePosition, totalFrames - 1);
             state.audioOutput->seek(framePosition);
-        }
-    }
-}
-
-void Recorder::handleKeyboardShortcuts(RecorderState& state,
-                                       bool windowFocused,
-                                       bool hasPlaybackData) {
-    if (!windowFocused) {
-        return;
-    }
-
-    ImGuiIO& io = ImGui::GetIO();
-    if (io.WantTextInput) {
-        return;
-    }
-
-    const auto pressed = [](ImGuiKey key) {
-        return ImGui::IsKeyPressed(key, false);
-    };
-
-    if (pressed(ImGuiKey_1)) {
-        state.toolState.activeTool = UI::Utilities::ToolType::Cursor;
-    } else if (pressed(ImGuiKey_2)) {
-        state.toolState.activeTool = UI::Utilities::ToolType::Zoom;
-    } else if (pressed(ImGuiKey_3) && !state.timeline.trackScrubber) {
-        state.toolState.activeTool = UI::Utilities::ToolType::Grab;
-    }
-
-    if (pressed(ImGuiKey_0)) {
-        state.timeline.trackScrubber = !state.timeline.trackScrubber;
-        if (state.timeline.trackScrubber) {
-            state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;
-            state.toolState.activeTool = UI::Utilities::ToolType::Cursor;
-            state.timeline.isGrabGestureActive = false;
-        }
-    }
-
-    if (hasPlaybackData && !state.isRecording && pressed(ImGuiKey_Space)) {
-        ImGui::ClearActiveID();
-        const bool isPlaying = state.audioOutput && state.audioOutput->isPlaying();
-        if (isPlaying) {
-            pausePlayback(state);
-        } else {
-            startPlayback(state);
         }
     }
 }

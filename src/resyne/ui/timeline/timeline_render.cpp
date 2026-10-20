@@ -427,7 +427,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const float scrubberLocal = static_cast<float>(0.5 +
         (static_cast<double>(state.scrubberNormalisedPosition) - viewCentre) / viewSpanNormalised);
     const float clampedLocal = std::clamp(scrubberLocal, 0.0f, 1.0f);
-    const float scrubberX = std::floor(topMin.x + clampedLocal * size.x) + 0.5f;
+    const float scrubberX = topMin.x + clampedLocal * size.x + 0.5f;
 
     if (state.zoomFactor > Viewport::MIN_ZOOM_FACTOR + 1e-3f && state.zoomIndicatorAlpha > 0.01f) {
         const float indicatorHeight = std::min(2.0f, topBarHeight * 0.1f);

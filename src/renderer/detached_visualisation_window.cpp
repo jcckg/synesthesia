@@ -11,6 +11,7 @@
 #include "ui.h"
 #include "ui/audio_visualisation/presentation_state.h"
 #include "ui/audio_visualisation/visualisation_surface.h"
+#include "ui/input/shortcuts.h"
 
 namespace Renderer {
 
@@ -107,6 +108,7 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
     }
 
     uiContext_.beginFrame();
+    UI::Input::handlePlaybackShortcut(recorderState, window_.isFocused());
 
     UI::AudioVisualisation::SurfaceLayout layout;
     layout.displaySize = ImGui::GetIO().DisplaySize;

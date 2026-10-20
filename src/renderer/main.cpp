@@ -11,6 +11,7 @@
 #include "ui.h"
 #include "ui/dragdrop/file_drop_manager.h"
 #include "ui/input/trackpad_gestures.h"
+#include "ui/input/shortcuts.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 #include "utilities/video/ffmpeg_locator.h"
 
@@ -192,6 +193,7 @@ int app_main(int, char**) {
         }
 
         mainWindowContext.beginFrame();
+        UI::Input::handlePlaybackShortcut(recorderState, window.isFocused());
 
         updateUI(audioInput, inputDevices, outputDevices, clearColour, ImGui::GetIO(), uiState
 #ifdef ENABLE_MIDI

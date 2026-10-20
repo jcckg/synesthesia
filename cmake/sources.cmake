@@ -36,6 +36,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/encoding/audio/wav_encoder.cpp
     ${SRC_DIR}/resyne/decoding/wav_decoder_impl.cpp
     ${SRC_DIR}/ui/ui.cpp
+    ${SRC_DIR}/ui/input/shortcuts.cpp
     ${SRC_DIR}/ui/handlers/import_handler.cpp
     ${SRC_DIR}/ui/controls/controls.cpp
     ${SRC_DIR}/ui/device_manager/device_manager.cpp

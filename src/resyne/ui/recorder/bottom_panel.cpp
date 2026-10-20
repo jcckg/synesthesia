@@ -7,6 +7,7 @@
 #include "audio/analysis/fft/fft_processor.h"
 #include "imgui.h"
 #include "ui/icons.h"
+#include "ui/input/shortcuts.h"
 #include "resyne/ui/recorder/utils.h"
 #include "resyne/ui/recorder/recorder_constants.h"
 #include "resyne/ui/recorder/shared_components.h"
@@ -141,7 +142,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
     ImGui::Spacing();
 
     const bool panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
-    if (controlsEnabled) Recorder::handleKeyboardShortcuts(state, panelFocused, hasData && !state.isRecording);
+    if (controlsEnabled) ::UI::Input::handleTimelineShortcuts(state, panelFocused);
     if ((!canStartRecording || !controlsEnabled || exportRunning) && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
@@ -256,11 +257,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         ImGui::SameLine(0.0f, transportSpacing);
 
         if (ImGui::Button(playPauseIcon, ImVec2(transportButtonSize, transportButtonSize))) {
-            if (isPlaying) {
-                pausePlayback(state);
-            } else {
-                startPlayback(state);
-            }
+            togglePlayback(state);
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip(isPlaying ? "Pause" : "Play");
