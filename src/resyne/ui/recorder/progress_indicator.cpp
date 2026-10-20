@@ -10,11 +10,8 @@ namespace ReSyne {
 
 namespace {
 
-void drawIndicator(const Timeline::TimelineState& timeline, float fraction, const std::string& filename,
+void drawIndicator(const ImVec2& min, const ImVec2& max, float fraction, const std::string& filename,
                    const std::string& operationStatus, bool alignLeft) {
-    if (!timeline.gradientRegionValid) return;
-    const ImVec2 min = timeline.gradientRegionMin;
-    const ImVec2 max = timeline.gradientRegionMax;
     if (max.x - min.x < 32.0f || max.y - min.y < 24.0f) return;
     const float progress = std::isfinite(fraction) ? std::clamp(fraction, 0.0f, 1.0f) : 0.0f;
     ImDrawList* drawList = ImGui::GetWindowDrawList();
@@ -62,27 +59,37 @@ void drawExportError(RecorderState& state, const std::string& error) {
 
 }
 
-void Recorder::drawProgressIndicator(RecorderState& state) {
+void Recorder::drawProgressIndicator(RecorderState& state, const ImVec2& regionMin, const ImVec2& regionMax) {
+    std::string error;
     if (state.showExportingDialog && state.exportComplete.load(std::memory_order_acquire)) {
-        std::string error;
         {
             std::lock_guard lock(state.samplesMutex);
             error = state.exportErrorMessage;
         }
-        if (!error.empty()) {
-            drawExportError(state, error);
-            return;
+        if (error.empty()) {
+            state.showExportingDialog = false;
+            setExportOperationStatus(state, {});
         }
-        state.showExportingDialog = false;
-        setExportOperationStatus(state, {});
     }
 
-    if (state.showExportingDialog) {
-        drawIndicator(state.timeline, state.exportProgressAtomic.load(std::memory_order_acquire),
+    if (!state.showExportingDialog && !state.showLoadingDialog) return;
+    const auto* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->Pos);
+    ImGui::SetNextWindowSize(viewport->Size);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("##OperationProgress", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+        ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoSavedSettings |
+        ImGuiWindowFlags_NoFocusOnAppearing);
+    if (!error.empty()) {
+        drawExportError(state, error);
+    } else if (state.showExportingDialog) {
+        drawIndicator(regionMin, regionMax, state.exportProgressAtomic.load(std::memory_order_acquire),
             state.exportingFilename, getExportOperationStatus(state), state.progressIndicatorOnLeft);
     } else if (state.showLoadingDialog) {
-        drawIndicator(state.timeline, state.loadingProgress, state.loadingFilename, getLoadingOperationStatus(state), state.progressIndicatorOnLeft);
+        drawIndicator(regionMin, regionMax, state.loadingProgress, state.loadingFilename, getLoadingOperationStatus(state), state.progressIndicatorOnLeft);
     }
+    ImGui::End();
+    ImGui::PopStyleVar();
 }
 
 }

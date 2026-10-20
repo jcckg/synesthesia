@@ -3,6 +3,7 @@
 #include <string>
 #include <functional>
 #include <memory>
+#include "imgui.h"
 #include "version.h"
 
 enum class UpdateError {
@@ -39,7 +40,7 @@ public:
     
     bool shouldShowUpdateBanner(const UpdateState& state) const;
     
-    void drawUpdateBanner(UpdateState& state, float windowWidth, float sidebarWidth);
+    void drawUpdateBanner(UpdateState& state, const ImVec2& regionMin, const ImVec2& regionMax);
     void openDownloadUrl(const std::string& url);
     
 private:

@@ -35,7 +35,11 @@ public:
 	}
 
 	void seek(size_t framePosition);
-	size_t getPlaybackPosition() const { return playbackPosition_.load(); }
+	size_t getPlaybackPosition() const {
+        const auto version = seekVersion_.load();
+        return (version & 1u) == 0 && version != appliedSeekVersion_.load()
+            ? pendingSeekPosition_.load() : playbackPosition_.load();
+    }
     double getPresentationPosition() const;
 	size_t getTotalSamples() const { return totalSamples_.load(); }
 	size_t getTotalFrames() const {
@@ -79,6 +83,7 @@ private:
         std::atomic<bool> loop{false};
         std::atomic<std::uint64_t> session{0};
         std::atomic<std::uint64_t> generation{0};
+        std::atomic<std::uint64_t> seekVersion{0};
     };
     std::array<OutputInterval, 256> outputIntervals_{};
     std::atomic<std::uint64_t> writtenIntervals_{0};
@@ -101,7 +106,7 @@ private:
     std::atomic<std::uint64_t> seekGeneration_{0};
     std::atomic<size_t> pendingSeekPosition_{0};
     std::atomic<bool> pendingSeekFade_{false};
-    std::uint64_t appliedSeekVersion_ = 0;
+    std::atomic<std::uint64_t> appliedSeekVersion_{0};
     size_t seekFadeRemaining_ = 0;
     void publishSeek(size_t position, bool fade);
 	double oldSeekCursor_;

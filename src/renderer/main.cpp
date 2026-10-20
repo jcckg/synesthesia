@@ -29,6 +29,8 @@ namespace {
 
 constexpr int kDefaultWindowWidth = 1480;
 constexpr int kDefaultWindowHeight = 750;
+constexpr int kMinimumWindowWidth = 900;
+constexpr int kMinimumWindowHeight = 550;
 constexpr int kTargetFramesPerSecond = 120;
 constexpr int kTargetFrameDurationMicroseconds = 1'000'000 / kTargetFramesPerSecond;
 
@@ -86,6 +88,8 @@ int app_main(int, char**) {
     Renderer::WindowOptions options;
     options.width = kDefaultWindowWidth;
     options.height = kDefaultWindowHeight;
+    options.minimumWidth = kMinimumWindowWidth;
+    options.minimumHeight = kMinimumWindowHeight;
 
     if (!window.create(options)) {
         std::fprintf(stderr, "Failed to create GLFW window\n");

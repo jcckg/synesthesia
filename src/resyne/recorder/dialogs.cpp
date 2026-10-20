@@ -75,7 +75,8 @@ bool Recorder::exportRecording(RecorderState& state,
 void Recorder::exportRecordingThreaded(RecorderState& state,
                                        std::string filepath,
                                        RecorderExportFormat format) {
-    if (state.exportRunning.load(std::memory_order_acquire)) {
+    if (state.exportRunning.load(std::memory_order_acquire) || state.isRecording ||
+        state.recordingCountdownActive || state.importPhase != 0) {
         return;
     }
 
@@ -83,10 +84,39 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
         state.exportThread.join();
     }
 
+    RSYNExportOptions rsynOptions{};
+    rsynOptions.presentationSettings.colourSpace = state.importColourSpace;
+    rsynOptions.presentationSettings.applyGamutMapping = state.importGamutMapping;
+    rsynOptions.presentationSettings.lowGain = state.importLowGain;
+    rsynOptions.presentationSettings.midGain = state.importMidGain;
+    rsynOptions.presentationSettings.highGain = state.importHighGain;
+    rsynOptions.presentationSettings.smoothingEnabled = state.presentationSmoothingEnabled;
+    rsynOptions.presentationSettings.manualSmoothing = state.presentationManualSmoothing;
+    rsynOptions.presentationSettings.smoothingAmount = state.presentationSmoothingAmount;
+
+    ReSyne::Encoding::Video::ExportOptions videoOptions;
+    if (format == RecorderExportFormat::MP4) {
+        auto& ffmpegLocator = Utilities::Video::FFmpegLocator::instance();
+        if (ffmpegLocator.isAvailable()) videoOptions.ffmpegExecutable = ffmpegLocator.executablePath();
+    }
+    videoOptions.colourSpace = state.videoColourSpace;
+    videoOptions.applyGamutMapping = state.videoGamutMapping;
+    videoOptions.smoothingAmount = state.presentationSmoothingAmount;
+    videoOptions.smoothingEnabled = state.presentationSmoothingEnabled;
+    videoOptions.manualSmoothing = state.presentationManualSmoothing;
+    videoOptions.lowGain = state.importLowGain;
+    videoOptions.midGain = state.importMidGain;
+    videoOptions.highGain = state.importHighGain;
+    videoOptions.width = state.videoWidth;
+    videoOptions.height = state.videoHeight;
+    videoOptions.frameRate = state.videoFrameRate;
+    videoOptions.exportGradient = state.exportGradient;
+
     state.exportRunning.store(true, std::memory_order_release);
     state.exportComplete.store(false, std::memory_order_release);
     state.exportProgressAtomic.store(0.0f, std::memory_order_release);
-    state.exportThread = std::thread([&state, filepath = std::move(filepath), format]() {
+    state.exportThread = std::thread([&state, filepath = std::move(filepath), format,
+        rsynOptions = std::move(rsynOptions), videoOptions = std::move(videoOptions)]() {
         bool success = false;
         std::string errorMessage;
 
@@ -100,16 +130,14 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 
         std::vector<AudioColourSample> samplesCopy;
         AudioMetadata metadataCopy;
-        ensureRsynSamplesLoaded(state);
-        {
-            std::lock_guard<std::mutex> lock(state.samplesMutex);
-            samplesCopy = state.samples;
-            metadataCopy = state.metadata;
-        }
-
-        updateProgress(0.05f);
-
 		try {
+            ensureRsynSamplesLoaded(state);
+            {
+                std::lock_guard<std::mutex> lock(state.samplesMutex);
+                samplesCopy = state.samples;
+                metadataCopy = state.metadata;
+            }
+            updateProgress(0.05f);
 			switch (format) {
 				case RecorderExportFormat::WAV:
 					updateStatus("Reconstructing audio from spectral data...");
@@ -124,22 +152,13 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 						});
 					break;
 				case RecorderExportFormat::RSYN: {
-                    RSYNExportOptions options{};
-                    options.presentationSettings.colourSpace = state.importColourSpace;
-                    options.presentationSettings.applyGamutMapping = state.importGamutMapping;
-                    options.presentationSettings.lowGain = state.importLowGain;
-                    options.presentationSettings.midGain = state.importMidGain;
-                    options.presentationSettings.highGain = state.importHighGain;
-                    options.presentationSettings.smoothingEnabled = state.presentationSmoothingEnabled;
-                    options.presentationSettings.manualSmoothing = state.presentationManualSmoothing;
-                    options.presentationSettings.smoothingAmount = state.presentationSmoothingAmount;
 					updateStatus("Encoding spectral data to RSYN format...");
 					updateProgress(0.1f);
 					success = SequenceExporter::exportToRsyn(
 						filepath,
 						samplesCopy,
 						metadataCopy,
-                        options,
+                        rsynOptions,
 						[&](float fraction) {
 							const float clamped = std::clamp(fraction, 0.0f, 1.0f);
 							updateProgress(0.1f + clamped * 0.8f);
@@ -159,33 +178,18 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 						});
 					break;
 				case RecorderExportFormat::MP4: {
-					auto& ffmpegLocator = Utilities::Video::FFmpegLocator::instance();
-					if (!ffmpegLocator.isAvailable()) {
+					if (videoOptions.ffmpegExecutable.empty()) {
 						errorMessage = "FFmpeg not found";
 						success = false;
 						break;
 					}
 					updateStatus("Preparing video export...");
 					updateProgress(0.02f);
-					ReSyne::Encoding::Video::ExportOptions options;
-					options.ffmpegExecutable = ffmpegLocator.executablePath();
-					options.colourSpace = state.videoColourSpace;
-					options.applyGamutMapping = state.videoGamutMapping;
-					options.smoothingAmount = state.presentationSmoothingAmount;
-            options.smoothingEnabled = state.presentationSmoothingEnabled;
-            options.manualSmoothing = state.presentationManualSmoothing;
-            options.lowGain = state.importLowGain;
-            options.midGain = state.importMidGain;
-            options.highGain = state.importHighGain;
-					options.width = state.videoWidth;
-					options.height = state.videoHeight;
-					options.frameRate = state.videoFrameRate;
-					options.exportGradient = state.exportGradient;
 					success = ReSyne::Encoding::Video::exportToMP4(
 						filepath,
 						samplesCopy,
 						metadataCopy,
-						options,
+						videoOptions,
 						[&](float fraction) {
 							const float clamped = std::clamp(fraction, 0.0f, 1.0f);
 							updateProgress(clamped);
@@ -193,7 +197,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 								updateStatus("Reconstructing audio...");
 							} else if (clamped < 0.5f) {
 								updateStatus("Rendering video frames...");
-							} else if (clamped < 0.9f && options.exportGradient) {
+							} else if (clamped < 0.9f && videoOptions.exportGradient) {
 								updateStatus("Rendering gradient video...");
 							} else {
 								updateStatus("Finalising video...");
@@ -244,6 +248,7 @@ void Recorder::handleLoadDialog(RecorderState& state) {
     }
 
     state.shouldOpenLoadDialog = false;
+    if (state.exportRunning.load(std::memory_order_acquire)) return;
 
     auto result = pfd::open_file(
         "Load Audio/Colour File",
@@ -270,6 +275,8 @@ void Recorder::handleFileDialog(RecorderState& state) {
     }
 
     state.shouldOpenSaveDialog = false;
+    if (state.exportRunning.load(std::memory_order_acquire) || state.isRecording ||
+        state.recordingCountdownActive || state.importPhase != 0) return;
 
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::system_clock::to_time_t(now);

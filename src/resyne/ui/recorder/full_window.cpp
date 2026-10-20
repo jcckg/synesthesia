@@ -1,6 +1,7 @@
 #include "resyne/recorder/recorder.h"
 
 #include <algorithm>
+#include <array>
 #include <vector>
 #include <mutex>
 #include <limits>
@@ -28,6 +29,81 @@
 namespace ReSyne {
 
 namespace {
+
+void drawStatusBar(const char* statusText, const ImVec4& statusColour,
+                   const std::array<std::string, 6>& segments) {
+    constexpr const char* separator = " | ";
+    const float availableWidth = ImGui::GetContentRegionAvail().x;
+    const float contentLeft = ImGui::GetCursorScreenPos().x;
+    const float ellipsisWidth = ImGui::CalcTextSize("...").x;
+    const float separatorWidth = ImGui::CalcTextSize(separator).x;
+    float barWidth = ImGui::CalcTextSize("STATUS: ").x + ImGui::CalcTextSize(statusText).x;
+    std::size_t visibleCount = 0;
+    for (const auto& segment : segments) {
+        const float extraWidth = separatorWidth + ImGui::CalcTextSize(segment.c_str()).x;
+        const float overflowWidth = visibleCount + 1 < segments.size() ? separatorWidth + ellipsisWidth : 0.0f;
+        if (barWidth + extraWidth + overflowWidth > availableWidth) break;
+        barWidth += extraWidth;
+        ++visibleCount;
+    }
+    if (visibleCount < segments.size()) barWidth += separatorWidth + ellipsisWidth;
+
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, availableWidth - barWidth));
+    ImGui::TextUnformatted("STATUS: ");
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::TextColored(statusColour, "%s", statusText);
+    for (std::size_t i = 0; i < visibleCount; ++i) {
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextUnformatted(separator);
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextUnformatted(segments[i].c_str());
+    }
+    if (visibleCount == segments.size()) {
+        if (ImGui::BeginPopup("StatusDetails")) {
+            ImGui::CloseCurrentPopup();
+            ImGui::EndPopup();
+        }
+        return;
+    }
+
+    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::TextUnformatted(separator);
+    ImGui::SameLine(0.0f, 0.0f);
+    const ImVec2 ellipsisPosition = ImGui::GetCursorScreenPos();
+    if (ImGui::InvisibleButton("##StatusOverflow", ImVec2(ellipsisWidth, ImGui::GetTextLineHeight()))) {
+        ImGui::OpenPopup("StatusDetails");
+    }
+    const ImVec2 anchorMin = ImGui::GetItemRectMin();
+    const ImVec2 anchorMax = ImGui::GetItemRectMax();
+    const bool anchorHovered = ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByPopup);
+    const ImFontGlyph* dot = ImGui::GetFontBaked()->FindGlyph('.');
+    const float ellipsisOffset = (ImGui::GetTextLineHeight() - dot->Y0 - dot->Y1) * 0.5f;
+    ImGui::GetWindowDrawList()->AddText(ImVec2(ellipsisPosition.x, ellipsisPosition.y + ellipsisOffset),
+        ImGui::GetColorU32(anchorHovered ? ImGuiCol_Text : ImGuiCol_TextDisabled), "...");
+
+    float popupWidth = 0.0f;
+    for (std::size_t i = visibleCount; i < segments.size(); ++i) {
+        popupWidth = std::max(popupWidth, ImGui::CalcTextSize(segments[i].c_str()).x);
+    }
+    popupWidth = std::min(availableWidth, popupWidth + ImGui::GetStyle().WindowPadding.x * 2.0f +
+        ImGui::GetStyle().WindowBorderSize * 2.0f);
+    ImGui::SetNextWindowPos(ImVec2(std::clamp(anchorMin.x, contentLeft,
+        contentLeft + availableWidth - popupWidth), anchorMax.y));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(popupWidth, 0.0f), ImVec2(popupWidth, FLT_MAX));
+    if (ImGui::BeginPopup("StatusDetails", ImGuiWindowFlags_NoMove)) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
+        for (std::size_t i = visibleCount; i < segments.size(); ++i) {
+            ImGui::TextUnformatted(segments[i].c_str());
+        }
+        ImGui::PopTextWrapPos();
+        if (!anchorHovered &&
+            !ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem) &&
+            !ImGui::IsWindowAppearing()) {
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
 
 bool drawCornerButton(const char* label, const ImVec2& size, bool bottomLeft) {
     const std::string buttonLabel = std::string(label) + (bottomLeft ? "###Record" : "###Export");
@@ -109,7 +185,8 @@ void Recorder::drawFullWindow(RecorderState& state,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
     ImGui::SetCursorPosY(HEADER_PADDING);
-    const bool controlsEnabled = state.importPhase == 0 && !state.exportRunning.load(std::memory_order_acquire);
+    const bool exportRunning = state.exportRunning.load(std::memory_order_acquire);
+    const bool controlsEnabled = state.importPhase == 0;
 
     if (state.focusRequested) {
         ImGui::SetWindowFocus();
@@ -156,26 +233,15 @@ void Recorder::drawFullWindow(RecorderState& state,
         snprintf(rateStr, sizeof(rateStr), "--");
     }
 
-    char statusDetails[512];
-    snprintf(statusDetails, sizeof(statusDetails),
-             "  |  RGB: %.3f %.3f %.3f  |  FRAMES: %zu  |  DURATION: %.2fs  |  FFT: %s  |  HOP: %s  |  RATE: %s",
-             static_cast<double>(currentR), static_cast<double>(currentG), static_cast<double>(currentB),
-             sampleCount,
-             duration,
-             fftStr, hopStr, rateStr);
-
-    const float statusBarWidth = ImGui::CalcTextSize("STATUS: ").x + ImGui::CalcTextSize(statusText).x +
-        ImGui::CalcTextSize(statusDetails).x;
-    const float availableWidth = ImGui::GetContentRegionAvail().x;
-    const float rightAlignX = std::max(0.0f, availableWidth - statusBarWidth);
-
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + rightAlignX);
-    ImGui::TextUnformatted("STATUS: ");
-    ImGui::SameLine(0.0f, 0.0f);
-    const ImVec4 statusColour = UI::activityStatusColour(state, audioInput, presentation.get());
-    ImGui::TextColored(statusColour, "%s", statusText);
-    ImGui::SameLine(0.0f, 0.0f);
-    ImGui::TextUnformatted(statusDetails);
+    char rgbStr[96], durationStr[64];
+    snprintf(rgbStr, sizeof(rgbStr), "RGB: %.3f %.3f %.3f",
+        static_cast<double>(currentR), static_cast<double>(currentG), static_cast<double>(currentB));
+    snprintf(durationStr, sizeof(durationStr), "DURATION: %.2fs", duration);
+    const std::array<std::string, 6> statusSegments{
+        rgbStr, "FRAMES: " + std::to_string(sampleCount), durationStr,
+        std::string("FFT: ") + fftStr, std::string("HOP: ") + hopStr, std::string("RATE: ") + rateStr
+    };
+    drawStatusBar(statusText, UI::activityStatusColour(state, audioInput, presentation.get()), statusSegments);
     ImGui::Spacing();
     ImGui::BeginDisabled(!controlsEnabled);
 
@@ -291,14 +357,14 @@ void Recorder::drawFullWindow(RecorderState& state,
 
     const bool windowFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (controlsEnabled) Recorder::handleKeyboardShortcuts(state, windowFocused, hasData && !state.isRecording);
-    if ((!canStartRecording || !controlsEnabled) && state.recordingCountdownActive) {
+    if ((!canStartRecording || !controlsEnabled || exportRunning) && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
     if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
         startRecording(state, audioInput.getAudioProcessor(), 0, 0);
     }
 
-    constexpr float BUTTON_WIDTH = 80.0f;
+    const float BUTTON_WIDTH = std::clamp(80.0f - std::max(0.0f, 700.0f - windowWidth) * 0.25f, 60.0f, 80.0f);
     constexpr float BUTTON_SPACING = 8.0f;
 
     const int toolbarButtonCount = 3;
@@ -332,7 +398,7 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        ImGui::BeginDisabled(state.isRecording || !canStartRecording);
+        ImGui::BeginDisabled(exportRunning || state.isRecording || !canStartRecording);
         const char* startLabel = state.recordingCountdownActive
             ? RecorderUI::recordingStartButtonLabel(state)
             : "RECORD";
@@ -343,14 +409,15 @@ void Recorder::drawFullWindow(RecorderState& state,
                 RecorderUI::beginRecordingCountdown(state);
             }
         }
-        if (!canStartRecording && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (controlsEnabled && !exportRunning && !canStartRecording &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("Select an input device in the sidebar");
         }
         ImGui::EndDisabled();
 
         ImGui::SameLine(0.0f, BUTTON_SPACING);
 
-        ImGui::BeginDisabled(!state.isRecording);
+        ImGui::BeginDisabled(exportRunning || !state.isRecording);
         if (ImGui::Button("STOP##record", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
             stopRecording(state);
         }
@@ -358,7 +425,7 @@ void Recorder::drawFullWindow(RecorderState& state,
 
         ImGui::SameLine(0.0f, BUTTON_SPACING);
 
-        ImGui::BeginDisabled(state.isRecording || state.recordingCountdownActive);
+        ImGui::BeginDisabled(exportRunning || state.isRecording || state.recordingCountdownActive);
         if (ImGui::Button("LOAD", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT))) {
             state.shouldOpenLoadDialog = true;
         }
@@ -444,7 +511,7 @@ void Recorder::drawFullWindow(RecorderState& state,
                 BUTTON_HEIGHT)) {
             state.detachedVisualisation.openRequested = true;
         }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (controlsEnabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             if (!state.detachedVisualisation.available) {
                 ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationUnsupportedTooltip);
             } else if (state.detachedVisualisation.isOpen) {
@@ -457,7 +524,7 @@ void Recorder::drawFullWindow(RecorderState& state,
         ImGui::SameLine(0.0f, visualisationToExportSpacing);
 
         const bool clearTimelineEnabled =
-            timelineControlsEnabled && !state.isRecording && !state.recordingCountdownActive &&
+            timelineControlsEnabled && !exportRunning && !state.isRecording && !state.recordingCountdownActive &&
             !state.importRunning.load(std::memory_order_acquire);
         if (UI::Utilities::drawToolButton(
                 ICON_FA_TRASH,
@@ -472,12 +539,14 @@ void Recorder::drawFullWindow(RecorderState& state,
 
         ImGui::SameLine(0.0f, clearToExportSpacing);
 
+        ImGui::BeginDisabled(exportRunning || state.showExportingDialog || state.isRecording || state.recordingCountdownActive);
         if (drawCornerButton("Export", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT), false)) {
             state.showExportDialog = true;
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Export recording to file");
         }
+        ImGui::EndDisabled();
 
         ImGui::EndDisabled();
 
@@ -486,7 +555,6 @@ void Recorder::drawFullWindow(RecorderState& state,
     ImGui::PopStyleVar();
 
     ImGui::EndDisabled();
-    drawProgressIndicator(state);
     ImGui::End();
     ImGui::PopStyleVar(3);
 

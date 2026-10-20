@@ -48,7 +48,14 @@ bool Window::create(const WindowOptions& options) {
     glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
 
     window_ = glfwCreateWindow(options.width, options.height, options.title, nullptr, nullptr);
-    return window_ != nullptr;
+    if (window_ == nullptr) return false;
+    if (options.minimumWidth > 0 || options.minimumHeight > 0) {
+        glfwSetWindowSizeLimits(window_,
+            options.minimumWidth > 0 ? options.minimumWidth : GLFW_DONT_CARE,
+            options.minimumHeight > 0 ? options.minimumHeight : GLFW_DONT_CARE,
+            GLFW_DONT_CARE, GLFW_DONT_CARE);
+    }
+    return true;
 }
 
 void Window::destroy() {

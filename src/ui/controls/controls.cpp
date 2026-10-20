@@ -125,9 +125,6 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
     int mode = manualSmoothing ? 1 : 0;
     ImGui::SetNextItemWidth(contentWidth);
     if (UIStyler::combo("##ColourResponseMode", &mode, "Automatic\0Manual\0")) manualSmoothing = mode == 1;
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-        "Automatic follows musical changes while stabilising uncertain spectral measurements.\n"
-        "Manual lets you choose the base response and follows local colour contribution changes.");
     if (manualSmoothing) {
         float responseMs = manualResponseTime(smoothingAmount) * 1000.0f;
         ImGui::TextUnformatted("Base response time");
@@ -135,9 +132,6 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
         if (ImGui::SliderFloat("##ColourResponseTime", &responseMs, 40.0f, 1500.0f, "%.0f ms", ImGuiSliderFlags_Logarithmic)) {
             smoothingAmount = manualSmoothingAmount(responseMs / 1000.0f);
         }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-            "Base settling response; faster colour motion shortens the effective response.\n"
-            "This control is used only in manual mode.");
     } else {
         ImGui::TextWrapped("Local audio-driven response");
     }
@@ -163,8 +157,6 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
                 static_cast<double>(responseRange.maximum * 1000.0f));
         else if (effectiveMs > 0.0f) ImGui::Text("Spectral integration: %.0f ms", static_cast<double>(effectiveMs));
         else ImGui::TextDisabled("Stored response");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip(
-            "Indicative integration time for spectral levels. Musical changes and combined intensity can respond faster.");
     }
     if (manualSmoothing && ImGui::Button("Reset response", {contentWidth, buttonHeight})) {
         smoothingAmount = UIConstants::DEFAULT_SMOOTHING_SPEED;
@@ -231,8 +223,6 @@ void renderAdvancedSettingsPanel(UIState& state
                                   , const std::vector<MIDIInput::DeviceInfo>* midiDevices
 #endif
                                   ) {
-    static bool previousSmoothingState = state.visualSettings.smoothingEnabled;
-
     if (renderSectionHeader("Advanced Settings")) {
         if (renderSectionHeader("Appearance", 0, SectionLayer::Secondary)) {
             ImGui::Text("Sidebar: %s", state.visibility.sidebarOnLeft ? "Left" : "Right");
@@ -243,20 +233,18 @@ void renderAdvancedSettingsPanel(UIState& state
             ImGui::Spacing();
             bool currentSmoothingState = state.visualSettings.smoothingEnabled;
             if (ImGui::Checkbox("Enable Smoothing", &currentSmoothingState)) {
-                if (currentSmoothingState != state.visualSettings.smoothingEnabled) {
-                    if (!currentSmoothingState && state.visualSettings.smoothingEnabled) {
-                        previousSmoothingState = state.visualSettings.smoothingEnabled;
-                        ImGui::OpenPopup("Photosensitivity Warning");
-                    } else {
-                        state.visualSettings.smoothingEnabled = currentSmoothingState;
-                    }
+                if (!currentSmoothingState) {
+                    ImGui::OpenPopup("Photosensitivity Warning");
+                } else {
+                    state.visualSettings.smoothingEnabled = true;
                 }
             }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("Smoothing reduces rapid colour changes.\nDisabling will cause rapid flashing.");
-            }
 
-            if (ImGui::BeginPopupModal("Photosensitivity Warning", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+            const auto* viewport = ImGui::GetMainViewport();
+            ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+            ImGui::SetNextWindowSize(ImVec2(std::min(600.0f, std::max(1.0f, viewport->WorkSize.x - 24.0f)), 0.0f));
+            if (ImGui::BeginPopupModal("Photosensitivity Warning", nullptr,
+                ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove)) {
                 ImGui::PushTextWrapPos(ImGui::GetCursorPos().x + ImGui::GetContentRegionAvail().x);
                 ImGui::TextWrapped("Warning: Disabling smoothing will cause rapidly flashing colours which can trigger photosensitive epilepsy in sensitive individuals.");
                 ImGui::Spacing();
@@ -264,13 +252,13 @@ void renderAdvancedSettingsPanel(UIState& state
                 ImGui::PopTextWrapPos();
                 ImGui::Spacing();
 
-                if (ImGui::Button("(Yes) Disable Smoothing")) {
+                const float buttonWidth = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+                if (ImGui::Button("(Yes) Disable Smoothing", ImVec2(buttonWidth, 0.0f))) {
                     state.visualSettings.smoothingEnabled = false;
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::SameLine();
-                if (ImGui::Button("(No) Keep Smoothing Enabled")) {
-                    state.visualSettings.smoothingEnabled = previousSmoothingState;
+                if (ImGui::Button("(No) Keep Smoothing Enabled", ImVec2(buttonWidth, 0.0f))) {
                     ImGui::CloseCurrentPopup();
                 }
                 ImGui::EndPopup();

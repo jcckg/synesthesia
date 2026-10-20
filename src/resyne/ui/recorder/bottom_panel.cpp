@@ -39,7 +39,8 @@ void Recorder::drawBottomPanel(RecorderState& state,
                      ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
                      ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    const bool controlsEnabled = state.importPhase == 0 && !state.exportRunning.load(std::memory_order_acquire);
+    const bool exportRunning = state.exportRunning.load(std::memory_order_acquire);
+    const bool controlsEnabled = state.importPhase == 0;
     ImGui::BeginDisabled(!controlsEnabled);
 
     if (state.focusRequested) {
@@ -141,7 +142,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
 
     const bool panelFocused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (controlsEnabled) Recorder::handleKeyboardShortcuts(state, panelFocused, hasData && !state.isRecording);
-    if ((!canStartRecording || !controlsEnabled) && state.recordingCountdownActive) {
+    if ((!canStartRecording || !controlsEnabled || exportRunning) && state.recordingCountdownActive) {
         RecorderUI::cancelRecordingCountdown(state);
     }
     if (RecorderUI::updateRecordingCountdown(state, ImGui::GetIO().DeltaTime)) {
@@ -177,7 +178,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         ImGui::TableNextRow();
 
         ImGui::TableSetColumnIndex(0);
-        ImGui::BeginDisabled(state.isRecording || !canStartRecording);
+        ImGui::BeginDisabled(exportRunning || state.isRecording || !canStartRecording);
         if (ImGui::Button(RecorderUI::recordingStartButtonLabel(state), ImVec2(buttonWidth, buttonHeight))) {
             if (state.recordingCountdownActive) {
                 RecorderUI::cancelRecordingCountdown(state);
@@ -185,14 +186,15 @@ void Recorder::drawBottomPanel(RecorderState& state,
                 RecorderUI::beginRecordingCountdown(state);
             }
         }
-        if (!canStartRecording && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (controlsEnabled && !exportRunning && !canStartRecording &&
+            ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("Select an input device in the sidebar");
         }
         ImGui::EndDisabled();
 
         ImGui::SameLine(0.0f, transportSpacing);
 
-        ImGui::BeginDisabled(!state.isRecording);
+        ImGui::BeginDisabled(exportRunning || !state.isRecording);
         if (ImGui::Button("Stop", ImVec2(buttonWidth, buttonHeight))) {
             stopRecording(state);
         }
@@ -200,7 +202,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
 
         ImGui::SameLine(0.0f, transportSpacing);
 
-        ImGui::BeginDisabled(state.isRecording || state.recordingCountdownActive);
+        ImGui::BeginDisabled(exportRunning || state.isRecording || state.recordingCountdownActive);
         if (ImGui::Button("Load", ImVec2(buttonWidth, buttonHeight))) {
             state.shouldOpenLoadDialog = true;
         }
@@ -317,7 +319,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
                 transportButtonSize)) {
             state.detachedVisualisation.openRequested = true;
         }
-        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+        if (controlsEnabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             if (!state.detachedVisualisation.available) {
                 ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationUnsupportedTooltip);
             } else if (state.detachedVisualisation.isOpen) {
@@ -330,7 +332,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         ImGui::SameLine(0.0f, visualisationToExportSpacing);
 
         const bool clearTimelineEnabled =
-            timelineControlsEnabled && !state.isRecording && !state.recordingCountdownActive &&
+            timelineControlsEnabled && !exportRunning && !state.isRecording && !state.recordingCountdownActive &&
             !state.importRunning.load(std::memory_order_acquire);
         if (UI::Utilities::drawToolButton(
                 ICON_FA_TRASH,
@@ -345,12 +347,14 @@ void Recorder::drawBottomPanel(RecorderState& state,
 
         ImGui::SameLine(0.0f, clearToExportSpacing);
 
+        ImGui::BeginDisabled(exportRunning || state.showExportingDialog || state.isRecording || state.recordingCountdownActive);
         if (ImGui::Button("Export", ImVec2(buttonWidth, buttonHeight))) {
             state.showExportDialog = true;
         }
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("Export recording to file");
         }
+        ImGui::EndDisabled();
 
         ImGui::EndDisabled();
 
@@ -360,7 +364,6 @@ void Recorder::drawBottomPanel(RecorderState& state,
     ReSyne::UI::renderStatusMessage(state);
 
     ImGui::EndDisabled();
-    drawProgressIndicator(state);
     ImGui::End();
     ImGui::PopStyleVar();
 

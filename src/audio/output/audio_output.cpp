@@ -208,11 +208,10 @@ void AudioOutput::seek(size_t framePosition) {
     const auto count = audioBuffer_ && audioBuffer_->channels > 0 ?
         audioBuffer_->samples.size() / audioBuffer_->channels : 0;
     const auto position = std::min(framePosition, count);
-    const auto previous = playbackPosition_.load();
-    const bool fade = position > previous ? position - previous > 2205 : previous - position > 2205;
+    if (position == getPlaybackPosition()) return;
+    const bool fade = isPlaying_.load();
     publishSeek(position, fade);
     playbackEqualiser_.requestReset();
-    playbackPosition_.store(position);
 }
 
 void AudioOutput::clearAudioData() {
@@ -224,6 +223,7 @@ void AudioOutput::clearAudioData() {
         audioBuffer_.reset();
     } else retiredBuffers_.push_back(std::move(audioBuffer_));
     totalSamples_.store(0);
+    publishSeek(0, false);
     playbackPosition_.store(0);
     clockSession_.fetch_add(1);
     playbackEqualiser_.requestReset();
@@ -233,8 +233,10 @@ void AudioOutput::clearAudioData() {
 // https://portaudio.com/docs/v19-doxydocs/structPaStreamCallbackTimeInfo.html
 // https://eel.is/c++draft/atomics.order
 double AudioOutput::getPresentationPosition() const {
-    const double fallback = static_cast<double>(playbackPosition_.load());
-    if (!stream_ || !clockAvailable_.load()) return fallback;
+    const double fallback = static_cast<double>(getPlaybackPosition());
+    if (!isPlaying_.load() || !stream_ || !clockAvailable_.load()) return fallback;
+    const auto seekVersion = seekVersion_.load();
+    if (seekVersion & 1u) return fallback;
     const double time = Pa_GetStreamTime(stream_);
     if (!std::isfinite(time)) return fallback;
     const auto session = clockSession_.load();
@@ -242,7 +244,7 @@ double AudioOutput::getPresentationPosition() const {
     const auto written = writtenIntervals_.load();
     const auto count = std::min<std::uint64_t>(written, outputIntervals_.size());
     bool found = false;
-    double selectedTime = 0, position = fallback;
+    double selectedTime = 0, position = static_cast<double>(pendingSeekPosition_.load());
     for (std::uint64_t i = 0; i < count; ++i) {
         const auto& interval = outputIntervals_[(written - count + i) % outputIntervals_.size()];
         const auto version = interval.version.load();
@@ -255,8 +257,9 @@ double AudioOutput::getPresentationPosition() const {
         const bool loop = interval.loop.load();
         const auto intervalSession = interval.session.load();
         const auto intervalGeneration = interval.generation.load();
+        const auto intervalSeekVersion = interval.seekVersion.load();
         if (interval.version.load() != version || intervalSession != session ||
-            intervalGeneration != generation ||
+            intervalGeneration != generation || intervalSeekVersion != seekVersion ||
             (found && dacTime > time)) continue;
         double candidate = start + std::clamp(time - dacTime, 0.0, duration) * speed;
         if (loop && total > 0.0) candidate = std::fmod(candidate, total);
@@ -314,16 +317,18 @@ int AudioOutput::audioCallback(const void* input, void* output,
         audioOutput->playbackCursor_ = 0.0;
         audioOutput->seekFadeRemaining_ = 0;
     }
+    auto renderedSeekVersion = audioOutput->appliedSeekVersion_.load();
     const auto version = audioOutput->seekVersion_.load();
-    if ((version & 1u) == 0 && version != audioOutput->appliedSeekVersion_) {
+    if ((version & 1u) == 0 && version != renderedSeekVersion) {
         const auto position = audioOutput->pendingSeekPosition_.load();
         const auto fade = audioOutput->pendingSeekFade_.load();
         const auto generation = audioOutput->seekGeneration_.load();
-        if (audioOutput->seekVersion_.load() == version && generation == snapshot->generation) {
+        if (audioOutput->seekVersion_.load() == version && generation == snapshot->generation &&
+            (!fade || audioOutput->seekFadeRemaining_ == 0)) {
             audioOutput->oldSeekCursor_ = audioOutput->playbackCursor_;
             audioOutput->playbackCursor_ = static_cast<double>(position);
             audioOutput->seekFadeRemaining_ = fade ? 256 : 0;
-            audioOutput->appliedSeekVersion_ = version;
+            renderedSeekVersion = version;
         }
     }
     const double cursorSnapshot = audioOutput->playbackCursor_;
@@ -354,6 +359,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 			}
 			stopPlayback = true;
 			cursor = totalFramesDouble;
+			seekFadeRemaining = 0;
 			break;
 		}
 
@@ -475,6 +481,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
             interval.loop.store(loopEnabled);
             interval.session.store(session);
             interval.generation.store(snapshot->generation);
+            interval.seekVersion.store(renderedSeekVersion);
             interval.version.store(serial * 2 + 2);
             audioOutput->writtenIntervals_.store(serial + 1);
             audioOutput->clockAvailable_.store(true);
@@ -493,7 +500,9 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	} else {
 		if (stopPlayback || finalCursor >= totalFramesDouble) {
 			audioOutput->playbackPosition_.store(totalFrames);
-			audioOutput->isPlaying_.store(false);
+			if (audioOutput->seekVersion_.load() == renderedSeekVersion) {
+                audioOutput->isPlaying_.store(false);
+            }
 		} else {
 			size_t stored = static_cast<size_t>(std::floor(finalCursor));
 			if (stored >= totalFrames) {
@@ -503,6 +512,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		}
 	}
 
+    audioOutput->appliedSeekVersion_.store(renderedSeekVersion);
 	audioOutput->playbackEqualiser_.processInterleaved(out, frameCount, outputChannels);
 
 	constexpr float THRESHOLD = 0.85f;

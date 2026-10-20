@@ -49,7 +49,7 @@ void computeViewWindow(TimelineState& state,
         return;
     }
 
-    if (state.trackScrubber) {
+    if (state.trackScrubber && !state.isScrubberDragging) {
         state.viewCentreNormalised = state.scrubberNormalisedPosition;
     }
 

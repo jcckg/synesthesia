@@ -88,7 +88,8 @@ void processIdleState(float* clearColour, float deltaTime) {
 
 void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dropEvents,
 						  ReSyne::RecorderState& recorderState) {
-	if (dropEvents.empty() || recorderState.importPhase != 0 || recorderState.isRecording) {
+	if (dropEvents.empty() || recorderState.importPhase != 0 || recorderState.isRecording ||
+        recorderState.exportRunning.load(std::memory_order_acquire)) {
 		return;
 	}
 
@@ -374,10 +375,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	constexpr float SIDEBAR_PADDING = 12.0f;
 	constexpr float contentWidth = SIDEBAR_WIDTH - SIDEBAR_PADDING * 2;
 
-	if (state.visibility.showUI && state.updateChecker.shouldShowUpdateBanner(state.updateState)) {
-        state.updateChecker.drawUpdateBanner(state.updateState, io.DisplaySize.x, SIDEBAR_WIDTH);
-    }
-    
 	static float currentDisplayR = 0.0f;
 	static float currentDisplayG = 0.0f;
 	static float currentDisplayB = 0.0f;
@@ -539,6 +536,14 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 				RECORDER_PANEL_HEIGHT);
 		}
 
+        const bool timelineVisible = state.visualSettings.activeView == UIState::View::ReSyne || showRecorder;
+        const float contentX = state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : 0.0f;
+        const ImVec2 progressMin = timelineVisible && recorderState.timeline.gradientRegionValid
+            ? recorderState.timeline.gradientRegionMin : ImVec2(contentX, 0.0f);
+        const ImVec2 progressMax = timelineVisible && recorderState.timeline.gradientRegionValid
+            ? recorderState.timeline.gradientRegionMax : ImVec2(contentX + displaySize.x - SIDEBAR_WIDTH, displaySize.y);
+        ReSyne::Recorder::drawProgressIndicator(recorderState, progressMin, progressMax);
+        state.updateChecker.drawUpdateBanner(state.updateState, progressMin, progressMax);
 			ReSyne::handleDialogs(state.resyneState);
 		}
 

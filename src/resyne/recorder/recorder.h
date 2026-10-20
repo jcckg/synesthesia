@@ -173,6 +173,7 @@ public:
 
     static void handleFileDialog(RecorderState& state);
     static void handleLoadDialog(RecorderState& state);
+    static void drawProgressIndicator(RecorderState& state, const ImVec2& regionMin, const ImVec2& regionMax);
 
     static bool importFromFile(RecorderState& state,
                                const std::string& filepath,
@@ -214,7 +215,6 @@ private:
     static bool ensureRsynSamplesLoaded(RecorderState& state);
     static bool ensurePlaybackAudioLoaded(RecorderState& state);
     static void drawExportDialog(RecorderState& state);
-    static void drawProgressIndicator(RecorderState& state);
     static void handleKeyboardShortcuts(RecorderState& state,
                                         bool windowFocused,
                                         bool hasPlaybackData);

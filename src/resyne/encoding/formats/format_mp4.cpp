@@ -282,7 +282,7 @@ std::string buildFFmpegCommand(const std::string& ffmpegPath,
         << " -video_size " << width << 'x' << height
         << " -framerate " << fps
         << " -i -"
-        << " -i " << '"' << audioPath.string() << '"'
+        << " -f wav -i " << '"' << audioPath.string() << '"'
         << " -map 0:v:0 -map 1:a:0"
         << " -vf \"" << colourProfile.filter << ",format=" << encoderSettings.pixelFormat
         << ",setparams=range=limited:color_primaries=" << colourProfile.primaries

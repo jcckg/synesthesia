@@ -458,60 +458,72 @@ bool UpdateChecker::shouldShowUpdateBanner(const UpdateState& state) const {
     return state.shouldShowBanner && state.updatePromptVisible && state.updateAvailable;
 }
 
-void UpdateChecker::drawUpdateBanner(UpdateState& state, float, float) {
+void UpdateChecker::drawUpdateBanner(UpdateState& state, const ImVec2& regionMin, const ImVec2& regionMax) {
     if (!shouldShowUpdateBanner(state)) {
         return;
     }
 
-    const float popupWidth = 220.0f;
-    const float popupHeight = 110.0f;
-    const float marginRight = 20.0f;
-    const float marginBottom = 53.0f;
+    constexpr float inset = 8.0f;
+    constexpr float buttonHeight = 26.0f;
+    const float availableWidth = regionMax.x - regionMin.x - inset * 2.0f;
+    const float availableHeight = regionMax.y - regionMin.y - inset * 2.0f;
+    if (availableWidth < 160.0f || availableHeight < buttonHeight + 12.0f) return;
+    const bool compact = availableHeight < ImGui::GetTextLineHeight() * 2.0f + buttonHeight + 24.0f;
+    const float compactButtonWidth = std::max(72.0f, ImGui::CalcTextSize("Update").x + 16.0f);
+    const float preferredWidth = compact
+        ? ImGui::CalcTextSize("Update available").x + compactButtonWidth * 2.0f + inset * 4.0f : 240.0f;
+    const float width = std::min(preferredWidth, availableWidth);
+    const bool lightMode = ImGui::GetStyleColorVec4(ImGuiCol_Text).x < 0.5f;
 
-    ImVec2 windowSize = ImGui::GetIO().DisplaySize;
-    float posX = windowSize.x - popupWidth - marginRight;
-    float posY = windowSize.y - popupHeight - marginBottom;
-
-    ImGui::SetNextWindowPos(ImVec2(posX, posY));
-    ImGui::SetNextWindowSize(ImVec2(popupWidth, popupHeight));
-
-    ImVec4 bgColor = ImGui::GetStyle().Colors[ImGuiCol_WindowBg];
-    bgColor.w = 0.97f;
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 4.0f);
+    ImGui::SetNextWindowPos(ImVec2(regionMax.x - inset, regionMax.y - inset), ImGuiCond_Always, ImVec2(1.0f, 1.0f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, availableHeight));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(14, 14));
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, bgColor);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(8.0f, 6.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, 0.0f);
 
     ImGui::Begin("##UpdateBanner", nullptr,
                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                 ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
-                ImGuiWindowFlags_NoCollapse);
+                ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing);
 
-    ImGui::Text("Update Available");
-    ImGui::Spacing();
-    ImGui::TextWrapped("Version %s is available", state.latestVersion.c_str());
-    ImGui::Spacing();
-
-    if (ImGui::Button("Download", ImVec2(100, 22))) {
-        openDownloadUrl(state.downloadUrl);
+    if (compact) ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Update available");
+    if (compact) {
+        ImGui::SameLine();
+    } else {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x);
+        ImGui::TextDisabled("Version %s", state.latestVersion.c_str());
+        ImGui::PopTextWrapPos();
     }
 
-    ImGui::SameLine(0, 8);
+    const float buttonWidth = compact ? compactButtonWidth :
+        (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    const float primaryShade = lightMode ? 0.0f : 1.0f;
+    const float primaryHover = lightMode ? 0.12f : 0.88f;
+    const float primaryActive = lightMode ? 0.24f : 0.76f;
+    const float primaryText = lightMode ? 1.0f : 0.0f;
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(primaryShade, primaryShade, primaryShade, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(primaryHover, primaryHover, primaryHover, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(primaryActive, primaryActive, primaryActive, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(primaryText, primaryText, primaryText, 1.0f));
+    if (ImGui::Button("Update", ImVec2(buttonWidth, buttonHeight))) {
+        openDownloadUrl(state.downloadUrl);
+    }
+    ImGui::PopStyleColor(4);
 
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.5f, 0.5f, 0.3f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.5f, 0.5f, 0.5f, 0.5f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.5f, 0.5f, 0.7f));
-    if (ImGui::Button("Dismiss", ImVec2(70, 22))) {
+    ImGui::SameLine();
+
+    if (ImGui::Button("Later", ImVec2(buttonWidth, buttonHeight))) {
         state.updatePromptVisible = false;
         state.shouldShowBanner = false;
     }
-    ImGui::PopStyleColor(3);
 
     ImGui::End();
 
-    ImGui::PopStyleColor();
-    ImGui::PopStyleVar(3);
+    ImGui::PopStyleVar(5);
 }
 
 void UpdateChecker::openDownloadUrl(const std::string& url) {

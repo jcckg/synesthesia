@@ -41,6 +41,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
 
     if (context.size.x <= 1.0f || context.size.y <= 1.0f) {
         state.gradientRegionValid = false;
+        state.isScrubberDragging = false;
         ImGui::Dummy(context.size);
         return result;
     }
@@ -74,7 +75,9 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         state.zoomFactor = Viewport::MIN_ZOOM_FACTOR;
     }
 
-    const bool gradientHovered = ImGui::IsMouseHoveringRect(
+    const bool timelineHovered = ImGui::IsWindowHovered();
+    const bool rulerHovered = timelineHovered && ImGui::IsMouseHoveringRect(topMin, topMax);
+    const bool gradientHovered = timelineHovered && ImGui::IsMouseHoveringRect(
         gradientMin, gradientMax, ImGuiHoveredFlags_None);
 
     const bool showOverlay = context.showDropOverlay && gradientHovered;
@@ -225,49 +228,38 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     Viewport::computeViewWindow(state, visibleFraction, viewStart, viewEnd, viewSpan);
 
     if (context.allowScrubbing && !state.isGrabGestureActive && !state.isZoomGestureActive) {
-        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-            ImGui::IsMouseHoveringRect(topMin, topMax, ImGuiHoveredFlags_None)) {
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && rulerHovered) {
             const float local = Viewport::clampNormalised((io.MousePos.x - topMin.x) / std::max(size.x, 1.0f));
             float newScrubber = viewStart + local * viewSpan;
             newScrubber = Viewport::clampNormalised(newScrubber);
             state.scrubberNormalisedPosition = newScrubber;
             state.isScrubberDragging = true;
-            state.scrubberGrabOffset = 0.0f;
             result.scrubberMoved = true;
             result.newScrubberPosition = newScrubber;
             result.behaviour = TimelineScrubBehaviour::Click;
             viewChanged = true;
-        } else if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) &&
-                   io.MousePos.x >= topMin.x && io.MousePos.x <= topMax.x &&
-                   io.MousePos.y >= topMin.y && io.MousePos.y <= topMax.y) {
-            const float scrubberX = topMin.x + ((state.scrubberNormalisedPosition - viewStart) / viewSpan) * size.x;
-            if (std::fabs(io.MousePos.x - scrubberX) <= 8.0f &&
-                io.MousePos.y >= topMin.y && io.MousePos.y <= topMax.y) {
-                state.isScrubberDragging = true;
-                state.scrubberGrabOffset = io.MousePos.x - scrubberX;
-            }
         }
 
         if (state.isScrubberDragging) {
-            if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                const float adjustedX = io.MousePos.x - state.scrubberGrabOffset;
-                const float local = Viewport::clampNormalised((adjustedX - topMin.x) / std::max(size.x, 1.0f));
+            if (ImGui::IsMousePosValid() && (ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
+                ImGui::IsMouseReleased(ImGuiMouseButton_Left))) {
+                const float local = Viewport::clampNormalised((io.MousePos.x - topMin.x) / std::max(size.x, 1.0f));
                 float newScrubber = viewStart + local * viewSpan;
                 newScrubber = Viewport::clampNormalised(newScrubber);
-                if (std::fabs(newScrubber - state.scrubberNormalisedPosition) > 0.0001f) {
+                if (newScrubber != state.scrubberNormalisedPosition) {
                     state.scrubberNormalisedPosition = newScrubber;
                     result.scrubberMoved = true;
                     result.newScrubberPosition = newScrubber;
                     result.behaviour = TimelineScrubBehaviour::Drag;
                     viewChanged = true;
                 }
-            } else {
+            }
+            if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
                 state.isScrubberDragging = false;
-                state.scrubberGrabOffset = 0.0f;
             }
         }
     } else if (!context.allowScrubbing) {
-            state.isScrubberDragging = false;
+        state.isScrubberDragging = false;
     }
 
     if (viewChanged) {
@@ -358,7 +350,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const double visibleEndSeconds = visibleCentreSeconds + visibleDuration * 0.5;
     const bool showHours = duration >= 3600.0;
     ImFont* labelFont = ImGui::GetFont();
-    const float labelFontSize = std::max(10.0f, std::round(ImGui::GetFontSize() * 0.85f));
+    const float labelFontSize = std::max(10.0f, std::round(ImGui::GetFontSize() * 0.78f));
     const auto referenceLabel = Labels::formatTickLabel(duration,
         Labels::chooseMajorTickStep(visibleDuration), showHours);
     const float labelSpacing = std::max(72.0f,
@@ -370,7 +362,11 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const int minorDivisions = Labels::chooseMinorTickDivisions(majorStep, majorSpacing);
     const double minorStep = majorStep / static_cast<double>(minorDivisions);
     const float tickBottom = dividerY - 3.0f;
-    const ImU32 majorTickColour = ImGui::GetColorU32(ImGuiCol_TextDisabled);
+    auto majorTick = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+    majorTick.x *= 0.8f;
+    majorTick.y *= 0.8f;
+    majorTick.z *= 0.8f;
+    const ImU32 majorTickColour = ImGui::GetColorU32(majorTick);
     const ImU32 minorTickColour = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.6f);
     const ImU32 labelColour = ImGui::GetColorU32(ImGuiCol_Text, 0.85f);
     const auto tickX = [&](double time) {
@@ -389,14 +385,14 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         for (double t = firstMajor; t <= visibleEndSeconds + epsilon; t += majorStep) {
             if (t >= visibleStartSeconds - epsilon) {
                 const float x = tickX(t);
-                drawList->AddLine(ImVec2(x, tickBottom - 5.0f), ImVec2(x, tickBottom), majorTickColour, 1.0f);
+                drawList->AddLine(ImVec2(x, tickBottom - 4.0f), ImVec2(x, tickBottom), majorTickColour, 1.0f);
                 const auto label = Labels::formatTickLabel(t, majorStep, showHours);
                 const ImVec2 textSize = labelFont->CalcTextSizeA(labelFontSize, FLT_MAX, 0.0f, label.c_str());
                 if (textSize.x + 8.0f <= size.x) {
                     float textX = x - textSize.x * 0.5f;
                     if (viewSpan >= 0.999f)
                         textX = std::clamp(textX, topMin.x + 4.0f, topMax.x - textSize.x - 4.0f);
-                    const ImVec2 textPos(textX, std::floor(topMin.y + 2.0f));
+                    const ImVec2 textPos(textX, std::floor(topMin.y + 1.0f));
                     drawList->AddText(labelFont, labelFontSize, textPos, labelColour, label.c_str());
                 }
             }
@@ -424,7 +420,7 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
         drawList->PopClipRect();
     }
 
-    if (ImGui::IsMouseHoveringRect(topMin, topMax, ImGuiHoveredFlags_None) && context.allowScrubbing) {
+    if (rulerHovered && context.allowScrubbing) {
         drawList->AddRectFilled(topMin, topMax, IM_COL32(255, 255, 255, 18), 4.0f, ImDrawFlags_RoundCornersTop);
     }
 

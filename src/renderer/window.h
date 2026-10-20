@@ -9,6 +9,8 @@ namespace Renderer {
 struct WindowOptions {
     int width = 1480;
     int height = 750;
+    int minimumWidth = 0;
+    int minimumHeight = 0;
     const char* title = "Synesthesia";
 };
 

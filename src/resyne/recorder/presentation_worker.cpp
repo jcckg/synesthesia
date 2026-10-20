@@ -195,7 +195,9 @@ struct PresentationWorker::Impl {
                 snapshot = std::make_shared<PresentationSnapshot>(*published);
         }
         if (request.metadata.presentationData &&
-            (!snapshot || snapshot->processedFrames < request.metadata.presentationData->frames.size())) {
+            (!snapshot || snapshot->processedFrames < request.metadata.presentationData->frames.size() ||
+                (snapshot->settings.smoothingEnabled != request.settings.smoothingEnabled &&
+                    request.metadata.presentationData->settings.smoothingEnabled == request.settings.smoothingEnabled))) {
             snapshot = std::make_shared<PresentationSnapshot>();
             const auto& stored = *request.metadata.presentationData;
             snapshot->colours = RSYNPresentation::colourTrack(stored, stored.settings.smoothingEnabled);
@@ -218,6 +220,12 @@ struct PresentationWorker::Impl {
             snapshot->duration = RSYNPresentation::durationSeconds(request.metadata);
         }
         snapshot->message = message;
+        if (!request.settings.smoothingEnabled && snapshot->targets && snapshot->targets->size() > 0 &&
+            sameAnalysis(snapshot->settings, request.settings)) {
+            snapshot->colours = snapshot->targets;
+            snapshot->settings = request.settings;
+            snapshot->message.clear();
+        }
         snapshot->sourceRevision = request.sourceRevision;
         snapshot->revision = ++snapshotRevision;
         std::lock_guard lock(mutex);
