@@ -1,9 +1,7 @@
 #pragma once
 
-#include "audio/processing/audio_processor.h"
 #include "colour/colour_core.h"
 #include "osc_messages.h"
-#include "ui/smoothing/smoothing.h"
 
 #include <span>
 #include <cmath>
@@ -12,30 +10,23 @@
 namespace Synesthesia::OSC {
 
 struct OSCAnalysisSignals {
-    float momentaryLoudnessLUFS = -200.0f;
     float spectralFlux = 0.0f;
     bool onsetDetected = false;
 };
 
-using OSCSmoothingSignals = OSCSmoothingFeatureData;
-
 struct OSCFrameUpdate {
     std::span<const float> magnitudes{};
     std::span<const float> phases{};
+    std::span<const float> frequencies{};
+    int32_t fftSize = 0;
     float sampleRate = 0.0f;
     ColourCore::FrameResult colourResult{};
     ColourCore::RGB displayColour{};
     ColourCore::XYZ presentedXYZ{NAN, NAN, NAN};
     double sourceTimestamp = std::numeric_limits<double>::quiet_NaN();
     OSCAnalysisSignals analysisSignals{};
-    OSCSmoothingSignals smoothingSignals{};
 };
 
-OSCAnalysisSignals buildAnalysisSignals(const AudioProcessor::SpectralData& spectralData);
-OSCAnalysisSignals buildAnalysisSignals(float momentaryLoudnessLUFS,
-                                        float spectralFlux,
-                                        bool onsetDetected);
-OSCSmoothingSignals buildSmoothingSignals(const SmoothingSignalFeatures& features);
 OSCFrameData buildFrameData(const OSCFrameUpdate& update);
 
 }

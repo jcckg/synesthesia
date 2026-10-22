@@ -59,6 +59,7 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 		stream_ = nullptr;
 	}
 	isPlaying_.store(false);
+	playbackGain_ = 0.0;
 	clockSession_.fetch_add(1);
     clockAvailable_.store(false);
 	outputChannelCount_.store(0);
@@ -180,7 +181,6 @@ void AudioOutput::pause() {
 	}
 
 	isPlaying_.store(false);
-    clockSession_.fetch_add(1);
 	resetStereoLevels();
 }
 
@@ -193,6 +193,7 @@ void AudioOutput::stop() {
 	if (Pa_IsStreamActive(stream_) == 1) {
 		Pa_StopStream(stream_);
 	}
+	playbackGain_ = 0.0;
 	playbackPosition_.store(0);
 	{
 		std::lock_guard<std::mutex> lock(bufferMutex_);
@@ -234,7 +235,7 @@ void AudioOutput::clearAudioData() {
 // https://eel.is/c++draft/atomics.order
 double AudioOutput::getPresentationPosition() const {
     const double fallback = static_cast<double>(getPlaybackPosition());
-    if (!isPlaying_.load() || !stream_ || !clockAvailable_.load()) return fallback;
+    if (!stream_ || !clockAvailable_.load()) return fallback;
     const auto seekVersion = seekVersion_.load();
     if (seekVersion & 1u) return fallback;
     const double time = Pa_GetStreamTime(stream_);
@@ -293,8 +294,10 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	auto* out = static_cast<float*>(output);
 	const size_t outputChannels = audioOutput->outputChannelCount_.load();
 
-	if (!audioOutput->isPlaying_.load()) {
+	const bool playing = audioOutput->isPlaying_.load();
+	if (!playing && audioOutput->playbackGain_ <= 0.0) {
 		std::memset(out, 0, frameCount * outputChannels * sizeof(float));
+		audioOutput->outputTimeline_.reset();
 		audioOutput->resetStereoLevels();
 		return paContinue;
 	}
@@ -315,13 +318,14 @@ int AudioOutput::audioCallback(const void* input, void* output,
     if (snapshot->generation != audioOutput->activeGeneration_) {
         audioOutput->activeGeneration_ = snapshot->generation;
         audioOutput->playbackCursor_ = 0.0;
+        audioOutput->playbackGain_ = 0.0;
         audioOutput->seekFadeRemaining_ = 0;
     }
     auto renderedSeekVersion = audioOutput->appliedSeekVersion_.load();
     const auto version = audioOutput->seekVersion_.load();
-    if ((version & 1u) == 0 && version != renderedSeekVersion) {
+    if (playing && (version & 1u) == 0 && version != renderedSeekVersion) {
         const auto position = audioOutput->pendingSeekPosition_.load();
-        const auto fade = audioOutput->pendingSeekFade_.load();
+        const bool fade = audioOutput->pendingSeekFade_.load() || audioOutput->playbackGain_ > 0.0;
         const auto generation = audioOutput->seekGeneration_.load();
         if (audioOutput->seekVersion_.load() == version && generation == snapshot->generation &&
             (!fade || audioOutput->seekFadeRemaining_ == 0)) {
@@ -350,8 +354,14 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	const auto& buffer = snapshot->samples;
 	double oldSeekCursor = oldSeekCursorSnapshot;
 	size_t seekFadeRemaining = audioOutput->seekFadeRemaining_;
+    const double rate = std::max(1.0, static_cast<double>(audioOutput->actualSampleRate_.load()));
+    const double gainStep = 1.0 / std::max(1.0, rate * 0.005);
+    const auto renderFrames = playing ? frameCount : std::min(frameCount,
+        static_cast<unsigned long>(std::ceil(audioOutput->playbackGain_ / gainStep)));
+    std::fill_n(out + renderFrames * outputChannels, (frameCount - renderFrames) * outputChannels, 0.0f);
+    unsigned long renderedFrames = 0;
 
-	for (unsigned long i = 0; i < frameCount; ++i) {
+	for (unsigned long i = 0; i < renderFrames; ++i) {
 		if (!loopEnabled && cursor >= totalFramesDouble) {
 			const size_t remaining = frameCount - i;
 			if (remaining > 0) {
@@ -445,6 +455,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 		}
 
 		cursor += step;
+        ++renderedFrames;
 	}
 
 	double finalCursor = cursor;
@@ -463,7 +474,6 @@ int AudioOutput::audioCallback(const void* input, void* output,
     audioOutput->seekFadeRemaining_ = seekFadeRemaining;
     audioOutput->oldSeekCursor_ = oldSeekCursor;
     if (timeInfo && std::isfinite(timeInfo->outputBufferDacTime) && std::isfinite(timeInfo->currentTime)) {
-        const double rate = std::max(1.0, static_cast<double>(audioOutput->actualSampleRate_.load()));
         const bool discontinuity = audioOutput->outputTimelineSession_ != session ||
             (statusFlags & (paOutputUnderflow | paOutputOverflow)) != 0;
         const auto timing = audioOutput->outputTimeline_.advance(timeInfo->outputBufferDacTime,
@@ -475,7 +485,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
             interval.version.store(serial * 2 + 1);
             interval.dacTime.store(timing->time);
             interval.position.store(cursorSnapshot);
-            interval.duration.store(timing->duration);
+            interval.duration.store(timing->duration * static_cast<double>(renderedFrames) / static_cast<double>(frameCount));
             interval.framesPerSecond.store(static_cast<double>(frameCount) * step / timing->duration);
             interval.totalFrames.store(totalFramesDouble);
             interval.loop.store(loopEnabled);
@@ -519,25 +529,32 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	constexpr float KNEE = 0.1f;
 	constexpr float CEILING = 0.95f;
 
-	for (size_t i = 0; i < frameCount * outputChannels; ++i) {
-		float sample = out[i];
-		float absSample = std::abs(sample);
+    double gain = audioOutput->playbackGain_;
+	for (size_t frame = 0; frame < frameCount; ++frame) {
+        gain = playing ? std::min(1.0, gain + gainStep) : std::max(0.0, gain - gainStep);
+        for (size_t channel = 0; channel < outputChannels; ++channel) {
+            const size_t i = frame * outputChannels + channel;
+			float sample = out[i];
+			float absSample = std::abs(sample);
 
-		if (absSample > THRESHOLD) {
-			float excess = absSample - THRESHOLD;
-			float reduction;
+			if (absSample > THRESHOLD) {
+				float excess = absSample - THRESHOLD;
+				float reduction;
 
-			if (excess < KNEE) {
-				reduction = excess * excess / (2.0f * KNEE);
-			} else {
-				reduction = excess - KNEE / 2.0f;
+				if (excess < KNEE) {
+					reduction = excess * excess / (2.0f * KNEE);
+				} else {
+					reduction = excess - KNEE / 2.0f;
+				}
+
+				float limited = THRESHOLD + reduction * 0.3f;
+				limited = std::min(limited, CEILING);
+				out[i] = (sample >= 0.0f) ? limited : -limited;
 			}
-
-			float limited = THRESHOLD + reduction * 0.3f;
-			limited = std::min(limited, CEILING);
-			out[i] = (sample >= 0.0f) ? limited : -limited;
-		}
+            out[i] *= static_cast<float>(gain);
+        }
 	}
+    audioOutput->playbackGain_ = stopPlayback ? 0.0 : gain;
 
 	float leftPeak = 0.0f;
 	float rightPeak = 0.0f;

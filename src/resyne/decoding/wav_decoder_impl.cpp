@@ -1,6 +1,7 @@
 #include "resyne/decoding/wav_decoder_impl.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -18,6 +19,76 @@ bool readChunkHeader(std::ifstream& stream, char (&id)[4], uint32_t& size) {
         return false;
     }
     return true;
+}
+
+bool readFormatChunk(std::ifstream& stream, uint32_t chunkSize,
+                     uint16_t& audioFormat, uint16_t& channels, uint32_t& sampleRate,
+                     uint16_t& bitsPerSample, std::string& errorMessage) {
+    uint32_t byteRate = 0;
+    uint16_t blockAlign = 0;
+    if (chunkSize < 16 ||
+        !stream.read(reinterpret_cast<char*>(&audioFormat), sizeof(audioFormat)) ||
+        !stream.read(reinterpret_cast<char*>(&channels), sizeof(channels)) ||
+        !stream.read(reinterpret_cast<char*>(&sampleRate), sizeof(sampleRate)) ||
+        !stream.read(reinterpret_cast<char*>(&byteRate), sizeof(byteRate)) ||
+        !stream.read(reinterpret_cast<char*>(&blockAlign), sizeof(blockAlign)) ||
+        !stream.read(reinterpret_cast<char*>(&bitsPerSample), sizeof(bitsPerSample))) {
+        errorMessage = "malformed fmt";
+        return false;
+    }
+
+    uint32_t consumed = 16;
+    if (audioFormat == 0xFFFE) {
+        std::array<uint8_t, 24> extension{};
+        if (chunkSize < 40 || !stream.read(reinterpret_cast<char*>(extension.data()), extension.size())) {
+            errorMessage = "malformed extensible fmt";
+            return false;
+        }
+        const uint16_t extensionSize = extension[0] | (static_cast<uint16_t>(extension[1]) << 8);
+        const uint16_t validBits = extension[2] | (static_cast<uint16_t>(extension[3]) << 8);
+        if (extensionSize < 22 || extensionSize > chunkSize - 18) {
+            errorMessage = "invalid extensible fmt size";
+            return false;
+        }
+        constexpr std::array<uint8_t, 14> subtypeTail{
+            0, 0, 0, 0, 0x10, 0, 0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71
+        };
+        if (!std::equal(subtypeTail.begin(), subtypeTail.end(), extension.begin() + 10)) {
+            errorMessage = "unsupported extensible format";
+            return false;
+        }
+        audioFormat = extension[8] | (static_cast<uint16_t>(extension[9]) << 8);
+        if (validBits == 0 || validBits > bitsPerSample || (audioFormat == 3 && validBits != bitsPerSample)) {
+            errorMessage = "invalid extensible bit depth";
+            return false;
+        }
+        consumed = 40;
+    }
+
+    if (audioFormat != 1 && audioFormat != 3) {
+        errorMessage = "unsupported format";
+        return false;
+    }
+    if (channels == 0 || sampleRate == 0) {
+        errorMessage = "invalid stream";
+        return false;
+    }
+    if (audioFormat == 3 && bitsPerSample != 32) {
+        errorMessage = "unsupported float bit depth";
+        return false;
+    }
+    if (audioFormat == 1 && bitsPerSample != 8 && bitsPerSample != 16 &&
+        bitsPerSample != 24 && bitsPerSample != 32) {
+        errorMessage = "unsupported bit depth";
+        return false;
+    }
+    if (blockAlign != static_cast<uint32_t>(channels) * (bitsPerSample / 8)) {
+        errorMessage = "invalid wav frame size";
+        return false;
+    }
+
+    stream.seekg(static_cast<std::streamoff>(chunkSize - consumed), std::ios::cur);
+    return static_cast<bool>(stream);
 }
 
 float readPCMValue(const uint8_t* data, uint16_t bitsPerSample) {
@@ -103,23 +174,8 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
         if (std::strncmp(chunkId, "fmt ", 4) == 0) {
             fmtFound = true;
 
-            if (!file.read(reinterpret_cast<char*>(&audioFormat), sizeof(uint16_t)) ||
-                !file.read(reinterpret_cast<char*>(&channels), sizeof(uint16_t)) ||
-                !file.read(reinterpret_cast<char*>(&sampleRate), sizeof(uint32_t))) {
-                errorMessage = "malformed fmt";
+            if (!readFormatChunk(file, chunkSize, audioFormat, channels, sampleRate, bitsPerSample, errorMessage)) {
                 return false;
-            }
-
-            file.seekg(6, std::ios::cur);
-
-            if (!file.read(reinterpret_cast<char*>(&bitsPerSample), sizeof(uint16_t))) {
-                errorMessage = "malformed fmt";
-                return false;
-            }
-
-            if (chunkSize > 16) {
-                const uint16_t extra = static_cast<uint16_t>(chunkSize - 16);
-                file.seekg(extra, std::ios::cur);
             }
         } else if (std::strncmp(chunkId, "data", 4) == 0) {
             dataFound = true;
@@ -141,24 +197,6 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
     }
     if (!dataFound) {
         errorMessage = "missing data";
-        return false;
-    }
-
-    if (audioFormat != 1 && audioFormat != 3) {
-        errorMessage = "unsupported format";
-        return false;
-    }
-    if (channels == 0 || sampleRate == 0) {
-        errorMessage = "invalid stream";
-        return false;
-    }
-    if (audioFormat == 3 && bitsPerSample != 32) {
-        errorMessage = "unsupported float bit depth";
-        return false;
-    }
-    if (audioFormat == 1 && bitsPerSample != 8 && bitsPerSample != 16 &&
-        bitsPerSample != 24 && bitsPerSample != 32) {
-        errorMessage = "unsupported bit depth";
         return false;
     }
 
@@ -242,22 +280,8 @@ bool probeDurationSeconds(const std::string& filepath, double& durationSeconds, 
             fmtFound = true;
 
             uint16_t audioFormat = 0;
-            if (!file.read(reinterpret_cast<char*>(&audioFormat), sizeof(uint16_t)) ||
-                !file.read(reinterpret_cast<char*>(&channels), sizeof(uint16_t)) ||
-                !file.read(reinterpret_cast<char*>(&sampleRate), sizeof(uint32_t))) {
-                errorMessage = "malformed fmt";
+            if (!readFormatChunk(file, chunkSize, audioFormat, channels, sampleRate, bitsPerSample, errorMessage)) {
                 return false;
-            }
-
-            file.seekg(6, std::ios::cur);
-
-            if (!file.read(reinterpret_cast<char*>(&bitsPerSample), sizeof(uint16_t))) {
-                errorMessage = "malformed fmt";
-                return false;
-            }
-
-            if (chunkSize > 16) {
-                file.seekg(static_cast<std::streamoff>(chunkSize - 16), std::ios::cur);
             }
         } else if (std::strncmp(chunkId, "data", 4) == 0) {
             dataFound = true;

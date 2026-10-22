@@ -192,7 +192,8 @@ void Recorder::startPlayback(RecorderState& state) {
 
     ensureRsynSamplesLoaded(state);
 
-    if (!state.isPlaybackInitialised || state.playbackAudio.empty()) {
+    const bool initialisePlayback = !state.isPlaybackInitialised || state.playbackAudio.empty();
+    if (initialisePlayback) {
         if (!ensurePlaybackAudioLoaded(state)) {
             return;
         }
@@ -208,7 +209,7 @@ void Recorder::startPlayback(RecorderState& state) {
         if (totalFrames > 0 && currentPosition >= totalFrames - 1) {
             state.audioOutput->seek(0);
             state.timeline.scrubberNormalisedPosition = 0.0f;
-        } else {
+        } else if (initialisePlayback) {
             if (totalFrames == 0) {
                 const uint32_t numChannels = !state.samples.empty() ? state.samples.front().channels : 1;
                 totalFrames = numChannels > 0 ? state.playbackAudio.size() / numChannels : state.playbackAudio.size();

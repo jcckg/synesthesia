@@ -202,6 +202,9 @@ struct PresentationWorker::Impl {
             const auto& stored = *request.metadata.presentationData;
             snapshot->colours = RSYNPresentation::colourTrack(stored, stored.settings.smoothingEnabled);
             snapshot->targets = RSYNPresentation::colourTrack(stored, false);
+            auto analysis = std::make_shared<PresentationAnalysis>();
+            for (const auto& frame : stored.frames) analysis->append(frame);
+            snapshot->analysis = std::move(analysis);
             snapshot->settings = stored.settings;
             snapshot->sourceGeneration = request.generation;
             snapshot->preview = request.preview;
@@ -223,6 +226,13 @@ struct PresentationWorker::Impl {
         if (!request.settings.smoothingEnabled && snapshot->targets && snapshot->targets->size() > 0 &&
             sameAnalysis(snapshot->settings, request.settings)) {
             snapshot->colours = snapshot->targets;
+            if (snapshot->analysis && snapshot->settings.smoothingEnabled) {
+                auto analysis = std::make_shared<PresentationAnalysis>();
+                RSYNPresentation::ReplayState replay(request.settings);
+                for (std::size_t i = 0; i < snapshot->analysis->size(); ++i)
+                    analysis->append(replay.processAnalysed((*snapshot->analysis)[i]));
+                snapshot->analysis = std::move(analysis);
+            }
             snapshot->settings = request.settings;
             snapshot->message.clear();
         }

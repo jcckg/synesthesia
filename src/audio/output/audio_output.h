@@ -101,6 +101,7 @@ private:
 	std::atomic<size_t> channelCount_;
 	std::atomic<size_t> outputChannelCount_{0};
 	double playbackCursor_;
+    double playbackGain_ = 0.0;
 
     std::atomic<std::uint64_t> seekVersion_{0};
     std::atomic<std::uint64_t> seekGeneration_{0};

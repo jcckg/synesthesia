@@ -12,7 +12,6 @@
 #include "audio/analysis/presentation/spectral_presentation.h"
 #include "colour/colour_core.h"
 #include "colour/colour_presentation.h"
-#include "ui/smoothing/smoothing_features.h"
 
 #ifdef ENABLE_OSC
 #include "synesthesia_osc_integration.h"
@@ -197,20 +196,16 @@ void HeadlessInterface::displayFrequencyInfo() {
     if (oscEnabled) {
         const auto frame = SpectralPresentation::mixChannels(spectralData.magnitudes, spectralData.phases, {},
             static_cast<std::uint32_t>(spectralData.magnitudes.size()), spectralData.sampleRate);
-        auto features = ::UI::Smoothing::buildSignalFeatures(colourResult);
-        features.onsetDetected = live->frame.smoothingSignals.onsetDetected;
-        features.spectralFlux = live->frame.smoothingSignals.spectralFlux;
         Synesthesia::OSC::OSCFrameUpdate update{};
         update.magnitudes = live->prepared.analysisMagnitudes;
         update.phases = frame.phases;
+        update.frequencies = frame.frequencies;
         update.sampleRate = spectralData.sampleRate;
         update.colourResult = colourResult;
         update.displayColour = {currentR, currentG, currentB};
         update.presentedXYZ = {xyz[0], xyz[1], xyz[2]};
         update.sourceTimestamp = live->frame.timestamp;
-        update.analysisSignals = Synesthesia::OSC::buildAnalysisSignals(spectralData.momentaryLoudnessLUFS,
-            features.spectralFlux, features.onsetDetected);
-        update.smoothingSignals = Synesthesia::OSC::buildSmoothingSignals(features);
+        update.analysisSignals = {live->frame.smoothingSignals.spectralFlux, live->frame.smoothingSignals.onsetDetected};
         Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance().updateFrameData(update);
     }
 #endif

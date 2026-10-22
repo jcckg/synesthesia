@@ -41,7 +41,7 @@ void appendNamedValueMessages(osc::OutboundPacketStream& packet, const OSCFrameD
 
     appendFloatValue(packet, kFrameSignalDominantFrequencyAddress, frame.signal.dominantFrequencyHz);
     appendFloatValue(packet, kFrameSignalDominantWavelengthAddress, frame.signal.dominantWavelengthNm);
-    appendFloatValue(packet, kFrameSignalVisualiserMagnitudeAddress, frame.signal.visualiserMagnitude);
+    appendFloatValue(packet, kFrameSignalDominantMagnitudeAddress, frame.signal.dominantMagnitude);
     appendFloatValue(packet, kFrameSignalPhaseRadiansAddress, frame.signal.phaseRadians);
 
     appendFloatValue(packet, kFrameColourDisplayRAddress, frame.colour.displayR);
@@ -62,37 +62,23 @@ void appendNamedValueMessages(osc::OutboundPacketStream& packet, const OSCFrameD
     appendFloatValue(packet, kFrameAnalysisSpectralCentroidAddress, frame.spectral.centroidHz);
     appendFloatValue(packet, kFrameAnalysisSpectralSpreadAddress, frame.spectral.spreadHz);
     appendFloatValue(packet, kFrameAnalysisSpectralSpreadNormalisedAddress, frame.spectral.normalisedSpread);
+    appendFloatValue(packet, kFrameAnalysisSpectralRelativeSpreadAddress, frame.spectral.relativeSpreadNormalised);
+    appendFloatValue(packet, kFrameAnalysisSpectralRolloffNormalisedAddress, frame.spectral.rolloffNormalised);
+    appendFloatValue(packet, kFrameAnalysisSpectralCrestNormalisedAddress, frame.spectral.crestNormalised);
     appendFloatValue(packet, kFrameAnalysisSpectralRolloffAddress, frame.spectral.rolloffHz);
     appendFloatValue(packet, kFrameAnalysisSpectralCrestAddress, frame.spectral.crestFactor);
     appendFloatValue(packet, kFrameAnalysisSpectralFluxAddress, frame.spectral.spectralFlux);
 
-    appendFloatValue(packet, kFrameAnalysisLoudnessDbAddress, frame.loudness.loudnessDb);
-    appendBoolValue(packet, kFrameLoudnessIsLufsAddress, frame.loudness.loudnessIsLufs);
     appendFloatValue(packet, kFrameAnalysisLoudnessNormalisedAddress, frame.loudness.loudnessNormalised);
     appendFloatValue(packet, kFrameAnalysisFrameLoudnessDbAddress, frame.loudness.frameLoudnessDb);
     appendFloatValue(packet, kFrameAnalysisMomentaryLoudnessAddress, frame.loudness.momentaryLoudnessLUFS);
-    appendFloatValue(packet, kFrameAnalysisEstimatedSPLAddress, frame.loudness.estimatedSPL);
-    appendFloatValue(packet, kFrameAnalysisLuminanceAddress, frame.loudness.luminanceCdM2);
     appendFloatValue(packet, kFrameAnalysisBrightnessNormalisedAddress, frame.loudness.brightnessNormalised);
 
-    appendFloatValue(packet, kFrameAnalysisTransientMixAddress, frame.transient.transientMix);
     appendBoolValue(packet, kFrameAnalysisOnsetDetectedAddress, frame.transient.onsetDetected);
 
     appendFloatValue(packet, kFrameAnalysisPhaseInstabilityAddress, frame.phase.instabilityNorm);
     appendFloatValue(packet, kFrameAnalysisPhaseCoherenceAddress, frame.phase.coherenceNorm);
     appendFloatValue(packet, kFrameAnalysisPhaseTransientAddress, frame.phase.transientNorm);
-
-    appendBoolValue(packet, kFrameSmoothingOnsetDetectedAddress, frame.smoothing.onsetDetected);
-    appendFloatValue(packet, kFrameSmoothingSpectralFluxAddress, frame.smoothing.spectralFlux);
-    appendFloatValue(packet, kFrameSmoothingSpectralFlatnessAddress, frame.smoothing.spectralFlatness);
-    appendFloatValue(packet, kFrameSmoothingLoudnessNormalisedAddress, frame.smoothing.loudnessNormalised);
-    appendFloatValue(packet, kFrameSmoothingBrightnessNormalisedAddress, frame.smoothing.brightnessNormalised);
-    appendFloatValue(packet, kFrameSmoothingSpectralSpreadAddress, frame.smoothing.spectralSpreadNorm);
-    appendFloatValue(packet, kFrameSmoothingSpectralRolloffAddress, frame.smoothing.spectralRolloffNorm);
-    appendFloatValue(packet, kFrameSmoothingSpectralCrestAddress, frame.smoothing.spectralCrestNorm);
-    appendFloatValue(packet, kFrameSmoothingPhaseInstabilityAddress, frame.smoothing.phaseInstabilityNorm);
-    appendFloatValue(packet, kFrameSmoothingPhaseCoherenceAddress, frame.smoothing.phaseCoherenceNorm);
-    appendFloatValue(packet, kFrameSmoothingPhaseTransientAddress, frame.smoothing.phaseTransientNorm);
 }
 
 }

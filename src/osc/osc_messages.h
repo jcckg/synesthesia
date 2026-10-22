@@ -3,6 +3,7 @@
 #include "colour/colour_core.h"
 
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <variant>
 
@@ -17,8 +18,8 @@ struct OSCFrameMetaData {
 struct OSCFrameSignalData {
     float dominantFrequencyHz = 0.0f;
     float dominantWavelengthNm = 0.0f;
-    float visualiserMagnitude = 0.0f;
-    float phaseRadians = 0.0f;
+    float dominantMagnitude = std::numeric_limits<float>::quiet_NaN();
+    float phaseRadians = std::numeric_limits<float>::quiet_NaN();
 };
 
 struct OSCFrameColourData {
@@ -40,24 +41,22 @@ struct OSCFrameSpectralData {
     float centroidHz = 0.0f;
     float spreadHz = 0.0f;
     float normalisedSpread = 0.0f;
+    float relativeSpreadNormalised = 0.0f;
+    float rolloffNormalised = 0.0f;
+    float crestNormalised = 0.0f;
     float rolloffHz = 0.0f;
     float crestFactor = 0.0f;
     float spectralFlux = 0.0f;
 };
 
 struct OSCFrameLoudnessData {
-    bool loudnessIsLufs = false;
-    float loudnessDb = 0.0f;
     float loudnessNormalised = 0.0f;
     float frameLoudnessDb = 0.0f;
-    float momentaryLoudnessLUFS = 0.0f;
-    float estimatedSPL = 0.0f;
-    float luminanceCdM2 = 0.0f;
+    float momentaryLoudnessLUFS = ColourCore::LOUDNESS_DB_UNSPECIFIED;
     float brightnessNormalised = 0.0f;
 };
 
 struct OSCFrameTransientData {
-    float transientMix = 0.0f;
     bool onsetDetected = false;
 };
 
@@ -65,20 +64,6 @@ struct OSCFramePhaseData {
     float instabilityNorm = 0.0f;
     float coherenceNorm = 0.0f;
     float transientNorm = 0.0f;
-};
-
-struct OSCSmoothingFeatureData {
-    bool onsetDetected = false;
-    float spectralFlux = 0.0f;
-    float spectralFlatness = 0.0f;
-    float loudnessNormalised = 0.0f;
-    float brightnessNormalised = 0.0f;
-    float spectralSpreadNorm = 0.0f;
-    float spectralRolloffNorm = 0.0f;
-    float spectralCrestNorm = 0.0f;
-    float phaseInstabilityNorm = 0.0f;
-    float phaseCoherenceNorm = 0.0f;
-    float phaseTransientNorm = 0.0f;
 };
 
 struct OSCFrameData {
@@ -89,7 +74,6 @@ struct OSCFrameData {
     OSCFrameLoudnessData loudness;
     OSCFrameTransientData transient;
     OSCFramePhaseData phase;
-    OSCSmoothingFeatureData smoothing;
 };
 
 struct OSCStats {
