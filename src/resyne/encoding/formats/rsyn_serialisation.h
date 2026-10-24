@@ -18,14 +18,16 @@ bool decodeSourceBytes(const std::vector<std::uint8_t>& input,
                        AudioMetadata& metadata);
 
 bool encodeSamples(const std::vector<AudioColourSample>& samples,
-                   std::vector<std::uint8_t>& output);
+                   std::vector<std::uint8_t>& output,
+                   const std::function<void(float)>& progress = {});
 bool decodeSamples(const std::vector<std::uint8_t>& input,
                    std::vector<AudioColourSample>& samples,
                    const SequenceFrameCallback& onFrameDecoded = {},
                    const std::function<void(float)>& progress = {});
 
 bool encodePresentationFrames(const std::shared_ptr<RSYNPresentationData>& presentationData,
-                              std::vector<std::uint8_t>& output);
+                              std::vector<std::uint8_t>& output,
+                              const std::function<void(float)>& progress = {});
 bool decodePresentationFrames(const std::vector<std::uint8_t>& input,
                               AudioMetadata& metadata,
                               const std::function<void(float)>& progress = {});

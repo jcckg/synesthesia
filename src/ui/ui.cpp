@@ -88,7 +88,7 @@ void processIdleState(float* clearColour, float deltaTime) {
 
 void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dropEvents,
 						  ReSyne::RecorderState& recorderState) {
-	if (dropEvents.empty() || recorderState.importPhase != 0 || recorderState.isRecording ||
+	if (dropEvents.empty() || recorderState.isRecording ||
         recorderState.exportRunning.load(std::memory_order_acquire)) {
 		return;
 	}
@@ -115,8 +115,7 @@ void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dro
 						continue;
 					}
 					attempted = true;
-					recorderState.pendingImportPath = path;
-					recorderState.importPhase = 1;
+					ReSyne::Recorder::requestImport(recorderState, path);
 					accepted = true;
 					break;
 				}

@@ -6,6 +6,9 @@
 
 namespace ReSyne::UI::Utilities {
 
+inline constexpr float kToolbarButtonSpacing = 6.0f;
+inline constexpr float kToolbarSeparatorWidth = 1.0f;
+
 struct ToolbarRenderContext {
     bool enabled = false;
     float buttonHeight = 26.0f;
@@ -21,8 +24,9 @@ bool drawToolButton(const char* label,
                     bool active,
                     bool enabled,
                     float height,
-                    float opticalOffsetX = 0.0f,
                     bool destructive = false);
+
+void drawToolbarSeparator(float height);
 
 ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& context);
 

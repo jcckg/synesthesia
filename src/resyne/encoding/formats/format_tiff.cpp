@@ -444,14 +444,12 @@ bool loadFromTIFF(const std::string& filepath,
 	if (samples.empty()) {
 		return fail("TIFF contains no decodable audio frames");
 	}
-	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata);
+	ReSyne::LoudnessUtils::calculateLoudnessFromSpectralFrames(samples, colourImage.metadata, false,
+        [&](float fraction) { if (progress) progress(0.96f + 0.03f * fraction); });
 
 	colourImage.metadata.sampleRate = detectedSampleRate;
 	colourImage.metadata.hopSize = hopSize;
 
-	if (progress) {
-		progress(0.96f);
-	}
 
 	const float finalSampleRate = samples.empty()
 		? detectedSampleRate

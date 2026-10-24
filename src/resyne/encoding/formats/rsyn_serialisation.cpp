@@ -346,12 +346,15 @@ bool decodeSourceBytes(const std::vector<std::uint8_t>& input,
 }
 
 bool encodeSamples(const std::vector<AudioColourSample>& samples,
-                   std::vector<std::uint8_t>& output) {
+                   std::vector<std::uint8_t>& output,
+                   const std::function<void(float)>& progress) {
     output.clear();
     if (samples.size() > std::numeric_limits<std::uint32_t>::max()) return false;
     appendIntegral(output, static_cast<std::uint32_t>(samples.size()));
 
+    std::size_t completed = 0;
     for (const AudioColourSample& sample : samples) {
+        if (progress) progress(static_cast<float>(completed++) / static_cast<float>(samples.size()));
         appendFloat(output, sample.timestamp);
         appendFloat(output, sample.sampleRate);
         appendFloat(output, sample.loudnessLUFS);
@@ -529,7 +532,8 @@ static bool validContributionFrame(const RSYNPresentationFrame& frame) {
 }
 
 bool encodePresentationFrames(const std::shared_ptr<RSYNPresentationData>& presentationData,
-                              std::vector<std::uint8_t>& output) {
+                              std::vector<std::uint8_t>& output,
+                              const std::function<void(float)>& progress) {
     output.clear();
     if (presentationData == nullptr) {
         appendIntegral(output, static_cast<std::uint32_t>(0));
@@ -539,7 +543,9 @@ bool encodePresentationFrames(const std::shared_ptr<RSYNPresentationData>& prese
     if (presentationData->frames.size() > std::numeric_limits<std::uint32_t>::max()) return false;
     appendIntegral(output, static_cast<std::uint32_t>(presentationData->frames.size()));
     double previousTimestamp = -std::numeric_limits<double>::infinity();
+    std::size_t completed = 0;
     for (const RSYNPresentationFrame& frame : presentationData->frames) {
+        if (progress) progress(static_cast<float>(completed++) / static_cast<float>(presentationData->frames.size()));
         if (!validContributionFrame(frame) || frame.timestamp <= previousTimestamp) return false;
         previousTimestamp = frame.timestamp;
         appendFloat(output, frame.timestamp);

@@ -29,20 +29,24 @@ void renderHeader(const RenderArgs& args) {
 
 void renderFooter(const RenderArgs& args, bool showHideHint) {
     if (showHideHint) {
-        ImGuiStyle& style = ImGui::GetStyle();
-        const float textHeight = ImGui::GetTextLineHeightWithSpacing();
-        const float reservedHeight = textHeight + args.layout.padding;
-        const float availableHeight = ImGui::GetWindowHeight() - ImGui::GetCursorPosY() - style.WindowPadding.y;
-        const float spaceToBottom = std::max(0.0f, availableHeight - reservedHeight);
-
-        if (spaceToBottom > 0.0f) {
-            ImGui::Dummy(ImVec2(0.0f, spaceToBottom));
-        }
-
+        constexpr float footerHeight = ReSyne::UI::kToolbarButtonHeight +
+                                       ReSyne::UI::kToolbarVerticalPadding * 2.0f;
+        const float footerTop = std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - footerHeight);
+        ImGui::SetCursorPos(ImVec2(args.layout.padding, footerTop));
+        ImVec4 separatorColour = ImGui::GetStyleColorVec4(ImGuiCol_Separator);
+        separatorColour.w *= 0.45f;
+        ImGui::PushStyleColor(ImGuiCol_Separator, separatorColour);
         ImGui::Separator();
-        const float textWidth = ImGui::CalcTextSize("Press H to hide/show interface").x;
-        ImGui::SetCursorPosX((args.layout.width - textWidth) * 0.5f);
-        ImGui::TextDisabled("Press H to hide/show interface");
+        ImGui::PopStyleColor();
+
+        ImGui::PushFont(ImGui::GetFont(), ImGui::GetFontSize() * 0.85f);
+        const ImVec2 textSize = ImGui::CalcTextSize("Press H to hide/show interface");
+        ImGui::SetCursorPos(ImVec2((args.layout.width - textSize.x) * 0.5f,
+                                  footerTop + (footerHeight - textSize.y) * 0.5f));
+        ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled);
+        textColour.w *= 0.65f;
+        ImGui::TextColored(textColour, "Press H to hide/show interface");
+        ImGui::PopFont();
     }
 }
 

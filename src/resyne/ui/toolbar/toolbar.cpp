@@ -1,6 +1,7 @@
 #include "resyne/ui/toolbar/toolbar.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include <cstdio>
 
 namespace ReSyne::UI::Utilities {
@@ -10,7 +11,6 @@ bool drawToolButton(const char* label,
                     bool active,
                     bool enabled,
                     float height,
-                    float opticalOffsetX,
                     bool destructive) {
     const ImVec4 baseColour = ImGui::GetStyleColorVec4(ImGuiCol_Button);
     const ImVec4 hoveredColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
@@ -32,8 +32,6 @@ bool drawToolButton(const char* label,
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, activeColour);
     ImGui::PushStyleColor(ImGuiCol_Text, textColour);
 
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
-
     ImVec2 buttonSize(height, height);
     ImVec2 screenPos = ImGui::GetCursorScreenPos();
 
@@ -46,22 +44,40 @@ bool drawToolButton(const char* label,
 
     constexpr float iconScale = 0.8f;
     const float fontSize = ImGui::GetFontSize() * iconScale;
-    const ImVec2 textSize = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
+    unsigned int codepoint = 0;
+    ImTextCharFromUtf8(&codepoint, label, nullptr);
+    ImFontBaked* font = ImGui::GetFont()->GetFontBaked(fontSize);
+    const ImFontGlyph* glyph = font->FindGlyph(static_cast<ImWchar>(codepoint));
+    const float scale = fontSize / font->Size;
     const ImVec2 textPos(
-        screenPos.x + (buttonSize.x - textSize.x) * 0.5f + opticalOffsetX,
-        screenPos.y + (buttonSize.y - textSize.y) * 0.5f
+        screenPos.x + (buttonSize.x - (glyph->X0 + glyph->X1) * scale) * 0.5f,
+        screenPos.y + (buttonSize.y - (glyph->Y0 + glyph->Y1) * scale) * 0.5f
     );
 
-    ImGui::GetWindowDrawList()->AddText(ImGui::GetFont(), fontSize, textPos, ImGui::ColorConvertFloat4ToU32(textColour), label);
+    ImDrawList* drawList = ImGui::GetWindowDrawList();
+    drawList->PushDrawFlag(ImDrawFlags_TextNoPixelSnap, true);
+    drawList->AddText(ImGui::GetFont(), fontSize, textPos, ImGui::ColorConvertFloat4ToU32(textColour), label);
+    drawList->PopDrawFlag();
 
     if (enabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled) && tooltip && tooltip[0] != '\0') {
         ImGui::SetTooltip("%s", tooltip);
     }
 
-    ImGui::PopStyleVar(1);
     ImGui::PopStyleColor(4);
 
     return clicked && enabled;
+}
+
+void drawToolbarSeparator(float height) {
+    ImGui::SameLine(0.0f, kToolbarButtonSpacing);
+    const ImVec2 position = ImGui::GetCursorScreenPos();
+    const float inset = height * 0.2f;
+    ImGui::Dummy(ImVec2(kToolbarSeparatorWidth, height));
+    ImGui::GetWindowDrawList()->AddRectFilled(
+        ImVec2(position.x, position.y + inset),
+        ImVec2(position.x + kToolbarSeparatorWidth, position.y + height - inset),
+        ImGui::GetColorU32(ImGuiCol_Separator, 0.65f));
+    ImGui::SameLine(0.0f, kToolbarButtonSpacing);
 }
 
 ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& context) {
@@ -90,7 +106,7 @@ ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& 
     for (const ToolEntry& toolEntry : tools) {
         const ToolType tool = toolEntry.type;
         if (!first) {
-            ImGui::SameLine(0.0f, 4.0f);
+            ImGui::SameLine(0.0f, kToolbarButtonSpacing);
         }
         first = false;
 
@@ -99,8 +115,7 @@ ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& 
 
         const bool active = state.activeTool == tool;
         const bool toolEnabled = enabled && toolEntry.allowed;
-        const float offset = (tool == ToolType::Cursor) ? 1.0f : 0.0f;
-        if (drawToolButton(label, tooltip, active, toolEnabled, buttonHeight, offset)) {
+        if (drawToolButton(label, tooltip, active, toolEnabled, buttonHeight)) {
             state.activeTool = tool;
         }
     }

@@ -150,31 +150,25 @@ void Recorder::drawBottomPanel(RecorderState& state,
         startRecording(state, audioProcessor, 0, 0);
     }
 
-    const float toolbarButtonSpacing = 4.0f;
-    const float transportSpacing = 8.0f;
+    constexpr float buttonSpacing = UI::Utilities::kToolbarButtonSpacing;
     const float transportButtonSize = buttonHeight;
     const int toolbarButtonCount = 3;
     const int transportButtonCount = 3;
     const float playbackWidth = transportButtonCount * transportButtonSize +
-                                std::max(0, transportButtonCount - 1) * transportSpacing;
+                                std::max(0, transportButtonCount - 1) * buttonSpacing;
     const float toolbarWidth = toolbarButtonCount * transportButtonSize +
-                               std::max(0, toolbarButtonCount - 1) * toolbarButtonSpacing;
-    const float controlsSpacing = transportSpacing * 1.5f;
-    const float lockToVisualisationSpacing = 6.0f;
-    const float visualisationToExportSpacing = 6.0f;
-    const float clearToExportSpacing = 6.0f;
-    const float utilityControlsWidth =
-        transportButtonSize + lockToVisualisationSpacing + transportButtonSize +
-        visualisationToExportSpacing + transportButtonSize + clearToExportSpacing + buttonWidth;
-    const float rightGroupWidth = toolbarWidth + controlsSpacing + utilityControlsWidth;
+                               std::max(0, toolbarButtonCount - 1) * buttonSpacing;
+    const float utilityControlsWidth = transportButtonSize * 3.0f + buttonSpacing * 4.0f +
+                                      UI::Utilities::kToolbarSeparatorWidth + buttonWidth;
+    const float rightGroupWidth = toolbarWidth + buttonSpacing + utilityControlsWidth;
 
     if (ImGui::BeginTable("RecorderBottomControls",
                           3,
                           ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody)) {
         ImGui::TableSetupColumn("Record", ImGuiTableColumnFlags_WidthFixed,
-                                buttonWidth * 3.0f + transportSpacing * 3.0f);
+                                buttonWidth * 3.0f + buttonSpacing * 2.0f);
         ImGui::TableSetupColumn("Transport", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Utilities", ImGuiTableColumnFlags_WidthFixed, rightGroupWidth + 12.0f);
+        ImGui::TableSetupColumn("Utilities", ImGuiTableColumnFlags_WidthFixed, rightGroupWidth);
 
         ImGui::TableNextRow();
 
@@ -193,7 +187,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         }
         ImGui::EndDisabled();
 
-        ImGui::SameLine(0.0f, transportSpacing);
+        ImGui::SameLine(0.0f, buttonSpacing);
 
         ImGui::BeginDisabled(exportRunning || !state.isRecording);
         if (ImGui::Button("Stop", ImVec2(buttonWidth, buttonHeight))) {
@@ -201,7 +195,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         }
         ImGui::EndDisabled();
 
-        ImGui::SameLine(0.0f, transportSpacing);
+        ImGui::SameLine(0.0f, buttonSpacing);
 
         ImGui::BeginDisabled(exportRunning || state.isRecording || state.recordingCountdownActive);
         if (ImGui::Button("Load", ImVec2(buttonWidth, buttonHeight))) {
@@ -221,7 +215,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
         }
 
         ImGui::TableSetColumnIndex(1);
-        const float centreColumnWidth = ImGui::GetColumnWidth(1);
+        const float centreColumnWidth = ImGui::GetContentRegionAvail().x;
         const float centreCursorStart = ImGui::GetCursorPosX();
         const float centreOffset = std::max(0.0f, (centreColumnWidth - playbackWidth) * 0.5f);
         ImGui::SetCursorPosX(centreCursorStart + centreOffset);
@@ -229,43 +223,31 @@ void Recorder::drawBottomPanel(RecorderState& state,
         const bool isPlaying = state.audioOutput && state.audioOutput->isPlaying();
         const char* playPauseIcon = isPlaying ? ICON_FA_PAUSE : ICON_FA_PLAY;
 
-        ImGui::BeginDisabled(!hasData || state.isRecording);
-        ImGui::PushStyleColor(ImGuiCol_Button,
-                              state.loopEnabled
-                                  ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                                  : ImGui::GetStyleColorVec4(ImGuiCol_Button));
-        if (ImGui::Button(ICON_FA_REPEAT, ImVec2(transportButtonSize, transportButtonSize))) {
+        const bool transportEnabled = controlsEnabled && hasData && !state.isRecording;
+        if (UI::Utilities::drawToolButton(ICON_FA_REPEAT,
+                                          state.loopEnabled ? "Loop enabled" : "Loop disabled",
+                                          state.loopEnabled,
+                                          transportEnabled,
+                                          transportButtonSize)) {
             state.loopEnabled = !state.loopEnabled;
             if (state.audioOutput) {
                 state.audioOutput->setLoopEnabled(state.loopEnabled);
             }
         }
-        ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(state.loopEnabled ? "Loop enabled" : "Loop disabled");
-        }
+        ImGui::SameLine(0.0f, buttonSpacing);
 
-        ImGui::SameLine(0.0f, transportSpacing);
-
-        if (ImGui::Button(ICON_FA_BACKWARD_STEP, ImVec2(transportButtonSize, transportButtonSize))) {
+        if (UI::Utilities::drawToolButton(ICON_FA_BACKWARD_STEP, "Jump to start", false, transportEnabled, transportButtonSize)) {
             Recorder::seekPlayback(state, 0.0f);
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Jump to start");
-        }
 
-        ImGui::SameLine(0.0f, transportSpacing);
+        ImGui::SameLine(0.0f, buttonSpacing);
 
-        if (ImGui::Button(playPauseIcon, ImVec2(transportButtonSize, transportButtonSize))) {
+        if (UI::Utilities::drawToolButton(playPauseIcon, isPlaying ? "Pause" : "Play", false, transportEnabled, transportButtonSize)) {
             togglePlayback(state);
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(isPlaying ? "Pause" : "Play");
-        }
-        ImGui::EndDisabled();
 
         ImGui::TableSetColumnIndex(2);
-        const float rightColumnWidth = ImGui::GetColumnWidth(2);
+        const float rightColumnWidth = ImGui::GetContentRegionAvail().x;
         const float rightCursorStart = ImGui::GetCursorPosX();
         const float rightOffset = std::max(0.0f, rightColumnWidth - rightGroupWidth);
         ImGui::SetCursorPosX(rightCursorStart + rightOffset);
@@ -277,32 +259,23 @@ void Recorder::drawBottomPanel(RecorderState& state,
         toolbarContext.allowGrabTool = hasData && !state.timeline.trackScrubber;
         UI::Utilities::renderToolbar(state.toolState, toolbarContext);
 
-        ImGui::SameLine(0.0f, controlsSpacing);
+        ImGui::SameLine(0.0f, buttonSpacing);
         ImGui::BeginDisabled(!timelineControlsEnabled);
 
         const bool trackingActive = state.timeline.trackScrubber;
-        const ImVec4 trackBase = trackingActive
-                                     ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                                     : ImGui::GetStyleColorVec4(ImGuiCol_Button);
-        const ImVec4 trackHover = trackingActive
-                                      ? ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive)
-                                      : ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
-        ImGui::PushStyleColor(ImGuiCol_Button, trackBase);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, trackHover);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-        if (ImGui::Button(ICON_FA_CROSSHAIRS, ImVec2(transportButtonSize, transportButtonSize))) {
+        if (UI::Utilities::drawToolButton(ICON_FA_CROSSHAIRS,
+                                          trackingActive ? "Click to stop tracking" : "Click to follow scrubber",
+                                          trackingActive,
+                                          timelineControlsEnabled,
+                                          transportButtonSize)) {
             state.timeline.trackScrubber = !state.timeline.trackScrubber;
             if (state.timeline.trackScrubber) {
                 state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;
                 state.toolState.activeTool = UI::Utilities::ToolType::Cursor;
             }
         }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip(state.timeline.trackScrubber ? "Click to stop tracking" : "Click to follow scrubber");
-        }
-        ImGui::PopStyleColor(3);
 
-        ImGui::SameLine(0.0f, lockToVisualisationSpacing);
+        UI::Utilities::drawToolbarSeparator(transportButtonSize);
 
         const bool detachedVisualisationEnabled =
             timelineControlsEnabled &&
@@ -326,7 +299,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
             }
         }
 
-        ImGui::SameLine(0.0f, visualisationToExportSpacing);
+        ImGui::SameLine(0.0f, buttonSpacing);
 
         const bool clearTimelineEnabled =
             timelineControlsEnabled && !exportRunning && !state.isRecording && !state.recordingCountdownActive &&
@@ -337,12 +310,11 @@ void Recorder::drawBottomPanel(RecorderState& state,
                 false,
                 clearTimelineEnabled,
                 transportButtonSize,
-                0.0f,
                 true)) {
             RecorderUI::requestTimelineClear(state);
         }
 
-        ImGui::SameLine(0.0f, clearToExportSpacing);
+        ImGui::SameLine(0.0f, buttonSpacing);
 
         ImGui::BeginDisabled(exportRunning || state.showExportingDialog || state.isRecording || state.recordingCountdownActive);
         if (ImGui::Button("Export", ImVec2(buttonWidth, buttonHeight))) {

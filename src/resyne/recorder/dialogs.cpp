@@ -1,4 +1,6 @@
 #include "resyne/recorder/recorder.h"
+#include "resyne/recorder/export_destination.h"
+#include "utilities/cancellation.h"
 
 #include <utility>
 #include <chrono>
@@ -112,26 +114,34 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
     videoOptions.frameRate = state.videoFrameRate;
     videoOptions.exportGradient = state.exportGradient;
 
+    state.exportCancellation = std::stop_source{};
     state.exportRunning.store(true, std::memory_order_release);
     state.exportComplete.store(false, std::memory_order_release);
     state.exportProgressAtomic.store(0.0f, std::memory_order_release);
     state.exportThread = std::thread([&state, filepath = std::move(filepath), format,
         rsynOptions = std::move(rsynOptions), videoOptions = std::move(videoOptions)]() {
+        const auto cancellation = state.exportCancellation.get_token();
         bool success = false;
+        bool cancelled = false;
         std::string errorMessage;
 
         auto updateProgress = [&](float progress) {
-            state.exportProgressAtomic.store(progress, std::memory_order_release);
+            Utilities::checkCancellation(cancellation);
+            const float current = state.exportProgressAtomic.load(std::memory_order_relaxed);
+            state.exportProgressAtomic.store(std::max(current, std::clamp(progress, 0.0f, 1.0f)), std::memory_order_release);
         };
 
         auto updateStatus = [&](const std::string& status) {
+            Utilities::checkCancellation(cancellation);
             setExportOperationStatus(state, status);
         };
 
-        std::vector<AudioColourSample> samplesCopy;
-        AudioMetadata metadataCopy;
 		try {
-            ensureRsynSamplesLoaded(state);
+            std::vector<AudioColourSample> samplesCopy;
+            AudioMetadata metadataCopy;
+            Utilities::checkCancellation(cancellation);
+            ExportDestination destination(filepath, format == RecorderExportFormat::MP4 && videoOptions.exportGradient);
+            ensureRsynSamplesLoaded(state, [&](float fraction) { updateProgress(0.05f * fraction); });
             {
                 std::lock_guard<std::mutex> lock(state.samplesMutex);
                 samplesCopy = state.samples;
@@ -143,7 +153,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 					updateStatus("Reconstructing audio from spectral data...");
 					updateProgress(0.1f);
 					success = SequenceExporter::exportToWAV(
-						filepath,
+						destination.path(),
 						samplesCopy,
 						metadataCopy,
 						[&](float fraction) {
@@ -155,7 +165,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 					updateStatus("Encoding spectral data to RSYN format...");
 					updateProgress(0.1f);
 					success = SequenceExporter::exportToRsyn(
-						filepath,
+						destination.path(),
 						samplesCopy,
 						metadataCopy,
                         rsynOptions,
@@ -169,7 +179,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 					updateStatus("Encoding spectral data to TIFF format...");
 					updateProgress(0.1f);
 					success = SequenceExporter::exportToTIFF(
-						filepath,
+						destination.path(),
 						samplesCopy,
 						metadataCopy,
 						[&](float fraction) {
@@ -186,7 +196,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
 					updateStatus("Preparing video export...");
 					updateProgress(0.02f);
 					success = ReSyne::Encoding::Video::exportToMP4(
-						filepath,
+						destination.path(),
 						samplesCopy,
 						metadataCopy,
 						videoOptions,
@@ -212,12 +222,18 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
                     break;
             }
 
+            Utilities::checkCancellation(cancellation);
             if (success) {
                 updateProgress(0.95f);
                 updateStatus("Finalising export...");
+                destination.commit();
             } else if (errorMessage.empty()) {
                 errorMessage = "Export failed";
             }
+        } catch (const Utilities::OperationCancelled&) {
+            success = false;
+            cancelled = true;
+            errorMessage.clear();
         } catch (const std::exception& e) {
             success = false;
             errorMessage = std::string("Export error: ") + e.what();
@@ -232,14 +248,18 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
             if (success) {
                 state.exportErrorMessage.clear();
             } else {
-                state.exportErrorMessage = errorMessage.empty() ? "Export failed" : errorMessage;
+                state.exportErrorMessage = cancelled ? "" : (errorMessage.empty() ? "Export failed" : errorMessage);
             }
         }
 
-        updateProgress(1.0f);
+        state.exportProgressAtomic.store(1.0f, std::memory_order_release);
         state.exportComplete.store(true, std::memory_order_release);
         state.exportRunning.store(false, std::memory_order_release);
     });
+}
+
+void Recorder::cancelExport(RecorderState& state) {
+    if (state.exportRunning.load(std::memory_order_acquire)) state.exportCancellation.request_stop();
 }
 
 void Recorder::handleLoadDialog(RecorderState& state) {
@@ -262,8 +282,7 @@ void Recorder::handleLoadDialog(RecorderState& state) {
     ).result();
 
     if (!result.empty() && !result[0].empty()) {
-        state.pendingImportPath = result[0];
-        state.importPhase = 1;
+        requestImport(state, result[0]);
     } else {
         state.focusRequested = true;
     }

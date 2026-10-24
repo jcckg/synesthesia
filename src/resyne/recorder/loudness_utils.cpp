@@ -39,7 +39,8 @@ std::vector<std::vector<float>> deinterleaveChannels(const std::vector<float>& i
 }
 
 void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples,
-										  const AudioMetadata& metadata, const bool replaceExisting) {
+										  const AudioMetadata& metadata, const bool replaceExisting,
+                                          const std::function<void(float)>& progress) {
 	if (samples.empty() || metadata.sampleRate <= 0.0f) {
 		return;
 	}
@@ -53,6 +54,7 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 	spectralSamples.reserve(samples.size());
 
 	for (const auto& sample : samples) {
+        if (progress) progress(0.1f * static_cast<float>(spectralSamples.size()) / static_cast<float>(samples.size()));
 		SpectralSample spectral;
 		spectral.timestamp = sample.timestamp;
 		spectral.sampleRate = sample.sampleRate > 0.0f ? sample.sampleRate : metadata.sampleRate;
@@ -77,7 +79,8 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 
 	// Rebuild analysis at the source level; the audio-export peak guard would alter full-scale loudness.
 	const auto reconstructionResult = WAVEncoder::reconstructFromSpectralData(
-		spectralSamples, metadata.sampleRate, fftSize, hopSize, metadata.analysisLeadingSamples, metadata.originalSampleCount, false);
+		spectralSamples, metadata.sampleRate, fftSize, hopSize, metadata.analysisLeadingSamples, metadata.originalSampleCount, false,
+        [&](float fraction) { if (progress) progress(0.1f + 0.5f * fraction); });
 
 	if (!reconstructionResult.success || reconstructionResult.audioSamples.empty()) {
 		for (auto& sample : samples) {
@@ -99,7 +102,9 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
     for (std::size_t i = 0; i < hann.size(); ++i)
         hann[i] = .5f * (1.0f - std::cos(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) / (fftSize - 1)));
     std::size_t processedSamples = 0, previousEnd = 0;
+    std::size_t completed = 0;
     for (auto& sample : samples) {
+        if (progress) progress(0.6f + 0.4f * static_cast<float>(completed++) / static_cast<float>(samples.size()));
         const double availableTime = sample.timestamp + static_cast<double>(fftSize) * .5 / metadata.sampleRate;
         const double position = std::isfinite(availableTime) ? availableTime * metadata.sampleRate : 0.0;
         const auto end = static_cast<std::size_t>(std::clamp(std::round(position),

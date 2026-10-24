@@ -45,7 +45,8 @@ bool exportToWAV(const std::string& filepath,
 		metadata.sampleRate,
 		metadata.fftSize,
 		metadata.hopSize,
-        metadata.analysisLeadingSamples, metadata.originalSampleCount
+        metadata.analysisLeadingSamples, metadata.originalSampleCount, true,
+        [&](float fraction) { emitProgress(0.3f + 0.45f * fraction); }
 	);
 
 	if (!result.success) {
@@ -59,7 +60,8 @@ bool exportToWAV(const std::string& filepath,
 		filepath,
 		result.audioSamples,
 		result.sampleRate,
-		result.numChannels
+		result.numChannels,
+        [&](float fraction) { emitProgress(0.8f + 0.2f * fraction); }
 	);
 
 	emitProgress(ok ? 1.0f : 0.9f);

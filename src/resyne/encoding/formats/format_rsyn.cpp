@@ -82,8 +82,10 @@ bool exportToRsyn(const std::string& filepath,
     std::vector<std::uint8_t> presentationPayload;
     if (!RSYNSerialisation::encodeMetadata(exportedMetadata, metaPayload) ||
         !RSYNSerialisation::encodeSourceBytes(exportedMetadata.sourceData, sourcePayload) ||
-        !RSYNSerialisation::encodeSamples(samples, spectralPayload) ||
-        !RSYNSerialisation::encodePresentationFrames(exportedMetadata.presentationData, presentationPayload)) {
+        !RSYNSerialisation::encodeSamples(samples, spectralPayload,
+            [&](float value) { emitProgress(progress, 0.3f + value * 0.2f); }) ||
+        !RSYNSerialisation::encodePresentationFrames(exportedMetadata.presentationData, presentationPayload,
+            [&](float value) { emitProgress(progress, 0.5f + value * 0.2f); })) {
         emitProgress(progress, 1.0f);
         return false;
     }

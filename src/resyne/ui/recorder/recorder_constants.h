@@ -4,6 +4,9 @@
 
 namespace ReSyne::UI {
 
+inline constexpr float kToolbarButtonHeight = 26.0f;
+inline constexpr float kToolbarVerticalPadding = 6.0f;
+
 inline constexpr const char* kDetachedVisualisationTooltip =
     "Open Visualisation Mode in another window";
 inline constexpr const char* kDetachedVisualisationAlreadyOpenTooltip =

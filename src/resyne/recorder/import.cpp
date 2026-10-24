@@ -1,4 +1,5 @@
 #include "resyne/recorder/recorder.h"
+#include "utilities/cancellation.h"
 #include "resyne/recorder/import_helpers.h"
 #include "resyne/recorder/reconstruction_utils.h"
 #include "audio/analysis/fft/fft_processor.h"
@@ -61,6 +62,24 @@ void applyImportedSequence(RecorderState& state,
     state.statusMessageTimer = STATUS_MESSAGE_DURATION;
 }
 
+}
+
+void Recorder::requestImport(RecorderState& state, const std::string& filepath) {
+    if (!isSupportedImportFile(filepath) || state.isRecording || state.exportRunning.load(std::memory_order_acquire)) return;
+    state.pendingImportPath = filepath;
+    if (state.importPhase >= 3 || state.importRunning.load(std::memory_order_acquire)) {
+        state.importCancellation.request_stop();
+        state.importPhase = 4;
+    } else {
+        state.importPhase = 1;
+    }
+}
+
+void Recorder::cancelImport(RecorderState& state) {
+    if (state.importPhase == 0 && !state.importRunning.load(std::memory_order_acquire)) return;
+    state.importCancellation.request_stop();
+    state.pendingImportPath.clear();
+    state.importPhase = 4;
 }
 
 bool Recorder::isSupportedImportFile(const std::string& filepath) {
@@ -165,6 +184,8 @@ void Recorder::importFromFileThreaded(RecorderState& state,
                                       std::string filepath,
                                       ColourCore::ColourSpace colourSpace,
                                       bool applyGamutMapping) {
+    const auto cancellation = state.importCancellation.get_token();
+    Utilities::checkCancellation(cancellation);
     state.importRunning.store(true, std::memory_order_release);
     state.importComplete.store(false, std::memory_order_release);
     state.loadingProgressAtomic.store(0.0f, std::memory_order_release);
@@ -176,13 +197,15 @@ void Recorder::importFromFileThreaded(RecorderState& state,
     const auto extension = extractExtension(filepath);
     bool success = false;
 
-    auto updateProgress = [&state](float progress) {
+    auto updateProgress = [&state, cancellation](float progress) {
+        Utilities::checkCancellation(cancellation);
         const float current = state.loadingProgressAtomic.load(std::memory_order_relaxed);
         state.loadingProgressAtomic.store(std::max(current, std::clamp(progress, 0.0f, 0.95f)),
             std::memory_order_release);
     };
 
-    auto forwardDecodedFrame = [&state, &metadata](const std::vector<AudioColourSample>& decoded, size_t validCount) {
+    auto forwardDecodedFrame = [&state, &metadata, cancellation](const std::vector<AudioColourSample>& decoded, size_t validCount) {
+        Utilities::checkCancellation(cancellation);
         const size_t safeCount = std::min(validCount, decoded.size());
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         state.previewMetadata = metadata;
@@ -197,7 +220,8 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         forwardDecodedFrame(decoded, decoded.size());
     };
 
-    auto setStatus = [&state](const std::string& status) {
+    auto setStatus = [&state, cancellation](const std::string& status) {
+        Utilities::checkCancellation(cancellation);
         setLoadingOperationStatus(state, status);
     };
 
@@ -247,6 +271,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         errorMessage = "unsupported format";
     }
 
+    Utilities::checkCancellation(cancellation);
     if (success) {
         std::lock_guard lock(state.samplesMutex);
         bool changed = false;
@@ -295,6 +320,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
         updateProgress(0.95f);
     }
 
+    Utilities::checkCancellation(cancellation);
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         if (success) {

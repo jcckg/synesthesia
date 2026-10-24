@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <stop_token>
 #include <thread>
 #include <vector>
 
@@ -85,6 +86,7 @@ struct RecorderState {
     std::string pendingImportPath;
     int importPhase = 0;  // 0=none, 1=show dialog, 2=start thread, 3+=poll
 
+    std::stop_source importCancellation;
     std::thread importThread;
     std::atomic<bool> importRunning{false};
     std::atomic<bool> importComplete{false};
@@ -100,6 +102,7 @@ struct RecorderState {
     std::mutex operationStatusMutex;
     std::string loadingOperationStatus;
 
+    std::stop_source exportCancellation;
     std::thread exportThread;
     std::atomic<bool> exportRunning{false};
     std::atomic<bool> exportComplete{false};
@@ -180,6 +183,10 @@ public:
                                ColourCore::ColourSpace colourSpace,
                                bool applyGamutMapping);
 
+    static void requestImport(RecorderState& state, const std::string& filepath);
+    static void cancelImport(RecorderState& state);
+    static void cancelExport(RecorderState& state);
+
     static bool isSupportedImportFile(const std::string& filepath);
     static bool hasLoadedAudio(RecorderState& state);
     static void clearLoadedAudio(RecorderState& state);
@@ -213,7 +220,7 @@ public:
                                        bool applyGamutMapping);
 
 private:
-    static bool ensureRsynSamplesLoaded(RecorderState& state);
+    static bool ensureRsynSamplesLoaded(RecorderState& state, const std::function<void(float)>& progress = {});
     static bool ensurePlaybackAudioLoaded(RecorderState& state);
     static void drawExportDialog(RecorderState& state);
 };

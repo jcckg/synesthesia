@@ -27,6 +27,8 @@ void resetTimelineState(RecorderState& state) {
 }
 
 RecorderState::~RecorderState() {
+    importCancellation.request_stop();
+    exportCancellation.request_stop();
     if (importThread.joinable()) {
         importThread.join();
     }

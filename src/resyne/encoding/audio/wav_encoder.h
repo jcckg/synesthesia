@@ -1,6 +1,7 @@
 #pragma once
 
 #include <vector>
+#include <functional>
 #include <cstdint>
 #include <string>
 
@@ -29,14 +30,16 @@ public:
 		int hopSize = 1024,
         std::uint32_t leadingSamples = 0,
         std::uint64_t originalSampleCount = 0,
-        bool limitPeak = true
+        bool limitPeak = true,
+        const std::function<void(float)>& progress = {}
 	);
 
 	static bool exportToWAV(
 		const std::string& wavPath,
 		const std::vector<float>& audioSamples,
 		float sampleRate,
-		size_t numChannels = 1
+		size_t numChannels = 1,
+        const std::function<void(float)>& progress = {}
 	);
 
 	static std::vector<float> inverseFFT(
@@ -49,6 +52,7 @@ private:
 	static std::vector<float> overlapAdd(
 		const std::vector<std::vector<float>>& frames,
 		int hopSize,
-		const std::vector<bool>& frequencyShifted
+		const std::vector<bool>& frequencyShifted,
+        const std::function<void(float)>& progress
 	);
 };

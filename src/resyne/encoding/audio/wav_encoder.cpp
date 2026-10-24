@@ -13,14 +13,15 @@ namespace {
 
 constexpr float TARGET_PEAK = 0.98f;
 
-void applyPeakGuard(std::vector<float>& samples) {
+void applyPeakGuard(std::vector<float>& samples, const std::function<void(float)>& progress) {
 	if (samples.empty()) {
 		return;
 	}
 
 	float peak = 0.0f;
-	for (float value : samples) {
-		peak = std::max(peak, std::fabs(value));
+	for (size_t i = 0; i < samples.size(); ++i) {
+        if (progress && (i % 4096) == 0) progress(0.5f * static_cast<float>(i) / static_cast<float>(samples.size()));
+		peak = std::max(peak, std::fabs(samples[i]));
 	}
 
 	if (peak <= std::numeric_limits<float>::epsilon()) {
@@ -32,8 +33,9 @@ void applyPeakGuard(std::vector<float>& samples) {
 	}
 
 	const float scale = TARGET_PEAK / peak;
-	for (float& value : samples) {
-		value *= scale;
+	for (size_t i = 0; i < samples.size(); ++i) {
+        if (progress && (i % 4096) == 0) progress(0.5f + 0.5f * static_cast<float>(i) / static_cast<float>(samples.size()));
+		samples[i] *= scale;
 	}
 }
 
@@ -46,7 +48,8 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	int hopSize,
     const std::uint32_t leadingSamples,
     const std::uint64_t originalSampleCount,
-    const bool limitPeak
+    const bool limitPeak,
+    const std::function<void(float)>& progress
 ) {
 	EncodingResult result;
 	result.success = false;
@@ -79,6 +82,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 		SpectralResampling::PhaseState phaseState;
 
 		for (size_t frame = 0; frame < samples.size(); ++frame) {
+            if (progress) progress(0.8f * (static_cast<float>(ch) + 0.75f * static_cast<float>(frame) / static_cast<float>(samples.size())) / static_cast<float>(numChannels));
 			const auto& sample = samples[frame];
 			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
 				timeFrames.push_back(std::vector<float>(static_cast<size_t>(fftSize), 0.0f));
@@ -112,7 +116,9 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 			timeFrames.push_back(std::move(timeFrame));
 		}
 
-		channelAudio[ch] = overlapAdd(timeFrames, hopSize, frequencyShifted);
+		channelAudio[ch] = overlapAdd(timeFrames, hopSize, frequencyShifted, [&](float fraction) {
+            if (progress) progress(0.8f * (static_cast<float>(ch) + 0.75f + 0.25f * fraction) / static_cast<float>(numChannels));
+        });
         if (leadingSamples > 0 || originalSampleCount > 0) {
             auto& audio = channelAudio[ch];
             if (leadingSamples > audio.size() || originalSampleCount > audio.size() - leadingSamples) {
@@ -135,6 +141,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 
 		result.audioSamples.resize(numSamplesPerChannel * numChannels);
 		for (size_t i = 0; i < numSamplesPerChannel; ++i) {
+            if (progress && (i % 4096) == 0) progress(0.8f + 0.1f * static_cast<float>(i) / static_cast<float>(numSamplesPerChannel));
 			for (size_t ch = 0; ch < numChannels; ++ch) {
 				result.audioSamples[i * numChannels + ch] =
 					i < channelAudio[ch].size() ? channelAudio[ch][i] : 0.0f;
@@ -142,7 +149,10 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 		}
 	}
 
-	if (limitPeak) applyPeakGuard(result.audioSamples);
+	if (limitPeak) applyPeakGuard(result.audioSamples, [&](float fraction) {
+        if (progress) progress(0.9f + 0.1f * fraction);
+    });
+    if (progress) progress(1.0f);
 
 	result.success = true;
 
@@ -188,7 +198,8 @@ std::vector<float> WAVEncoder::inverseFFT(
 std::vector<float> WAVEncoder::overlapAdd(
 	const std::vector<std::vector<float>>& frames,
 	int hopSize,
-	const std::vector<bool>& frequencyShifted
+	const std::vector<bool>& frequencyShifted,
+    const std::function<void(float)>& progress
 ) {
 	if (frames.empty()) {
 		return {};
@@ -213,6 +224,7 @@ std::vector<float> WAVEncoder::overlapAdd(
 	std::vector<float> normalisation(totalSamples, 0.0f);
 
 	for (size_t i = 0; i < frames.size(); ++i) {
+        if (progress) progress(0.5f * static_cast<float>(i) / static_cast<float>(frames.size()));
 		size_t writePos = i * static_cast<size_t>(hopSize);
 
 		const auto& frame = frames[i];
@@ -234,6 +246,7 @@ std::vector<float> WAVEncoder::overlapAdd(
 			completeNormalisation[j % hop] += hannWindow[j] * hannWindow[j];
 		}
 		for (size_t frame = 0; frame < frames.size(); ++frame) {
+            if (progress) progress(0.5f + 0.25f * static_cast<float>(frame) / static_cast<float>(frames.size()));
 			const size_t writePos = frame * hop;
 			if (!frequencyShifted[frame] ||
 				(writePos >= frameSize && writePos + frameSize <= totalSamples - frameSize)) {
@@ -248,6 +261,7 @@ std::vector<float> WAVEncoder::overlapAdd(
 
 	constexpr float normalisationEpsilon = 1e-6f;
 	for (size_t i = 0; i < output.size(); ++i) {
+        if (progress && (i % 4096) == 0) progress(0.75f + 0.25f * static_cast<float>(i) / static_cast<float>(output.size()));
 		if (normalisation[i] > normalisationEpsilon) {
 			output[i] /= normalisation[i];
 		}
@@ -260,7 +274,8 @@ bool WAVEncoder::exportToWAV(
 	const std::string& wavPath,
 	const std::vector<float>& audioSamples,
 	float sampleRate,
-	size_t numChannels
+	size_t numChannels,
+    const std::function<void(float)>& progress
 ) {
 	if (audioSamples.empty() || numChannels == 0) {
 		return false;
@@ -298,11 +313,16 @@ bool WAVEncoder::exportToWAV(
 	file.write("data", 4);
 	file.write(reinterpret_cast<const char*>(&dataSize), 4);
 
-	std::vector<int16_t> intSamples(audioSamples.size());
-	for (size_t i = 0; i < audioSamples.size(); ++i) {
-		intSamples[i] = static_cast<int16_t>(std::clamp(audioSamples[i], -1.0f, 1.0f) * 32767.0f);
-	}
-	file.write(reinterpret_cast<const char*>(intSamples.data()), static_cast<std::streamsize>(intSamples.size() * sizeof(int16_t)));
+    std::vector<int16_t> intSamples(std::min<size_t>(65536, audioSamples.size()));
+    for (size_t offset = 0; offset < audioSamples.size(); offset += intSamples.size()) {
+        if (progress) progress(static_cast<float>(offset) / static_cast<float>(audioSamples.size()));
+        const auto count = std::min(intSamples.size(), audioSamples.size() - offset);
+        for (size_t i = 0; i < count; ++i)
+            intSamples[i] = static_cast<int16_t>(std::clamp(audioSamples[offset + i], -1.0f, 1.0f) * 32767.0f);
+        file.write(reinterpret_cast<const char*>(intSamples.data()), static_cast<std::streamsize>(count * sizeof(int16_t)));
+        if (!file.good()) return false;
+    }
+    if (progress) progress(1.0f);
 
 	file.close();
 	return true;

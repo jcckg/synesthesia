@@ -1,4 +1,5 @@
 #include "import_handler.h"
+#include "utilities/cancellation.h"
 #include "ui.h"
 #include "imgui_internal.h"
 #include "resyne/encoding/formats/rsyn_presentation.h"
@@ -16,6 +17,30 @@ namespace UIHandlers {
 
 void ImportHandler::processFileImport(UIState& state) {
     auto& recorder = state.resyneState.recorderState;
+    if (recorder.importPhase == 4) {
+        if (recorder.presentationWorker) recorder.presentationWorker->request();
+        if (recorder.importRunning.load(std::memory_order_acquire)) return;
+        if (recorder.importThread.joinable()) recorder.importThread.join();
+        {
+            std::lock_guard lock(recorder.samplesMutex);
+            ++recorder.presentationPreviewGeneration;
+            recorder.presentationPreviewRevision = 0;
+            recorder.previewSamples.clear();
+            recorder.previewMetadata = {};
+            recorder.importedSamples.clear();
+            recorder.importedMetadata = {};
+            recorder.importedPlaybackAudio.clear();
+            recorder.importErrorMessage.clear();
+            recorder.previewReady.store(false, std::memory_order_release);
+        }
+        recorder.showLoadingDialog = false;
+        recorder.loadingProgress = 0.0f;
+        recorder.dropFlashAlpha = 0.0f;
+        recorder.importComplete.store(false, std::memory_order_release);
+        recorder.importPhase = recorder.pendingImportPath.empty() ? 0 : 1;
+        recorder.focusRequested = recorder.importPhase == 0;
+        ReSyne::setLoadingOperationStatus(recorder, {});
+    }
     if (recorder.importPhase == 1 && !recorder.pendingImportPath.empty()) {
         const std::filesystem::path path(recorder.pendingImportPath);
         recorder.loadingFilename = path.filename().string();
@@ -40,6 +65,7 @@ void ImportHandler::processFileImport(UIState& state) {
             recorder.importErrorMessage.clear();
             recorder.previewReady.store(false, std::memory_order_release);
         }
+        recorder.importCancellation = std::stop_source{};
         recorder.importComplete.store(false, std::memory_order_release);
         recorder.importRunning.store(true, std::memory_order_release);
         recorder.loadingProgressAtomic.store(0.0f, std::memory_order_release);
@@ -54,6 +80,9 @@ void ImportHandler::processFileImport(UIState& state) {
             colourSpace = recorder.importColourSpace, gamutMapping = recorder.importGamutMapping] {
             try {
                 ReSyne::Recorder::importFromFileThreaded(recorder, path, colourSpace, gamutMapping);
+            } catch (const Utilities::OperationCancelled&) {
+                recorder.importComplete.store(true, std::memory_order_release);
+                recorder.importRunning.store(false, std::memory_order_release);
             } catch (const std::exception& error) {
                 {
                     std::lock_guard lock(recorder.samplesMutex);

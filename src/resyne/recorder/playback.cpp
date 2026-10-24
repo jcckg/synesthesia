@@ -37,7 +37,7 @@ bool refreshPlaybackOutputPreservingPosition(RecorderState& state) {
 
 }
 
-bool Recorder::ensureRsynSamplesLoaded(RecorderState& state) {
+bool Recorder::ensureRsynSamplesLoaded(RecorderState& state, const std::function<void(float)>& progress) {
     {
         std::lock_guard<std::mutex> lock(state.samplesMutex);
         if (!state.samples.empty()) {
@@ -55,7 +55,7 @@ bool Recorder::ensureRsynSamplesLoaded(RecorderState& state) {
     }
 
     std::vector<AudioColourSample> loadedSamples;
-    if (!SequenceExporter::hydrateRsynSamples(metadata, loadedSamples) || loadedSamples.empty()) {
+    if (!SequenceExporter::hydrateRsynSamples(metadata, loadedSamples, progress) || loadedSamples.empty()) {
         return false;
     }
 
