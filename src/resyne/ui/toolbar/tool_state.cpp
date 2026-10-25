@@ -24,7 +24,7 @@ const char* toolTooltip(ToolType tool) {
         case ToolType::Zoom:
             return "Zoom in/out by dragging vertically";
         case ToolType::Grab:
-            return "Drag timeline horizontally";
+            return "Drag timeline horizontally without screen-edge limits";
         default:
             return "";
     }

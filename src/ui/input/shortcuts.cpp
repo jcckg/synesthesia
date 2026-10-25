@@ -21,7 +21,9 @@ void handlePlaybackShortcut(ReSyne::RecorderState& state, bool windowFocused) {
 }
 
 void handleTimelineShortcuts(ReSyne::RecorderState& state, bool timelineFocused) {
-    if (!timelineFocused || ImGui::GetIO().WantTextInput) return;
+    const auto& io = ImGui::GetIO();
+    if (!timelineFocused || io.WantTextInput || io.KeySuper || io.KeyCtrl || io.KeyAlt || io.KeyShift ||
+        ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return;
 
     using ReSyne::UI::Utilities::ToolType;
     const auto pressed = [](ImGuiKey key) {
@@ -36,7 +38,7 @@ void handleTimelineShortcuts(ReSyne::RecorderState& state, bool timelineFocused)
         state.toolState.activeTool = ToolType::Grab;
     }
 
-    if (pressed(ImGuiKey_0)) {
+    if (pressed(ImGuiKey_4)) {
         state.timeline.trackScrubber = !state.timeline.trackScrubber;
         if (state.timeline.trackScrubber) {
             state.timeline.viewCentreNormalised = state.timeline.scrubberNormalisedPosition;

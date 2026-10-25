@@ -1,5 +1,6 @@
 #include "renderer/bgfx_context.h"
 #include "renderer/detached_visualisation_window.h"
+#include "renderer/event_tracking_frames.h"
 #include "renderer/imgui_window_context.h"
 #include "renderer/presentation_resources.h"
 #include "renderer/render_utils.h"
@@ -12,6 +13,8 @@
 #include "ui/dragdrop/file_drop_manager.h"
 #include "ui/input/trackpad_gestures.h"
 #include "ui/input/shortcuts.h"
+#include "ui/input/continuous_pan.h"
+#include "ui/menu/application_menu.h"
 #include "ui/styling/system_theme/system_theme_detector.h"
 #include "utilities/video/ffmpeg_locator.h"
 
@@ -34,6 +37,22 @@ constexpr int kMinimumWindowWidth = 900;
 constexpr int kMinimumWindowHeight = 550;
 constexpr int kTargetFramesPerSecond = 120;
 constexpr int kTargetFrameDurationMicroseconds = 1'000'000 / kTargetFramesPerSecond;
+
+struct FrameScope {
+    bool& rendering;
+    bool& tracking;
+
+    FrameScope(bool& active, bool& nativeTracking, bool isTracking)
+        : rendering(active), tracking(nativeTracking) {
+        rendering = true;
+        tracking = isTracking;
+    }
+
+    ~FrameScope() {
+        tracking = false;
+        rendering = false;
+    }
+};
 
 PresentationDiagnostics::DisplaySurfacePrecision displaySurfacePrecisionFromFormat(
     const bgfx::TextureFormat::Enum colourFormat) {
@@ -163,6 +182,16 @@ int app_main(int, char**) {
     recorderState.presentationResources = uiState.presentationResources;
     recorderState.detachedVisualisation.available = bgfxContext.supportsMultipleWindows();
     Renderer::DetachedVisualisationWindow detachedVisualisationWindow;
+    UI::Menu::MenuBar menuBar(UI::Menu::applicationMenus(),
+        [&uiState](UI::Menu::Command command) {
+            return UI::Menu::queryCommand(command, uiState);
+        },
+        [&uiState, &window](UI::Menu::Command command) {
+            if (UI::Menu::executeCommand(command, uiState) && command != UI::Menu::Command::ToggleOSC &&
+                command != UI::Menu::Command::ToggleSpectrumAnalyser && command != UI::Menu::Command::ProjectPage) {
+                window.show();
+            }
+        });
 
 #ifdef ENABLE_MIDI
     initialiseMidiState(uiState, midiInput, midiDevices);
@@ -172,10 +201,22 @@ int app_main(int, char**) {
 
     int previousWidth = std::max(initialSize.width, 1);
     int previousHeight = std::max(initialSize.height, 1);
+    UI::Input::ContinuousPan continuousPan(window.handle());
 
-    while (!window.shouldClose()) {
-        const auto frameStart = std::chrono::steady_clock::now();
-        window.pollEvents();
+    const auto canPanTimeline = [&] {
+        return uiState.visibility.showUI && !uiState.helpState.showKeyboardShortcuts &&
+               recorderState.importPhase == 0 && recorderState.timeline.gradientRegionValid &&
+               (uiState.visualSettings.activeView == UIState::View::ReSyne || recorderState.windowOpen) &&
+               !recorderState.detachedVisualisation.openRequested && !recorderState.detachedVisualisation.reattachRequested &&
+               !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+    };
+
+    bool renderingFrame = false;
+    const auto renderFrame = [&](bool nativeTracking) {
+        if (renderingFrame || window.shouldClose()) return;
+        FrameScope frameScope(renderingFrame, uiState.nativeMenuTracking, nativeTracking);
+        mainWindowContext.makeCurrent();
+        continuousPan.synchronise(recorderState.timeline, recorderState.toolState, !nativeTracking && canPanTimeline(), false);
 
         const Renderer::FramebufferSize currentSize = window.framebufferSize();
         const int framebufferWidth = currentSize.width;
@@ -192,8 +233,11 @@ int app_main(int, char**) {
             bgfxContext.setViewRects(static_cast<uint16_t>(framebufferWidth), static_cast<uint16_t>(framebufferHeight));
         }
 
-        mainWindowContext.beginFrame();
-        UI::Input::handlePlaybackShortcut(recorderState, window.isFocused());
+        mainWindowContext.beginFrame(!nativeTracking);
+        if (!nativeTracking) menuBar.dispatchPendingCommands();
+        if (!nativeTracking && !uiState.helpState.showKeyboardShortcuts) {
+            UI::Input::handlePlaybackShortcut(recorderState, window.isFocused());
+        }
 
         updateUI(audioInput, inputDevices, outputDevices, clearColour, ImGui::GetIO(), uiState
 #ifdef ENABLE_MIDI
@@ -201,9 +245,17 @@ int app_main(int, char**) {
 #endif
         );
 
+        continuousPan.synchronise(recorderState.timeline, recorderState.toolState, !nativeTracking && canPanTimeline(), true);
         mainWindowContext.endFrame();
 
-        if (recorderState.detachedVisualisation.openRequested && !recorderState.detachedVisualisation.isOpen) {
+        if (!nativeTracking && recorderState.detachedVisualisation.reattachRequested) {
+            detachedVisualisationWindow.close(recorderState);
+            mainWindowContext.makeCurrent();
+            uiState.visualSettings.activeView = UIState::View::ReSyne;
+            uiState.visibility.showUI = true;
+        }
+
+        if (!nativeTracking && recorderState.detachedVisualisation.openRequested && !recorderState.detachedVisualisation.isOpen) {
             uiState.visualSettings.activeView = UIState::View::ReSyne;
             uiState.visibility.showUI = true;
 
@@ -243,6 +295,15 @@ int app_main(int, char**) {
         }
 
         bgfx::frame();
+    };
+
+    Renderer::EventTrackingFrames trackingFrames([&] { renderFrame(true); }, kTargetFramesPerSecond);
+
+    while (!window.shouldClose()) {
+        const auto frameStart = std::chrono::steady_clock::now();
+        window.pollEvents();
+        trackingFrames.rethrowPendingException();
+        renderFrame(false);
 
         const auto frameEnd = std::chrono::steady_clock::now();
         const auto frameDuration = frameEnd - frameStart;
@@ -251,11 +312,14 @@ int app_main(int, char**) {
         }
     }
 
+    trackingFrames.shutdown();
+    continuousPan.release();
     if (recorderState.detachedVisualisation.isOpen) {
         detachedVisualisationWindow.close(recorderState);
         mainWindowContext.makeCurrent();
     }
 
+    menuBar.shutdown();
     presentationResources.shutdown();
     TrackpadGestures::shutdown();
     mainWindowContext.shutdown();

@@ -45,6 +45,7 @@ struct DetachedVisualisationState {
     bool available = false;
     bool isOpen = false;
     bool openRequested = false;
+    bool reattachRequested = false;
 };
 
 struct RecorderState {

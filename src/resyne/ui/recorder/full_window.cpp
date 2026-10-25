@@ -302,11 +302,12 @@ void Recorder::drawFullWindow(RecorderState& state,
             }
         }
         const ImU32 liveCol = isLightMode ? IM_COL32(245, 245, 245, 255) : ImGui::ColorConvertFloat4ToU32(ImVec4(currentR, currentG, currentB, 1.0f));
-        const ImU32 borderCol = isLightMode ? IM_COL32(180, 180, 180, 255) : IM_COL32(60, 60, 60, 255);
+        const ImU32 borderCol = ImGui::GetColorU32(ImGuiCol_Separator);
+        const float borderWidth = 1.0f / std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
         if (!usedHighPrecisionPreview) {
             drawList->AddRectFilled(cursorPos, regionMax, liveCol);
         }
-        drawList->AddRect(cursorPos, regionMax, borderCol, 0.0f, 0, 1.0f);
+        drawList->AddRect(cursorPos, regionMax, borderCol, 0.0f, borderWidth, ImDrawFlags_StrokeInside);
         ImGui::Dummy(gradientSize);
 
         ImGuiIO& ioLocal = ImGui::GetIO();

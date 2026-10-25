@@ -78,8 +78,19 @@ void ImGuiWindowContext::makeCurrent() const {
     ImPlot::SetCurrentContext(implotContext_);
 }
 
-void ImGuiWindowContext::beginFrame() const {
+void ImGuiWindowContext::beginFrame(bool acceptInput) const {
     makeCurrent();
+    ImGuiIO& io = ImGui::GetIO();
+    if (!acceptInput) {
+        frameConfigFlags_ = io.ConfigFlags;
+        inputSuppressed_ = true;
+        io.ConfigFlags &= ~(ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad);
+        io.ConfigFlags |= ImGuiConfigFlags_NoMouse | ImGuiConfigFlags_NoKeyboard | ImGuiConfigFlags_NoMouseCursorChange;
+        io.WantSetMousePos = false;
+        io.ClearEventsQueue();
+        io.ClearInputKeys();
+        io.ClearInputMouse();
+    }
     ImGui_Implbgfx_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
@@ -88,6 +99,10 @@ void ImGuiWindowContext::beginFrame() const {
 void ImGuiWindowContext::endFrame() const {
     makeCurrent();
     ImGui::Render();
+    if (inputSuppressed_) {
+        ImGui::GetIO().ConfigFlags = frameConfigFlags_;
+        inputSuppressed_ = false;
+    }
 }
 
 void ImGuiWindowContext::renderDrawData() const {

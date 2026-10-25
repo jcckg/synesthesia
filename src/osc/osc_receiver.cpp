@@ -4,6 +4,8 @@
 
 #include "ip/UdpSocket.h"
 
+#include <chrono>
+
 namespace Synesthesia::OSC {
 
 OSCReceiver::OSCReceiver(OSCCommandQueue& commandQueue)
@@ -35,7 +37,11 @@ bool OSCReceiver::start(const uint16_t receivePort) {
         if (socket_) {
             socket_->Run();
         }
-        running_.store(false);
+        {
+            std::lock_guard lock(stopMutex_);
+            running_.store(false);
+        }
+        stopped_.notify_all();
     });
 
     return true;
@@ -48,8 +54,12 @@ void OSCReceiver::stop() {
         return;
     }
 
-    if (socket_) {
-        socket_->AsynchronousBreak();
+    {
+        std::unique_lock lock(stopMutex_);
+        while (thread_.joinable() && running_.load()) {
+            if (socket_) socket_->AsynchronousBreak();
+            stopped_.wait_for(lock, std::chrono::milliseconds(1), [this] { return !running_.load(); });
+        }
     }
 
     if (thread_.joinable()) {

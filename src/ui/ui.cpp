@@ -187,6 +187,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 #endif
 			  ) {
 	initialiseApp(state);
+    UI::Notifications::updateStatusPrompt(state.statusPrompt, io.DeltaTime);
 	state.updateChecker.update(state.updateState);
 
 #ifdef ENABLE_OSC
@@ -214,6 +215,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 #endif
 
 	auto dropEvents = FileDropManager::consume();
+    if (state.helpState.showKeyboardShortcuts) dropEvents.clear();
 	if (!dropEvents.empty() &&
 	    state.visualSettings.activeView == UIState::View::Visualisation &&
 	    dropEventsContainSupportedImport(dropEvents)) {
@@ -265,7 +267,11 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 
     UIHandlers::ImportHandler::processFileImport(state);
 
-	if (ImGui::IsKeyPressed(ImGuiKey_H) && state.visualSettings.activeView != UIState::View::ReSyne) {
+    const bool interfaceShortcutsEnabled = !state.nativeMenuTracking && !state.helpState.showKeyboardShortcuts && !io.WantTextInput &&
+        !io.KeyCtrl && !io.KeySuper && !io.KeyAlt &&
+        !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel);
+	if (interfaceShortcutsEnabled && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_H) &&
+        state.visualSettings.activeView != UIState::View::ReSyne) {
 		state.visibility.showUI = !state.visibility.showUI;
 	}
 
@@ -275,7 +281,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		                       : UIState::View::ReSyne;
 	};
 
-	if (!recorderState.detachedVisualisation.isOpen &&
+	if (interfaceShortcutsEnabled && !recorderState.detachedVisualisation.isOpen &&
 	    state.visibility.showUI &&
 	    ImGui::IsKeyPressed(ImGuiKey_Tab, false) &&
 	    io.KeyShift) {
@@ -543,10 +549,31 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
             ? recorderState.timeline.gradientRegionMax : ImVec2(contentX + displaySize.x - SIDEBAR_WIDTH, displaySize.y);
         ReSyne::Recorder::drawProgressIndicator(recorderState, progressMin, progressMax);
         state.updateChecker.drawUpdateBanner(state.updateState, progressMin, progressMax);
-			ReSyne::handleDialogs(state.resyneState);
+            if (!state.nativeMenuTracking) ReSyne::handleDialogs(state.resyneState);
 		}
 
 	handleFileDropEvents(dropEvents, recorderState);
+
+    if (!state.statusPrompt.message.empty()) {
+        const UITheme theme = SystemThemeDetector::isSystemInDarkMode() ? UITheme::Dark : UITheme::Light;
+        UIStyler::applyCustomStyleWithTheme(ImGui::GetStyle(), state.styleState, theme);
+        const float contentX = state.visibility.showUI && state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : 0.0f;
+        const float promptRegionWidth = io.DisplaySize.x - (state.visibility.showUI ? SIDEBAR_WIDTH : 0.0f);
+        const bool timelineVisible = state.visibility.showUI && recorderState.timeline.gradientRegionValid;
+        const ImVec2 regionMin = timelineVisible ? recorderState.timeline.gradientRegionMin : ImVec2(contentX, 0.0f);
+        const ImVec2 regionMax = timelineVisible ? recorderState.timeline.gradientRegionMax
+            : ImVec2(contentX + promptRegionWidth, io.DisplaySize.y);
+        const bool progressVisible = state.visibility.showUI &&
+            (recorderState.showLoadingDialog || recorderState.showExportingDialog);
+        UI::Notifications::drawStatusPrompt(state.statusPrompt, regionMin, regionMax,
+            !state.visibility.sidebarOnLeft, progressVisible ? ImGui::GetFontSize() + 20.0f : 0.0f);
+    }
+
+    if (state.helpState.showKeyboardShortcuts) {
+        const UITheme theme = SystemThemeDetector::isSystemInDarkMode() ? UITheme::Dark : UITheme::Light;
+        UIStyler::applyCustomStyleWithTheme(ImGui::GetStyle(), state.styleState, theme);
+        UI::Help::drawKeyboardShortcuts(state.helpState);
+    }
 
 	UIStyler::restoreOriginalStyle(ImGui::GetStyle(), state.styleState);
 }

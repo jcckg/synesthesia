@@ -32,6 +32,7 @@ DetachedVisualisationWindow::~DetachedVisualisationWindow() {
 bool DetachedVisualisationWindow::open(ReSyne::RecorderState& recorderState,
                                        const bgfx::TextureFormat::Enum colourFormat) {
     recorderState.detachedVisualisation.openRequested = false;
+    recorderState.detachedVisualisation.reattachRequested = false;
     colourFormat_ = colourFormat;
 
     if (isOpen()) {
@@ -71,6 +72,7 @@ void DetachedVisualisationWindow::close(ReSyne::RecorderState& recorderState) {
     if (!isOpen()) {
         recorderState.detachedVisualisation.isOpen = false;
         recorderState.detachedVisualisation.openRequested = false;
+        recorderState.detachedVisualisation.reattachRequested = false;
         return;
     }
 
@@ -84,6 +86,7 @@ void DetachedVisualisationWindow::close(ReSyne::RecorderState& recorderState) {
 
     recorderState.detachedVisualisation.isOpen = false;
     recorderState.detachedVisualisation.openRequested = false;
+    recorderState.detachedVisualisation.reattachRequested = false;
 }
 
 void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& audioInput) {
@@ -93,7 +96,7 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
         return;
     }
 
-    if (window_.shouldClose()) {
+    if (window_.shouldClose() && !state.nativeMenuTracking) {
         close(recorderState);
         return;
     }
@@ -107,8 +110,10 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
         return;
     }
 
-    uiContext_.beginFrame();
-    UI::Input::handlePlaybackShortcut(recorderState, window_.isFocused());
+    uiContext_.beginFrame(!state.nativeMenuTracking);
+    if (!state.helpState.showKeyboardShortcuts && !state.nativeMenuTracking) {
+        UI::Input::handlePlaybackShortcut(recorderState, window_.isFocused());
+    }
 
     UI::AudioVisualisation::SurfaceLayout layout;
     layout.displaySize = ImGui::GetIO().DisplaySize;
@@ -130,6 +135,12 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
         );
     }
 
+    if (!state.statusPrompt.message.empty()) {
+        UIStyler::applyCustomStyleWithTheme(ImGui::GetStyle(), state.styleState, state.styleState.currentTheme);
+        UI::Notifications::drawStatusPrompt(state.statusPrompt, ImVec2(0.0f, 0.0f),
+            ImGui::GetIO().DisplaySize, !state.visibility.sidebarOnLeft);
+        UIStyler::restoreOriginalStyle(ImGui::GetStyle(), state.styleState);
+    }
     uiContext_.endFrame();
 
     const auto clearColour = loadingTrack ? std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}

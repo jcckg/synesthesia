@@ -54,6 +54,9 @@ elseif(APPLE)
         ${SRC_DIR}/renderer/styling/mac.mm
         ${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm
         ${SRC_DIR}/ui/input/trackpad_gestures_mac.mm
+        ${SRC_DIR}/ui/menu/menu_bar_mac.mm
+        ${SRC_DIR}/ui/help/help_mac.mm
+        ${SRC_DIR}/renderer/event_tracking_frames_mac.mm
     )
     set(OBJC_FLAGS "-ObjC++ -fobjc-arc -fobjc-weak")
 else()
@@ -120,6 +123,9 @@ elseif(APPLE)
     set_source_files_properties(${SRC_DIR}/renderer/styling/mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/styling/system_theme/system_theme_detector.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/input/trackpad_gestures_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/ui/menu/menu_bar_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/ui/help/help_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/renderer/event_tracking_frames_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/updating/update.cpp PROPERTIES COMPILE_FLAGS "-Wno-nan-infinity-disabled")
 
     set_property(SOURCE ${SRC_DIR}/renderer/imgui_impl_bgfx.cpp APPEND PROPERTY COMPILE_OPTIONS

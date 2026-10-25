@@ -90,6 +90,9 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const bool commandLikeDown = io.KeyCtrl || io.KeySuper;
     const bool altDown = io.KeyAlt;
     const ToolType effectiveTool = resolveTool(context, commandLikeDown, altDown);
+    if (!context.allowGrab || ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        state.isGrabGestureActive = false;
+    }
 
     if (gradientHovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (effectiveTool == ToolType::Zoom && context.allowZoom) {
@@ -286,7 +289,9 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
     const ImU32 frameColour = ImGui::GetColorU32(ImGuiCol_WindowBg);
     const ImU32 topBarColour = ImGui::GetColorU32(ImGuiCol_Header);
     const ImU32 gradientBgColour = ImGui::GetColorU32(ImGuiCol_FrameBg);
-    const ImU32 frameBorderColour = ImGui::GetColorU32(ImGuiCol_Border);
+    const ImU32 frameBorderColour = ImGui::GetColorU32(ImGuiCol_Separator);
+    const float borderScale = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
+    const float borderWidth = 1.0f / borderScale;
 
     drawList->AddRectFilled(cursorPos, regionMax, frameColour, 4.0f, ImDrawFlags_RoundCornersTop);
     drawList->AddRectFilled(topMin, topMax, topBarColour, 4.0f, ImDrawFlags_RoundCornersTop);
@@ -332,12 +337,11 @@ RenderResult renderTimelineImpl(TimelineState& state, const RenderContext& conte
 
     if (context.availableDurationSeconds.has_value()) drawList->PopClipRect();
 
-    const float dividerY = topMax.y - 1.0f;
-    drawList->AddLine(ImVec2(gradientMin.x, dividerY),
-                      ImVec2(gradientMax.x, dividerY),
-                      frameBorderColour,
-                      1.0f);
-    drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f, 1.0f, ImDrawFlags_RoundCornersTop);
+    const float dividerY = std::round(topMax.y * borderScale) / borderScale - borderWidth;
+    drawList->AddRectFilled(ImVec2(gradientMin.x, dividerY),
+                           ImVec2(gradientMax.x, dividerY + borderWidth), frameBorderColour);
+    drawList->AddRect(cursorPos, regionMax, frameBorderColour, 4.0f, borderWidth,
+                      ImDrawFlags_RoundCornersTop | ImDrawFlags_StrokeInside);
 
     const double duration = std::max(context.durationSeconds, 0.0);
     const double viewSpanNormalised = static_cast<double>(viewSpan);

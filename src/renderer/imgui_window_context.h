@@ -21,7 +21,7 @@ public:
     void shutdown();
 
     void makeCurrent() const;
-    void beginFrame() const;
+    void beginFrame(bool acceptInput = true) const;
     void endFrame() const;
     void renderDrawData() const;
 
@@ -33,6 +33,8 @@ private:
     ImGuiContext* imguiContext_ = nullptr;
     ImPlotContext* implotContext_ = nullptr;
     bool initialised_ = false;
+    mutable bool inputSuppressed_ = false;
+    mutable int frameConfigFlags_ = 0;
 };
 
 }

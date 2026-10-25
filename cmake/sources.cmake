@@ -37,6 +37,15 @@ set(SOURCES
     ${SRC_DIR}/resyne/decoding/wav_decoder_impl.cpp
     ${SRC_DIR}/ui/ui.cpp
     ${SRC_DIR}/ui/input/shortcuts.cpp
+    ${SRC_DIR}/ui/input/continuous_pan.cpp
+    ${SRC_DIR}/ui/menu/menu_bar.cpp
+    ${SRC_DIR}/ui/menu/file_menu.cpp
+    ${SRC_DIR}/ui/menu/application_menu.cpp
+    ${SRC_DIR}/ui/menu/view_menu.cpp
+    ${SRC_DIR}/ui/menu/tools_menu.cpp
+    ${SRC_DIR}/ui/menu/help_menu.cpp
+    ${SRC_DIR}/ui/help/help.cpp
+    ${SRC_DIR}/ui/notifications/status_prompt.cpp
     ${SRC_DIR}/ui/handlers/import_handler.cpp
     ${SRC_DIR}/ui/controls/controls.cpp
     ${SRC_DIR}/ui/device_manager/device_manager.cpp
@@ -89,6 +98,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/controller/controller.cpp
     ${SRC_DIR}/renderer/render_utils.cpp
     ${SRC_DIR}/renderer/imgui_window_context.cpp
+    ${SRC_DIR}/renderer/event_tracking_frames.cpp
     ${SRC_DIR}/renderer/detached_visualisation_window.cpp
     ${SRC_DIR}/utilities/cli/batch_exporter.cpp
     ${SRC_DIR}/utilities/cli/misc/misc_commands.cpp

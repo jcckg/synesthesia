@@ -9,6 +9,8 @@
 #include "colour/colour_core.h"
 #include "spectrum_analyser.h"
 #include "imgui.h"
+#include "ui/help/help.h"
+#include "ui/notifications/status_prompt.h"
 #include <array>
 #include <string>
 #include <vector>
@@ -85,6 +87,8 @@ struct UIState {
     AudioSettings audioSettings;
     VisualSettings visualSettings;
     UIVisibility visibility;
+    UI::Help::State helpState;
+    UI::Notifications::StatusPrompt statusPrompt;
 
     DeviceState deviceState;
     AudioInputLevelMonitor inputLevelMonitor;
@@ -104,6 +108,7 @@ struct UIState {
     PresentationDiagnostics presentationDiagnostics;
 
     bool oscEnabled = false;
+    bool nativeMenuTracking = false;
     ReSyne::State resyneState;
     Renderer::PresentationResources* presentationResources = nullptr;
 
