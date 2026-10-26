@@ -36,6 +36,7 @@ public:
     void show() const;
     void pollEvents() const;
     void realiseForRenderer() const;
+    void setSidePanelVisible(bool visible, bool onLeft, int width);
 
     [[nodiscard]] bool shouldClose() const;
     [[nodiscard]] bool isFocused() const;
@@ -46,6 +47,10 @@ public:
 
 private:
     GLFWwindow* window_ = nullptr;
+    int minimumWidth_ = 0;
+    int minimumHeight_ = 0;
+    int sidePanelGrowth_ = 0;
+    bool sidePanelVisible_ = false;
 };
 
 }

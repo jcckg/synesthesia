@@ -37,7 +37,8 @@ void renderSpectrumOverlay(UIState& state,
         layout.displaySize,
         layout.sidebarWidth,
         layout.sidebarOnLeft,
-        layout.bottomPanelHeight
+        layout.bottomPanelHeight,
+        layout.oppositeSidebarWidth
     );
 }
 

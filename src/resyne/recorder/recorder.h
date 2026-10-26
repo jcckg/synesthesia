@@ -15,6 +15,7 @@
 #include "resyne/encoding/formats/exporter.h"
 #include "resyne/ui/timeline/timeline.h"
 #include "resyne/ui/toolbar/tool_state.h"
+#include "ui/file_browser/file_browser.h"
 
 class FFTProcessor;
 class AudioInput;
@@ -85,6 +86,7 @@ struct RecorderState {
     std::string loadingFilename;
     float loadingProgress = 0.0f;
     std::string pendingImportPath;
+    std::string loadedSourcePath;
     int importPhase = 0;  // 0=none, 1=show dialog, 2=start thread, 3+=poll
 
     std::stop_source importCancellation;
@@ -127,6 +129,7 @@ struct RecorderState {
     bool focusRequested = false;
     int outputDeviceIndex = -1;
     DetachedVisualisationState detachedVisualisation;
+    ::UI::FileBrowser::State fileBrowser;
 
     int videoWidth = 1920;
     int videoHeight = 1080;

@@ -152,7 +152,7 @@ void renderReSyneSections(const RenderArgs& args) {
 
     const float contentWidth = args.layout.width - args.layout.padding * 2.0f;
 
-    if (Controls::renderSectionHeader("Colour Preview")) {
+    if (Controls::renderSidebarSectionHeader("Colour Preview")) {
         ImGui::Spacing();
 
         const float squareSize = contentWidth;

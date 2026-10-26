@@ -216,6 +216,8 @@ int app_main(int, char**) {
         if (renderingFrame || window.shouldClose()) return;
         FrameScope frameScope(renderingFrame, uiState.nativeMenuTracking, nativeTracking);
         mainWindowContext.makeCurrent();
+        if (!nativeTracking) window.setSidePanelVisible(recorderState.fileBrowser.isOpen,
+            !uiState.visibility.sidebarOnLeft, static_cast<int>(UI::FileBrowser::panelWidth));
         continuousPan.synchronise(recorderState.timeline, recorderState.toolState, !nativeTracking && canPanTimeline(), false);
 
         const Renderer::FramebufferSize currentSize = window.framebufferSize();
@@ -233,8 +235,18 @@ int app_main(int, char**) {
             bgfxContext.setViewRects(static_cast<uint16_t>(framebufferWidth), static_cast<uint16_t>(framebufferHeight));
         }
 
+        UI::FileBrowser::uploadArtwork(recorderState.fileBrowser);
         mainWindowContext.beginFrame(!nativeTracking);
         if (!nativeTracking) menuBar.dispatchPendingCommands();
+        if (!nativeTracking && !recorderState.fileBrowser.requestedFile.empty()) {
+            if (UI::FileBrowser::canLoadFiles(uiState)) {
+                ReSyne::Recorder::requestImport(recorderState, recorderState.fileBrowser.requestedFile);
+                uiState.visualSettings.activeView = UIState::View::ReSyne;
+                uiState.visibility.showUI = true;
+                recorderState.focusRequested = true;
+            }
+            recorderState.fileBrowser.requestedFile.clear();
+        }
         if (!nativeTracking && !uiState.helpState.showKeyboardShortcuts) {
             UI::Input::handlePlaybackShortcut(recorderState, window.isFocused());
         }
@@ -320,6 +332,7 @@ int app_main(int, char**) {
     }
 
     menuBar.shutdown();
+    UI::FileBrowser::releaseArtwork(recorderState.fileBrowser);
     presentationResources.shutdown();
     TrackpadGestures::shutdown();
     mainWindowContext.shutdown();

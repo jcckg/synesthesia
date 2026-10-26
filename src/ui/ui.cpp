@@ -1,6 +1,7 @@
 #include "ui.h"
 
 #include <imgui.h>
+#include "imgui_internal.h"
 
 #include <algorithm>
 #include <array>
@@ -28,6 +29,10 @@
 #include "ui/audio_visualisation/presentation_state.h"
 #include "ui/audio_visualisation/visualisation_surface.h"
 #include "ui/dragdrop/file_drop_manager.h"
+#include "ui/file_browser/file_browser.h"
+#include "ui/menu/application_menu.h"
+#include "resyne/ui/recorder/shared_components.h"
+#include "resyne/recorder/presentation_worker.h"
 #include "ui/input/trackpad_gestures.h"
 #include "system_theme_detector.h"
 #include "ui/handlers/import_handler.h"
@@ -54,17 +59,18 @@ void initialiseApp(UIState& state) {
 
 namespace {
 
+bool isDirectory(const std::string& path) {
+    std::error_code error;
+    return std::filesystem::is_directory(std::filesystem::path(std::u8string(path.begin(), path.end())), error);
+}
+
 bool dropEventsContainSupportedImport(const std::vector<FileDropManager::FileDropEvent>& events) {
-	for (const auto& event : events) {
-		bool anySupported = std::any_of(
-			event.paths.begin(),
-			event.paths.end(),
-			ReSyne::Recorder::isSupportedImportFile);
-		if (anySupported) {
-			return true;
-		}
-	}
-	return false;
+    for (const auto& event : events) {
+        if (std::any_of(event.paths.begin(), event.paths.end(), [](const std::string& path) {
+            return isDirectory(path) || ReSyne::Recorder::isSupportedImportFile(path);
+        })) return true;
+    }
+    return false;
 }
 
 void processIdleState(float* clearColour, float deltaTime) {
@@ -87,13 +93,24 @@ void processIdleState(float* clearColour, float deltaTime) {
 }
 
 void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dropEvents,
-						  ReSyne::RecorderState& recorderState) {
+						  UIState& state) {
+    auto& recorderState = state.resyneState.recorderState;
 	if (dropEvents.empty() || recorderState.isRecording ||
-        recorderState.exportRunning.load(std::memory_order_acquire)) {
-		return;
-	}
+        recorderState.exportRunning.load(std::memory_order_acquire) || recorderState.recordingCountdownActive ||
+        recorderState.showExportDialog || recorderState.showClearTimelineDialog || state.nativeMenuTracking ||
+        ImGui::GetTopMostPopupModal() != nullptr) {
+        return;
+    }
 
-	for (const auto& event : dropEvents) {
+    for (const auto& event : dropEvents) {
+        for (const auto& path : event.paths) {
+            if (isDirectory(path)) {
+                UI::FileBrowser::selectDirectory(recorderState.fileBrowser, path);
+                state.visualSettings.activeView = UIState::View::ReSyne;
+                state.visibility.showUI = true;
+                return;
+            }
+        }
 		bool anySupported = std::any_of(event.paths.begin(), event.paths.end(),
 										ReSyne::Recorder::isSupportedImportFile);
 		if (!anySupported) {
@@ -247,8 +264,13 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			trackpadInput.mouseWheelDelta = 0.0f;
 		}
 	}
-	auto& recorderState = state.resyneState.recorderState;
-	recorderState.trackpadInput = trackpadInput;
+    auto& recorderState = state.resyneState.recorderState;
+    if (recorderState.fileBrowser.onLeft == state.visibility.sidebarOnLeft) {
+        recorderState.fileBrowser.onLeft = !state.visibility.sidebarOnLeft;
+        recorderState.fileBrowser.titleElapsed = 0.0f;
+    }
+    UI::FileBrowser::update(recorderState.fileBrowser, io.DeltaTime);
+    recorderState.trackpadInput = trackpadInput;
 	if (recorderState.detachedVisualisation.isOpen &&
 	    state.visualSettings.activeView == UIState::View::Visualisation) {
 		state.visualSettings.activeView = UIState::View::ReSyne;
@@ -457,7 +479,11 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		UITheme currentTheme = SystemThemeDetector::isSystemInDarkMode() ? UITheme::Dark : UITheme::Light;
 		UIStyler::applyCustomStyleWithTheme(style, state.styleState, currentTheme);
 
-		ImVec2 displaySize = io.DisplaySize;
+        ImVec2 displaySize = io.DisplaySize;
+        recorderState.fileBrowser.entryPadding = SIDEBAR_PADDING;
+        const float browserWidth = recorderState.fileBrowser.isOpen ? UI::FileBrowser::panelWidth : 0.0f;
+        const float contentX = state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : browserWidth;
+        const float mainContentWidth = std::max(0.0f, displaySize.x - SIDEBAR_WIDTH - browserWidth);
 
 		constexpr float RECORDER_PANEL_HEIGHT = 200.0f;
 
@@ -503,6 +529,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 			UI::AudioVisualisation::SurfaceLayout layout;
 			layout.displaySize = displaySize;
 			layout.sidebarWidth = SIDEBAR_WIDTH;
+            layout.oppositeSidebarWidth = browserWidth;
 			layout.sidebarOnLeft = state.visibility.sidebarOnLeft;
 			layout.bottomPanelHeight = bottomPanelHeight;
 			UI::AudioVisualisation::renderSpectrumOverlay(
@@ -513,9 +540,9 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		}
 
 		if (state.visualSettings.activeView == UIState::View::ReSyne) {
-			float windowX = state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : 0.0f;
+			float windowX = contentX;
 			float windowY = 0.0f;
-			float windowWidth = displaySize.x - SIDEBAR_WIDTH;
+			float windowWidth = mainContentWidth;
 			float windowHeight = displaySize.y;
 
 			ReSyne::renderMainView(
@@ -527,8 +554,8 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 				windowWidth,
 				windowHeight);
 		} else if (showRecorder) {
-			float panelX = state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : 0.0f;
-			float panelWidth = displaySize.x - SIDEBAR_WIDTH;
+			float panelX = contentX;
+			float panelWidth = mainContentWidth;
 			float panelY = displaySize.y - RECORDER_PANEL_HEIGHT;
 
 			ReSyne::renderRecorderPanel(
@@ -542,23 +569,48 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		}
 
         const bool timelineVisible = state.visualSettings.activeView == UIState::View::ReSyne || showRecorder;
-        const float contentX = state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : 0.0f;
         const ImVec2 progressMin = timelineVisible && recorderState.timeline.gradientRegionValid
             ? recorderState.timeline.gradientRegionMin : ImVec2(contentX, 0.0f);
         const ImVec2 progressMax = timelineVisible && recorderState.timeline.gradientRegionValid
-            ? recorderState.timeline.gradientRegionMax : ImVec2(contentX + displaySize.x - SIDEBAR_WIDTH, displaySize.y);
+            ? recorderState.timeline.gradientRegionMax : ImVec2(contentX + mainContentWidth, displaySize.y);
         ReSyne::Recorder::drawProgressIndicator(recorderState, progressMin, progressMax);
         state.updateChecker.drawUpdateBanner(state.updateState, progressMin, progressMax);
-            if (!state.nativeMenuTracking) ReSyne::handleDialogs(state.resyneState);
+        if (recorderState.fileBrowser.isOpen) {
+            const bool playing = recorderState.importPhase == 0 && recorderState.audioOutput && recorderState.audioOutput->isPlaying();
+            auto& browser = recorderState.fileBrowser;
+            const bool loading = recorderState.importPhase != 0;
+            const std::string trackPath = loading
+                ? (recorderState.pendingImportPath.empty() ? browser.playingPath : recorderState.pendingImportPath)
+                : (!recorderState.isRecording ? recorderState.loadedSourcePath : std::string{});
+            if (loading && (!browser.loading || trackPath != browser.playingPath)) browser.preview.focusTrack();
+            browser.loading = loading;
+            browser.playingPath = trackPath;
+            browser.trackAvailable = !trackPath.empty();
+            if (loading) {
+                browser.playingColour = ReSyne::UI::loadingStatusColour();
+            } else if (!playing) {
+                const bool dark = currentTheme == UITheme::Dark;
+                browser.playingColour = dark ? ImVec4(0.95f, 0.59f, 0.22f, 1.0f)
+                    : ImVec4(0.70f, 0.34f, 0.04f, 1.0f);
+            }
+            if (playing && state.visualSettings.activeView != UIState::View::ReSyne) {
+                const auto presentation = ReSyne::recorderPresentation(recorderState);
+                recorderState.fileBrowser.playingColour = ReSyne::UI::activityStatusColour(recorderState, audioInput, presentation.get());
+            }
+            UI::FileBrowser::draw(recorderState.fileBrowser,
+                UI::FileBrowser::canLoadFiles(state), displaySize);
+        }
+        if (!state.nativeMenuTracking) ReSyne::handleDialogs(state.resyneState);
 		}
 
-	handleFileDropEvents(dropEvents, recorderState);
+	handleFileDropEvents(dropEvents, state);
 
     if (!state.statusPrompt.message.empty()) {
         const UITheme theme = SystemThemeDetector::isSystemInDarkMode() ? UITheme::Dark : UITheme::Light;
         UIStyler::applyCustomStyleWithTheme(ImGui::GetStyle(), state.styleState, theme);
-        const float contentX = state.visibility.showUI && state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : 0.0f;
-        const float promptRegionWidth = io.DisplaySize.x - (state.visibility.showUI ? SIDEBAR_WIDTH : 0.0f);
+        const float browserWidth = state.visibility.showUI && recorderState.fileBrowser.isOpen ? UI::FileBrowser::panelWidth : 0.0f;
+        const float contentX = state.visibility.showUI ? (state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : browserWidth) : 0.0f;
+        const float promptRegionWidth = io.DisplaySize.x - (state.visibility.showUI ? SIDEBAR_WIDTH + browserWidth : 0.0f);
         const bool timelineVisible = state.visibility.showUI && recorderState.timeline.gradientRegionValid;
         const ImVec2 regionMin = timelineVisible ? recorderState.timeline.gradientRegionMin : ImVec2(contentX, 0.0f);
         const ImVec2 regionMax = timelineVisible ? recorderState.timeline.gradientRegionMax

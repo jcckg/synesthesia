@@ -84,6 +84,7 @@ void Recorder::clearLoadedAudio(RecorderState& state) {
     ++state.presentationPreviewGeneration;
     state.presentationSourceRevision = 0;
     state.presentationPreviewRevision = 0;
+    state.loadedSourcePath.clear();
     state.samples.clear();
     state.previewSamples.clear();
     state.importedSamples.clear();

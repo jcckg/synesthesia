@@ -11,6 +11,7 @@ struct PresentationSnapshot;
 
 namespace ReSyne::UI {
 
+ImVec4 loadingStatusColour();
 void renderStatusMessage(RecorderState& state);
 ImVec4 activityStatusColour(RecorderState& state, const AudioInput& audioInput, const PresentationSnapshot* presentation = nullptr);
 

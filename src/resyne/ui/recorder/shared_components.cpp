@@ -11,22 +11,24 @@
 
 namespace ReSyne::UI {
 
+ImVec4 loadingStatusColour() {
+    ImVec4 colour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
+    constexpr double fadeDownSeconds = 1.3;
+    constexpr double fadeUpSeconds = 0.3;
+    const double time = std::fmod(ImGui::GetTime(), fadeDownSeconds + fadeUpSeconds);
+    const double phase = time < fadeDownSeconds ? time / fadeDownSeconds
+        : 1.0 + (time - fadeDownSeconds) / fadeUpSeconds;
+    const float pulse = static_cast<float>(0.5 - 0.5 * std::cos(phase * std::numbers::pi));
+    colour.w *= 1.0f - 0.32f * pulse;
+    return colour;
+}
+
 ImVec4 activityStatusColour(RecorderState& state, const AudioInput& audioInput, const PresentationSnapshot* presentation) {
     const bool recording = state.importPhase == 0 && state.isRecording;
     const bool playing = state.importPhase == 0 && state.audioOutput && state.audioOutput->isPlaying();
     if (!recording && !playing) {
         state.statusIntensity = 0.0f;
-        ImVec4 colour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-        if (state.importPhase != 0) {
-            constexpr double fadeDownSeconds = 1.3;
-            constexpr double fadeUpSeconds = 0.3;
-            const double time = std::fmod(ImGui::GetTime(), fadeDownSeconds + fadeUpSeconds);
-            const double phase = time < fadeDownSeconds ? time / fadeDownSeconds
-                : 1.0 + (time - fadeDownSeconds) / fadeUpSeconds;
-            const float pulse = static_cast<float>(0.5 - 0.5 * std::cos(phase * std::numbers::pi));
-            colour.w *= 1.0f - 0.32f * pulse;
-        }
-        return colour;
+        return state.importPhase != 0 ? loadingStatusColour() : ImGui::GetStyleColorVec4(ImGuiCol_Text);
     }
 
     std::optional<float> loudnessDb;

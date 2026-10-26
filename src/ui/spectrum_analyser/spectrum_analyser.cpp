@@ -12,13 +12,14 @@ void SpectrumAnalyser::drawSpectrumWindow(
     const ImVec2& displaySize,
     float sidebarWidth,
     bool sidebarOnLeft,
-    float bottomPanelHeight
+    float bottomPanelHeight,
+    float oppositeSidebarWidth
 ) {
-    const float spectrumX = sidebarOnLeft ? sidebarWidth : 0.0f;
+    const float spectrumX = sidebarOnLeft ? sidebarWidth : oppositeSidebarWidth;
     const float availableHeight = std::max(0.0f, displaySize.y - bottomPanelHeight);
     const float spectrumHeight = std::min(120.0f, availableHeight * .15f);
     const auto spectrumPos = ImVec2(spectrumX, availableHeight - spectrumHeight);
-    const auto spectrumSize = ImVec2(std::max(0.0f, displaySize.x - sidebarWidth), spectrumHeight);
+    const auto spectrumSize = ImVec2(std::max(0.0f, displaySize.x - sidebarWidth - oppositeSidebarWidth), spectrumHeight);
     if (spectrumSize.x < 1.0f || spectrumSize.y < 1.0f) return;
 
     ImGui::SetNextWindowPos(spectrumPos);

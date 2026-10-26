@@ -5,6 +5,7 @@
 #include <utility>
 #include <chrono>
 #include <algorithm>
+#include <filesystem>
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -263,29 +264,47 @@ void Recorder::cancelExport(RecorderState& state) {
 }
 
 void Recorder::handleLoadDialog(RecorderState& state) {
-    if (!state.shouldOpenLoadDialog) {
-        return;
-    }
+    const auto loadSelection = [&](bool directoryOnly) {
+        const auto path = ::UI::FileBrowser::chooseLoadPath(state.fileBrowser.directory,
+            true, directoryOnly);
+        if (path.empty()) {
+            state.focusRequested = true;
+            return;
+        }
+        std::error_code error;
+        if (std::filesystem::is_directory(std::filesystem::path(std::u8string(path.begin(), path.end())), error)) {
+            ::UI::FileBrowser::selectDirectory(state.fileBrowser, path);
+        } else {
+            requestImport(state, path);
+        }
+    };
 
+#ifdef __APPLE__
+    if (!state.shouldOpenLoadDialog) return;
     state.shouldOpenLoadDialog = false;
     if (state.exportRunning.load(std::memory_order_acquire)) return;
-
-    auto result = pfd::open_file(
-        "Load Audio/Colour File",
-        "",
-        {"Audio and RSYN Files", "*.rsyn *.wav *.flac *.mp3 *.mpeg3 *.mpga *.ogg *.oga *.tiff *.tif",
-         "Audio Files", "*.wav *.flac *.mp3 *.mpeg3 *.mpga *.ogg *.oga",
-         "RSYN Files", "*.rsyn *.tiff *.tif",
-         "TIFF Files", "*.tiff *.tif",
-         "RSYN Files", "*.rsyn",
-         "All Files", "*"}
-    ).result();
-
-    if (!result.empty() && !result[0].empty()) {
-        requestImport(state, result[0]);
-    } else {
-        state.focusRequested = true;
+    loadSelection(false);
+#else
+    if (state.shouldOpenLoadDialog) {
+        state.shouldOpenLoadDialog = false;
+        if (!state.exportRunning.load(std::memory_order_acquire)) ImGui::OpenPopup("Load File or Directory");
     }
+    ImGui::SetNextWindowPos(ImGui::GetMainViewport()->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    if (ImGui::BeginPopupModal("Load File or Directory", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::TextUnformatted("Load a file, or browse a directory in the file sidebar.");
+        bool chooseFile = ImGui::Button("File...", ImVec2(140.0f, 0.0f));
+        ImGui::SameLine();
+        bool chooseDirectory = ImGui::Button("Directory...", ImVec2(140.0f, 0.0f));
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(100.0f, 0.0f)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            ImGui::CloseCurrentPopup();
+            state.focusRequested = true;
+        }
+        if (chooseFile || chooseDirectory) ImGui::CloseCurrentPopup();
+        ImGui::EndPopup();
+        if (chooseFile || chooseDirectory) loadSelection(chooseDirectory);
+    }
+#endif
 }
 
 void Recorder::handleFileDialog(RecorderState& state) {

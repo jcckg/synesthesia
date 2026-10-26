@@ -12,6 +12,13 @@
 
 namespace Renderer::Styling {
 
+bool allowsAutomaticResize(GLFWwindow* window) {
+    if (window == nullptr) return false;
+    NSWindow* nativeWindow = glfwGetCocoaWindow(window);
+    return nativeWindow != nil && !(nativeWindow.styleMask & NSWindowStyleMaskFullScreen) &&
+        !nativeWindow.isZoomed && !nativeWindow.inLiveResize;
+}
+
 std::optional<float> windowBottomCornerRadius(GLFWwindow* window, bool left) {
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 270000
     if (@available(macOS 27.0, *)) {
@@ -19,6 +26,22 @@ std::optional<float> windowBottomCornerRadius(GLFWwindow* window, bool left) {
             NSWindow* nativeWindow = glfwGetCocoaWindow(window);
             NSViewCornerRadii* radii = nativeWindow.contentView.effectiveCornerRadii;
             if (radii != nil) return static_cast<float>(left ? radii.bottomLeft : radii.bottomRight);
+        }
+    }
+#else
+    (void)window;
+    (void)left;
+#endif
+    return std::nullopt;
+}
+
+std::optional<float> windowTopCornerRadius(GLFWwindow* window, bool left) {
+#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 270000
+    if (@available(macOS 27.0, *)) {
+        if (window != nullptr) {
+            NSWindow* nativeWindow = glfwGetCocoaWindow(window);
+            NSViewCornerRadii* radii = nativeWindow.contentView.effectiveCornerRadii;
+            if (radii != nil) return static_cast<float>(left ? radii.topLeft : radii.topRight);
         }
     }
 #else

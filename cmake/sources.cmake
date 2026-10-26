@@ -46,6 +46,11 @@ set(SOURCES
     ${SRC_DIR}/ui/menu/help_menu.cpp
     ${SRC_DIR}/ui/help/help.cpp
     ${SRC_DIR}/ui/notifications/status_prompt.cpp
+    ${SRC_DIR}/ui/file_browser/preview.cpp
+    ${SRC_DIR}/ui/file_browser/artwork.cpp
+    ${SRC_DIR}/ui/file_browser/directory_scanner.cpp
+    ${SRC_DIR}/ui/file_browser/file_browser.cpp
+    ${SRC_DIR}/ui/file_browser/load_dialog.cpp
     ${SRC_DIR}/ui/handlers/import_handler.cpp
     ${SRC_DIR}/ui/controls/controls.cpp
     ${SRC_DIR}/ui/device_manager/device_manager.cpp

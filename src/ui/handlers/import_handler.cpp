@@ -18,7 +18,6 @@ namespace UIHandlers {
 void ImportHandler::processFileImport(UIState& state) {
     auto& recorder = state.resyneState.recorderState;
     if (recorder.importPhase == 4) {
-        if (recorder.presentationWorker) recorder.presentationWorker->request();
         if (recorder.importRunning.load(std::memory_order_acquire)) return;
         if (recorder.importThread.joinable()) recorder.importThread.join();
         {
@@ -40,8 +39,10 @@ void ImportHandler::processFileImport(UIState& state) {
         recorder.importPhase = recorder.pendingImportPath.empty() ? 0 : 1;
         recorder.focusRequested = recorder.importPhase == 0;
         ReSyne::setLoadingOperationStatus(recorder, {});
+        if (recorder.presentationWorker) recorder.presentationWorker->request();
     }
     if (recorder.importPhase == 1 && !recorder.pendingImportPath.empty()) {
+        ReSyne::Recorder::clearLoadedAudio(recorder);
         const std::filesystem::path path(recorder.pendingImportPath);
         recorder.loadingFilename = path.filename().string();
         if (recorder.loadingFilename.empty()) recorder.loadingFilename = recorder.pendingImportPath;
@@ -130,6 +131,7 @@ void ImportHandler::processFileImport(UIState& state) {
         if (recorder.importThread.joinable()) recorder.importThread.join();
 
         if (success) {
+            recorder.loadedSourcePath = recorder.pendingImportPath;
             if (recorder.audioOutput) {
                 recorder.audioOutput->stop();
                 recorder.audioOutput->clearAudioData();

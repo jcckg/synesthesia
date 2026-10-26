@@ -166,6 +166,7 @@ bool Recorder::importFromFile(RecorderState& state,
     state.loadingProgress = 0.9f;
     applyImportedSequence(state, std::move(importedSamples), metadata);
 
+    state.loadedSourcePath = filepath;
     state.loadingProgress = 0.95f;
     if (!playbackAudio.empty()) {
         state.playbackAudio = std::move(playbackAudio);

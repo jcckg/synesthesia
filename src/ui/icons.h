@@ -27,3 +27,13 @@
 #define ICON_FA_CROSSHAIRS "\xef\x81\x9b"         // U+f05b
 #define ICON_FA_BACKWARD_STEP "\xef\x81\x88"      // U+f048
 #define ICON_FA_BLUETOOTH "\xef\x8a\x93"
+
+#define ICON_FA_FOLDER_OPEN "\xef\x81\xbc"
+
+#define ICON_FA_XMARK "\xef\x80\x8d"
+#define ICON_FA_CHEVRON_LEFT "\xef\x81\x93"
+#define ICON_FA_FOLDER "\xef\x81\xbb"
+
+#define ICON_FA_MAGNIFYING_GLASS "\xef\x80\x82"
+#define ICON_FA_CHEVRON_UP "\xef\x81\xb7"
+#define ICON_FA_CHEVRON_DOWN "\xef\x81\xb8"

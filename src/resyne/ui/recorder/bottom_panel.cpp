@@ -166,7 +166,8 @@ void Recorder::drawBottomPanel(RecorderState& state,
                           3,
                           ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody)) {
         ImGui::TableSetupColumn("Record", ImGuiTableColumnFlags_WidthFixed,
-                                buttonWidth * 3.0f + buttonSpacing * 2.0f);
+                                buttonWidth * 3.0f + buttonSpacing * 2.0f +
+                                (state.fileBrowser.directory.empty() ? 0.0f : buttonHeight + buttonSpacing));
         ImGui::TableSetupColumn("Transport", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Utilities", ImGuiTableColumnFlags_WidthFixed, rightGroupWidth);
 
@@ -205,6 +206,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
             ImGui::SetTooltip("Load audio, .rsyn, or TIFF files");
         }
         ImGui::EndDisabled();
+        ::UI::FileBrowser::drawToolbarButton(state.fileBrowser, buttonHeight);
 
         ImGui::Spacing();
         ImGui::AlignTextToFramePadding();
