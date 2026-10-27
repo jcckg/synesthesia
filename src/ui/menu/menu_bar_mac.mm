@@ -101,9 +101,11 @@ struct MenuBar::Impl {
         if (definition.title[0] == '\0') return [NSMenuItem separatorItem];
 
         NSString* title = [NSString stringWithUTF8String:definition.title];
+        NSString* shortcut = [NSString stringWithUTF8String:definition.shortcut];
+        if (definition.shiftShortcut) shortcut = shortcut.uppercaseString;
         NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:title
             action:definition.command == Command::None ? nullptr : @selector(performCommand:)
-            keyEquivalent:[NSString stringWithUTF8String:definition.shortcut]];
+            keyEquivalent:shortcut];
         if (definition.command != Command::None) {
             item.target = target;
             item.tag = static_cast<NSInteger>(definition.command);

@@ -159,6 +159,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
     const float toolbarWidth = toolbarButtonCount * transportButtonSize +
                                std::max(0, toolbarButtonCount - 1) * buttonSpacing;
     const float utilityControlsWidth = transportButtonSize * 3.0f + buttonSpacing * 4.0f +
+                                      (state.fileBrowser.rootDirectory.empty() ? 0.0f : buttonHeight + buttonSpacing) +
                                       UI::Utilities::kToolbarSeparatorWidth + buttonWidth;
     const float rightGroupWidth = toolbarWidth + buttonSpacing + utilityControlsWidth;
 
@@ -166,8 +167,7 @@ void Recorder::drawBottomPanel(RecorderState& state,
                           3,
                           ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody)) {
         ImGui::TableSetupColumn("Record", ImGuiTableColumnFlags_WidthFixed,
-                                buttonWidth * 3.0f + buttonSpacing * 2.0f +
-                                (state.fileBrowser.directory.empty() ? 0.0f : buttonHeight + buttonSpacing));
+                                buttonWidth * 3.0f + buttonSpacing * 2.0f);
         ImGui::TableSetupColumn("Transport", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Utilities", ImGuiTableColumnFlags_WidthFixed, rightGroupWidth);
 
@@ -206,7 +206,6 @@ void Recorder::drawBottomPanel(RecorderState& state,
             ImGui::SetTooltip("Load audio, .rsyn, or TIFF files");
         }
         ImGui::EndDisabled();
-        ::UI::FileBrowser::drawToolbarButton(state.fileBrowser, buttonHeight);
 
         ImGui::Spacing();
         ImGui::AlignTextToFramePadding();
@@ -300,6 +299,10 @@ void Recorder::drawBottomPanel(RecorderState& state,
                 ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationTooltip);
             }
         }
+
+        ImGui::EndDisabled();
+        ::UI::FileBrowser::drawToolbarButton(state.fileBrowser, buttonHeight);
+        ImGui::BeginDisabled(!timelineControlsEnabled);
 
         ImGui::SameLine(0.0f, buttonSpacing);
 

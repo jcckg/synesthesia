@@ -10,6 +10,7 @@
 #include "spectrum_analyser.h"
 #include "imgui.h"
 #include "ui/help/help.h"
+#include "ui/input/scrolling.h"
 #include "ui/notifications/status_prompt.h"
 #include <array>
 #include <string>
@@ -88,6 +89,7 @@ struct UIState {
     VisualSettings visualSettings;
     UIVisibility visibility;
     UI::Help::State helpState;
+    UI::Input::Scrolling scrolling;
     UI::Notifications::StatusPrompt statusPrompt;
 
     DeviceState deviceState;

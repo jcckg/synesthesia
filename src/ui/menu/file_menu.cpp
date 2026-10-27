@@ -22,6 +22,7 @@ constexpr std::array kFileItems{
     Item{"New", Command::NewTimeline, "n"},
     Item{"Load…", Command::Load, "o"},
     Item{},
+    Item{.title = "Export…", .command = Command::Export, .shortcut = "e", .shiftShortcut = true},
     Item{"Export As", Command::None, "", kExportItems}
 };
 
@@ -47,6 +48,7 @@ bool canExecuteFileCommand(Command command, UIState& state) {
         case Command::Load:
             return true;
         case Command::NewTimeline:
+        case Command::Export:
         case Command::ExportWAV:
         case Command::ExportRSYN:
         case Command::ExportTIFF:
@@ -72,6 +74,9 @@ bool executeFileCommand(Command command, UIState& state) {
         case Command::Load:
             recorder.shouldOpenLoadDialog = true;
             break;
+        case Command::Export:
+            recorder.showExportDialog = true;
+            break;
         case Command::ExportWAV:
             recorder.exportFormat = ReSyne::RecorderExportFormat::WAV;
             break;
@@ -89,7 +94,7 @@ bool executeFileCommand(Command command, UIState& state) {
         default:
             return false;
     }
-    if (command != Command::NewTimeline && command != Command::Load) {
+    if (command != Command::NewTimeline && command != Command::Load && command != Command::Export) {
         recorder.shouldOpenSaveDialog = true;
     }
 

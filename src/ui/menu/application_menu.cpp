@@ -18,7 +18,13 @@ namespace {
 void collectShortcuts(std::span<const Item> items, std::vector<Shortcut>& shortcuts) {
     for (const auto& item : items) {
         if (item.command != Command::None && item.shortcut[0] != '\0') {
+#ifdef __APPLE__
             std::string keys = "Cmd + ";
+#else
+            if (item.command != Command::ToggleExplorer && item.command != Command::SearchExplorer &&
+                item.command != Command::Export) continue;
+            std::string keys = "Ctrl + ";
+#endif
             if (item.shiftShortcut) keys += "Shift + ";
             for (const char* key = item.shortcut; *key != '\0'; ++key) {
                 keys += static_cast<char>(std::toupper(static_cast<unsigned char>(*key)));
@@ -55,6 +61,8 @@ State queryCommand(Command command, UIState& state) {
     switch (command) {
         case Command::ReSyneView:
         case Command::VisualiserView:
+        case Command::ToggleExplorer:
+        case Command::SearchExplorer:
         case Command::DetachVisualiser:
         case Command::ToggleInterface:
         case Command::ToggleSpectrumAnalyser:
@@ -89,6 +97,8 @@ bool executeCommand(Command command, UIState& state) {
     switch (command) {
         case Command::ReSyneView:
         case Command::VisualiserView:
+        case Command::ToggleExplorer:
+        case Command::SearchExplorer:
         case Command::DetachVisualiser:
         case Command::ToggleInterface:
         case Command::ToggleSpectrumAnalyser:

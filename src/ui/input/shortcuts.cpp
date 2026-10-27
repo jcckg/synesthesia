@@ -2,8 +2,23 @@
 
 #include "imgui.h"
 #include "resyne/recorder/recorder.h"
+#include "ui/menu/application_menu.h"
+#include "ui/ui.h"
 
 namespace UI::Input {
+
+void handleApplicationShortcuts([[maybe_unused]] UIState& state) {
+#ifndef __APPLE__
+    const auto& io = ImGui::GetIO();
+    if (state.nativeMenuTracking || !io.KeyCtrl || io.KeyAlt || io.KeySuper) return;
+    if (io.KeyShift) {
+        if (ImGui::IsKeyPressed(ImGuiKey_E, false)) Menu::executeCommand(Menu::Command::Export, state);
+        return;
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_E, false)) Menu::executeCommand(Menu::Command::ToggleExplorer, state);
+    if (ImGui::IsKeyPressed(ImGuiKey_F, false)) Menu::executeCommand(Menu::Command::SearchExplorer, state);
+#endif
+}
 
 void handlePlaybackShortcut(ReSyne::RecorderState& state, bool windowFocused) {
     if (state.importPhase != 0 || state.isRecording || state.recordingCountdownActive ||

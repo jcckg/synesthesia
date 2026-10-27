@@ -34,6 +34,7 @@
 #include "resyne/ui/recorder/shared_components.h"
 #include "resyne/recorder/presentation_worker.h"
 #include "ui/input/trackpad_gestures.h"
+#include "ui/input/shortcuts.h"
 #include "system_theme_detector.h"
 #include "ui/handlers/import_handler.h"
 #ifdef ENABLE_MIDI
@@ -241,6 +242,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	ReSyne::Timeline::TrackpadGestureInput trackpadInput;
 	{
 		auto gestures = TrackpadGestures::consume();
+        state.scrolling.beginFrame(gestures, !state.nativeMenuTracking);
 		if (gestures.hasPinch) {
 			trackpadInput.hasPinch = true;
 			trackpadInput.pinchDelta = static_cast<float>(gestures.pinchDelta);
@@ -269,7 +271,9 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
         recorderState.fileBrowser.onLeft = !state.visibility.sidebarOnLeft;
         recorderState.fileBrowser.titleElapsed = 0.0f;
     }
+    if (!state.nativeMenuTracking) UI::FileBrowser::advancePanel(recorderState.fileBrowser, io.DeltaTime, ImGui::GetFrameCount());
     UI::FileBrowser::update(recorderState.fileBrowser, io.DeltaTime);
+    UI::Input::handleApplicationShortcuts(state);
     recorderState.trackpadInput = trackpadInput;
 	if (recorderState.detachedVisualisation.isOpen &&
 	    state.visualSettings.activeView == UIState::View::Visualisation) {
@@ -473,6 +477,12 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     state.resyneState.displayColour[1] = surfaceG;
     state.resyneState.displayColour[2] = surfaceB;
 
+    if (!state.visibility.showUI && recorderState.fileBrowser.resizing.active) {
+        auto& browser = recorderState.fileBrowser;
+        browser.isOpen = browser.isOpen && !browser.resizing.collapsed;
+        browser.resizing.finish();
+    }
+
 	if (state.visibility.showUI) {
 		ImGuiStyle& style = ImGui::GetStyle();
 
@@ -480,8 +490,9 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		UIStyler::applyCustomStyleWithTheme(style, state.styleState, currentTheme);
 
         ImVec2 displaySize = io.DisplaySize;
-        recorderState.fileBrowser.entryPadding = SIDEBAR_PADDING;
-        const float browserWidth = recorderState.fileBrowser.isOpen ? UI::FileBrowser::panelWidth : 0.0f;
+        UI::FileBrowser::drawResizeHandle(recorderState.fileBrowser, displaySize, SIDEBAR_WIDTH,
+            !state.nativeMenuTracking && !state.helpState.showKeyboardShortcuts && ImGui::GetTopMostPopupModal() == nullptr);
+        const float browserWidth = UI::FileBrowser::visibleWidth(recorderState.fileBrowser);
         const float contentX = state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : browserWidth;
         const float mainContentWidth = std::max(0.0f, displaySize.x - SIDEBAR_WIDTH - browserWidth);
 
@@ -575,7 +586,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
             ? recorderState.timeline.gradientRegionMax : ImVec2(contentX + mainContentWidth, displaySize.y);
         ReSyne::Recorder::drawProgressIndicator(recorderState, progressMin, progressMax);
         state.updateChecker.drawUpdateBanner(state.updateState, progressMin, progressMax);
-        if (recorderState.fileBrowser.isOpen) {
+        if (browserWidth > 0.0f) {
             const bool playing = recorderState.importPhase == 0 && recorderState.audioOutput && recorderState.audioOutput->isPlaying();
             auto& browser = recorderState.fileBrowser;
             const bool loading = recorderState.importPhase != 0;
@@ -598,7 +609,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
                 recorderState.fileBrowser.playingColour = ReSyne::UI::activityStatusColour(recorderState, audioInput, presentation.get());
             }
             UI::FileBrowser::draw(recorderState.fileBrowser,
-                UI::FileBrowser::canLoadFiles(state), displaySize);
+                UI::FileBrowser::canLoadFiles(state), displaySize, state.scrolling);
         }
         if (!state.nativeMenuTracking) ReSyne::handleDialogs(state.resyneState);
 		}
@@ -608,7 +619,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     if (!state.statusPrompt.message.empty()) {
         const UITheme theme = SystemThemeDetector::isSystemInDarkMode() ? UITheme::Dark : UITheme::Light;
         UIStyler::applyCustomStyleWithTheme(ImGui::GetStyle(), state.styleState, theme);
-        const float browserWidth = state.visibility.showUI && recorderState.fileBrowser.isOpen ? UI::FileBrowser::panelWidth : 0.0f;
+        const float browserWidth = state.visibility.showUI ? UI::FileBrowser::visibleWidth(recorderState.fileBrowser) : 0.0f;
         const float contentX = state.visibility.showUI ? (state.visibility.sidebarOnLeft ? SIDEBAR_WIDTH : browserWidth) : 0.0f;
         const float promptRegionWidth = io.DisplaySize.x - (state.visibility.showUI ? SIDEBAR_WIDTH + browserWidth : 0.0f);
         const bool timelineVisible = state.visibility.showUI && recorderState.timeline.gradientRegionValid;

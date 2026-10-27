@@ -9,6 +9,7 @@
 
 #import <AppKit/AppKit.h>
 #import <QuartzCore/CAMetalLayer.h>
+#import <QuartzCore/CATransaction.h>
 
 namespace Renderer::Styling {
 
@@ -17,6 +18,28 @@ bool allowsAutomaticResize(GLFWwindow* window) {
     NSWindow* nativeWindow = glfwGetCocoaWindow(window);
     return nativeWindow != nil && !(nativeWindow.styleMask & NSWindowStyleMaskFullScreen) &&
         !nativeWindow.isZoomed && !nativeWindow.inLiveResize;
+}
+
+void performAlignmentFeedback() {
+    [[NSHapticFeedbackManager defaultPerformer] performFeedbackPattern:NSHapticFeedbackPatternAlignment
+        performanceTime:NSHapticFeedbackPerformanceTimeNow];
+}
+
+void resizeWindow(GLFWwindow* window, int width, int height, int offsetX, bool preserveRightEdge) {
+    if (window == nullptr) return;
+    NSWindow* nativeWindow = glfwGetCocoaWindow(window);
+    NSRect content = [nativeWindow contentRectForFrameRect:nativeWindow.frame];
+    content.origin.x += offsetX;
+    content.origin.y += content.size.height - height;
+    content.size = NSMakeSize(width, height);
+    [CATransaction begin];
+    [CATransaction setDisableActions:YES];
+    CAMetalLayer* layer = [nativeWindow.contentView.layer isKindOfClass:[CAMetalLayer class]]
+        ? (CAMetalLayer*)nativeWindow.contentView.layer : nil;
+    layer.contentsGravity = preserveRightEdge ? kCAGravityTopRight : kCAGravityTopLeft;
+    layer.contentsScale = nativeWindow.backingScaleFactor;
+    [nativeWindow setFrame:[nativeWindow frameRectForContentRect:content] display:NO];
+    [CATransaction commit];
 }
 
 std::optional<float> windowBottomCornerRadius(GLFWwindow* window, bool left) {
@@ -64,6 +87,8 @@ void applyPresentationColourSpace(GLFWwindow* window) {
         layer = [CAMetalLayer layer];
         view.layer = layer;
     }
+    layer.contentsScale = nativeWindow.backingScaleFactor;
+    layer.contentsGravity = kCAGravityTopLeft;
     CGColorSpaceRef colourSpace = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     layer.colorspace = colourSpace;
     CGColorSpaceRelease(colourSpace);

@@ -378,6 +378,7 @@ void Recorder::drawFullWindow(RecorderState& state,
     const float toolbarWidth = toolbarButtonCount * BUTTON_HEIGHT +
                                std::max(0, toolbarButtonCount - 1) * buttonSpacing;
     const float utilityControlsWidth = BUTTON_HEIGHT * 3.0f + buttonSpacing * 4.0f +
+                                      (state.fileBrowser.rootDirectory.empty() ? 0.0f : BUTTON_HEIGHT + buttonSpacing) +
                                       UI::Utilities::kToolbarSeparatorWidth + BUTTON_WIDTH;
     const float rightGroupWidth = toolbarWidth + buttonSpacing + utilityControlsWidth;
 
@@ -388,8 +389,7 @@ void Recorder::drawFullWindow(RecorderState& state,
                           ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_NoBordersInBody,
                           ImVec2(windowWidth - WINDOW_PADDING * 2.0f, 0.0f))) {
         ImGui::TableSetupColumn("Recorder", ImGuiTableColumnFlags_WidthFixed,
-                                BUTTON_WIDTH * 3.0f + buttonSpacing * 2.0f +
-                                (state.fileBrowser.directory.empty() ? 0.0f : BUTTON_HEIGHT + buttonSpacing));
+                                BUTTON_WIDTH * 3.0f + buttonSpacing * 2.0f);
         ImGui::TableSetupColumn("Transport", ImGuiTableColumnFlags_WidthStretch);
         ImGui::TableSetupColumn("Utilities", ImGuiTableColumnFlags_WidthFixed, rightGroupWidth);
 
@@ -401,7 +401,7 @@ void Recorder::drawFullWindow(RecorderState& state,
             ? RecorderUI::recordingStartButtonLabel(state)
             : "RECORD";
         if (drawCornerButton(startLabel, ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT), true,
-                !state.fileBrowser.isOpen || !state.fileBrowser.onLeft)) {
+                ::UI::FileBrowser::visibleWidth(state.fileBrowser) <= 0.0f || !state.fileBrowser.onLeft)) {
             if (state.recordingCountdownActive) {
                 RecorderUI::cancelRecordingCountdown(state);
             } else {
@@ -429,7 +429,6 @@ void Recorder::drawFullWindow(RecorderState& state,
             state.shouldOpenLoadDialog = true;
         }
         ImGui::EndDisabled();
-        ::UI::FileBrowser::drawToolbarButton(state.fileBrowser, BUTTON_HEIGHT);
 
         ImGui::TableSetColumnIndex(1);
         const float centreColumnWidth = ImGui::GetContentRegionAvail().x;
@@ -516,6 +515,10 @@ void Recorder::drawFullWindow(RecorderState& state,
             }
         }
 
+        ImGui::EndDisabled();
+        ::UI::FileBrowser::drawToolbarButton(state.fileBrowser, BUTTON_HEIGHT);
+        ImGui::BeginDisabled(!timelineControlsEnabled);
+
         ImGui::SameLine(0.0f, buttonSpacing);
 
         const bool clearTimelineEnabled =
@@ -535,7 +538,7 @@ void Recorder::drawFullWindow(RecorderState& state,
 
         ImGui::BeginDisabled(exportRunning || state.showExportingDialog || state.isRecording || state.recordingCountdownActive);
         if (drawCornerButton("Export", ImVec2(BUTTON_WIDTH, BUTTON_HEIGHT), false,
-                !state.fileBrowser.isOpen || state.fileBrowser.onLeft)) {
+                ::UI::FileBrowser::visibleWidth(state.fileBrowser) <= 0.0f || state.fileBrowser.onLeft)) {
             state.showExportDialog = true;
         }
         if (ImGui::IsItemHovered()) {

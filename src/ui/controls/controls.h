@@ -19,7 +19,6 @@ namespace Controls {
     enum class SectionLayer { Primary, Secondary };
 
     bool renderSectionHeader(const char* label, ImGuiTreeNodeFlags flags = 0, SectionLayer layer = SectionLayer::Primary);
-    bool renderSidebarSectionHeader(const char* label, ImGuiTreeNodeFlags flags = 0, SectionLayer layer = SectionLayer::Primary);
     void renderFrequencyInfoPanel(AudioInput& audioInput, ReSyne::RecorderState& recorderState);
     
     void renderColourSmoothingPanel(float& smoothingAmount,

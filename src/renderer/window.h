@@ -36,12 +36,13 @@ public:
     void show() const;
     void pollEvents() const;
     void realiseForRenderer() const;
-    void setSidePanelVisible(bool visible, bool onLeft, int width);
+    void setSidePanelVisible(bool visible, bool onLeft, int width, float progress = -1.0f);
 
     [[nodiscard]] bool shouldClose() const;
     [[nodiscard]] bool isFocused() const;
     [[nodiscard]] GLFWwindow* handle() const;
     [[nodiscard]] FramebufferSize framebufferSize() const;
+    [[nodiscard]] int sidePanelExpandedWidth() const;
     [[nodiscard]] bgfx::PlatformData platformData() const;
     [[nodiscard]] bgfx::SwapChain swapChain() const;
 
@@ -50,6 +51,8 @@ private:
     int minimumWidth_ = 0;
     int minimumHeight_ = 0;
     int sidePanelGrowth_ = 0;
+    int sidePanelMaximumGrowth_ = 0;
+    float sidePanelProgress_ = 0.0f;
     bool sidePanelVisible_ = false;
 };
 

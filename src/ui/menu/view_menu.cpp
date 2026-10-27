@@ -13,6 +13,8 @@ std::span<const Item> viewMenuItems() {
         Item{},
         Item{.title = "Detach Visualiser", .command = Command::DetachVisualiser,
              .shortcut = "2", .shiftShortcut = true, .shortcutTitle = "Detach / reattach visualiser"},
+        Item{"Explorer", Command::ToggleExplorer, "e"},
+        Item{.title = "Search Explorer", .command = Command::SearchExplorer, .shortcut = "f"},
         Item{},
         Item{.title = "Show/Hide Interface", .command = Command::ToggleInterface,
              .shortcut = "h", .shiftShortcut = true},
@@ -42,6 +44,13 @@ State queryViewCommand(Command command, UIState& state) {
         case Command::DetachVisualiser:
             result.enabled = (detached.isOpen || detached.available) && !detached.openRequested && !detached.reattachRequested;
             result.title = detached.isOpen ? "Reattach Visualiser" : "Detach Visualiser";
+            break;
+        case Command::ToggleExplorer:
+            result.enabled = !state.resyneState.recorderState.fileBrowser.rootDirectory.empty();
+            result.checked = state.resyneState.recorderState.fileBrowser.isOpen;
+            break;
+        case Command::SearchExplorer:
+            result.enabled = state.resyneState.recorderState.fileBrowser.isOpen;
             break;
         case Command::ToggleInterface:
             result.enabled = state.visualSettings.activeView == UIState::View::Visualisation;
@@ -82,6 +91,15 @@ bool executeViewCommand(Command command, UIState& state) {
             else recorder.detachedVisualisation.openRequested = true;
             state.visualSettings.activeView = UIState::View::ReSyne;
             break;
+        case Command::ToggleExplorer:
+            recorder.fileBrowser.isOpen = !recorder.fileBrowser.isOpen;
+            state.visibility.showUI = true;
+            return true;
+        case Command::SearchExplorer:
+            recorder.fileBrowser.searchOpen = true;
+            recorder.fileBrowser.searchFocus = true;
+            state.visibility.showUI = true;
+            return true;
         case Command::ToggleInterface:
             state.visibility.showUI = !state.visibility.showUI;
             return true;

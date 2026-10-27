@@ -63,6 +63,11 @@ NSEvent* handleEvent(NSEvent* event) {
         }
     } else if (type == NSEventTypeScrollWheel) {
         const bool precise = [event hasPreciseScrollingDeltas];
+        state.pending.hasScroll = true;
+        state.pending.scrollMomentum = [event momentumPhase] != NSEventPhaseNone;
+        state.pending.scrollGestureBegan |= [event phase] == NSEventPhaseBegan;
+        if (precise) state.pending.scrollPixelsY += [event scrollingDeltaY];
+        else state.pending.scrollStepsY += [event scrollingDeltaY];
 
         if (precise) {
             updatePointer(state);

@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <thread>
 #include <vector>
@@ -216,8 +217,13 @@ int app_main(int, char**) {
         if (renderingFrame || window.shouldClose()) return;
         FrameScope frameScope(renderingFrame, uiState.nativeMenuTracking, nativeTracking);
         mainWindowContext.makeCurrent();
-        if (!nativeTracking) window.setSidePanelVisible(recorderState.fileBrowser.isOpen,
-            !uiState.visibility.sidebarOnLeft, static_cast<int>(UI::FileBrowser::panelWidth));
+        if (!nativeTracking) {
+            auto& browser = recorderState.fileBrowser;
+            UI::FileBrowser::advancePanel(browser, ImGui::GetIO().DeltaTime, ImGui::GetFrameCount() + 1);
+            if (!browser.resizing.active) window.setSidePanelVisible(browser.isOpen, !uiState.visibility.sidebarOnLeft,
+                static_cast<int>(std::round(browser.resizing.width)), browser.panelAnimation.value);
+            browser.expandedWindowWidth = static_cast<float>(window.sidePanelExpandedWidth());
+        }
         continuousPan.synchronise(recorderState.timeline, recorderState.toolState, !nativeTracking && canPanTimeline(), false);
 
         const Renderer::FramebufferSize currentSize = window.framebufferSize();

@@ -108,7 +108,6 @@ void drawKeyboardShortcuts(State& state) {
         constexpr float buttonHeight = 26.0f;
         const float footerHeight = buttonHeight + ImGui::GetStyle().ItemSpacing.y * 2.0f + 1.0f;
         if (ImGui::BeginChild("Shortcuts", ImVec2(0.0f, -footerHeight))) {
-#ifdef __APPLE__
             const auto menuShortcuts = UI::Menu::menuShortcuts();
             std::vector<Shortcut> applicationShortcuts;
             applicationShortcuts.reserve(menuShortcuts.size());
@@ -116,7 +115,6 @@ void drawKeyboardShortcuts(State& state) {
                 applicationShortcuts.push_back({shortcut.keys.c_str(), shortcut.action.c_str()});
             }
             drawSection("Application", applicationShortcuts);
-#endif
             static constexpr std::array interfaceShortcuts{
                 Shortcut{"H", "Show / hide interface"},
                 Shortcut{"Shift + Tab", "Switch views"},

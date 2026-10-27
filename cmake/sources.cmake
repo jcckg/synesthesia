@@ -37,6 +37,7 @@ set(SOURCES
     ${SRC_DIR}/resyne/decoding/wav_decoder_impl.cpp
     ${SRC_DIR}/ui/ui.cpp
     ${SRC_DIR}/ui/input/shortcuts.cpp
+    ${SRC_DIR}/ui/input/scrolling.cpp
     ${SRC_DIR}/ui/input/continuous_pan.cpp
     ${SRC_DIR}/ui/menu/menu_bar.cpp
     ${SRC_DIR}/ui/menu/file_menu.cpp

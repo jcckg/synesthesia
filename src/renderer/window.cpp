@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <thread>
 
@@ -45,7 +46,8 @@ Window::~Window() {
 bool Window::create(const WindowOptions& options) {
     minimumWidth_ = options.minimumWidth;
     minimumHeight_ = options.minimumHeight;
-    sidePanelGrowth_ = 0;
+    sidePanelGrowth_ = sidePanelMaximumGrowth_ = 0;
+    sidePanelProgress_ = 0.0f;
     sidePanelVisible_ = false;
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
@@ -93,21 +95,25 @@ void Window::realiseForRenderer() const {
     Styling::applyPresentationColourSpace(window_);
 }
 
-void Window::setSidePanelVisible(bool visible, bool onLeft, int width) {
-    if (window_ == nullptr || visible == sidePanelVisible_) return;
+void Window::setSidePanelVisible(bool visible, bool onLeft, int width, float progress) {
+    if (progress < 0.0f) progress = visible ? 1.0f : 0.0f;
+    progress = std::clamp(progress, 0.0f, 1.0f);
+    if (window_ == nullptr || (visible == sidePanelVisible_ && progress == sidePanelProgress_)) return;
+    const bool opening = visible && !sidePanelVisible_;
     sidePanelVisible_ = visible;
+    sidePanelProgress_ = progress;
     const auto restoreLimits = [&] {
         glfwSetWindowSizeLimits(window_, minimumWidth_ > 0 ? minimumWidth_ : GLFW_DONT_CARE,
             minimumHeight_ > 0 ? minimumHeight_ : GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
     };
     if (glfwGetWindowMonitor(window_) != nullptr || glfwGetWindowAttrib(window_, GLFW_MAXIMIZED)) {
-        sidePanelGrowth_ = 0;
+        sidePanelGrowth_ = sidePanelMaximumGrowth_ = 0;
         if (!visible) restoreLimits();
         return;
     }
 #ifdef __APPLE__
     if (!Styling::allowsAutomaticResize(window_)) {
-        sidePanelGrowth_ = 0;
+        sidePanelGrowth_ = sidePanelMaximumGrowth_ = 0;
         if (!visible) restoreLimits();
         return;
     }
@@ -138,25 +144,38 @@ void Window::setSidePanelVisible(bool visible, bool onLeft, int width) {
     int workX = 0, workY = 0, workWidth = currentWidth + width, workHeight = currentHeight;
     if (monitor != nullptr) glfwGetMonitorWorkarea(monitor, &workX, &workY, &workWidth, &workHeight);
     const int maximumWidth = std::max(1, workWidth - left - right);
-    int targetWidth;
-    if (visible) {
-        targetWidth = std::max(currentWidth, std::min(currentWidth + width, maximumWidth));
-        sidePanelGrowth_ = targetWidth - currentWidth;
-        const int minimum = std::max(minimumWidth_, std::min(minimumWidth_ + width, maximumWidth));
+    const int baseWidth = currentWidth - sidePanelGrowth_;
+    if (opening && sidePanelGrowth_ == 0) sidePanelMaximumGrowth_ = std::max(0, std::min(width, maximumWidth - baseWidth));
+    const int growth = static_cast<int>(std::round(static_cast<float>(sidePanelMaximumGrowth_) * progress));
+    const int targetWidth = std::max(minimumWidth_, baseWidth + growth);
+    if (progress > 0.0f) {
+        const int panelMinimum = static_cast<int>(std::round(static_cast<float>(width) * progress));
+        const int minimum = std::max(minimumWidth_, std::min(minimumWidth_ + panelMinimum, maximumWidth));
         glfwSetWindowSizeLimits(window_, minimum > 0 ? minimum : GLFW_DONT_CARE,
             minimumHeight_ > 0 ? minimumHeight_ : GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
     } else {
         restoreLimits();
-        targetWidth = std::max(minimumWidth_, currentWidth - sidePanelGrowth_);
-        sidePanelGrowth_ = 0;
+        if (!visible) sidePanelMaximumGrowth_ = 0;
     }
+    sidePanelGrowth_ = targetWidth - baseWidth;
     if (targetWidth == currentWidth) return;
     int targetX = onLeft ? x + currentWidth - targetWidth : x;
     if (canPosition && monitor != nullptr) {
         targetX = std::clamp(targetX, workX + left, std::max(workX + left, workX + workWidth - right - targetWidth));
     }
+#ifdef __APPLE__
+    Styling::resizeWindow(window_, targetWidth, currentHeight, targetX - x, onLeft);
+#else
     glfwSetWindowSize(window_, targetWidth, currentHeight);
     if (canPosition && targetX != x) glfwSetWindowPos(window_, targetX, y);
+#endif
+}
+
+int Window::sidePanelExpandedWidth() const {
+    if (window_ == nullptr) return 0;
+    int width = 0;
+    glfwGetWindowSize(window_, &width, nullptr);
+    return width + std::max(0, sidePanelMaximumGrowth_ - sidePanelGrowth_);
 }
 
 bool Window::shouldClose() const {

@@ -1,7 +1,6 @@
 #include "controls.h"
 
 #include <imgui.h>
-#include "imgui_internal.h"
 #include "ui/styling/styling.h"
 #include <array>
 #include <algorithm>
@@ -94,24 +93,8 @@ bool renderSectionHeader(const char* label, ImGuiTreeNodeFlags flags, SectionLay
     return open;
 }
 
-bool renderSidebarSectionHeader(const char* label, ImGuiTreeNodeFlags flags, SectionLayer layer) {
-    constexpr float inset = 6.0f;
-    auto* window = ImGui::GetCurrentWindow();
-    const float cursorX = window->DC.CursorPos.x;
-    const float contentRight = window->ContentRegionRect.Max.x;
-    const float workRight = window->WorkRect.Max.x;
-    window->ContentRegionRect.Max.x = window->Pos.x + window->Size.x - inset;
-    window->WorkRect.Max.x = window->ContentRegionRect.Max.x;
-    ImGui::SetCursorPosX(inset);
-    const bool open = renderSectionHeader(label, flags, layer);
-    window->ContentRegionRect.Max.x = contentRight;
-    window->WorkRect.Max.x = workRight;
-    window->DC.CursorPos.x = cursorX;
-    return open;
-}
-
 void renderFrequencyInfoPanel(AudioInput& audioInput, ReSyne::RecorderState& recorderState) {
-    if (!renderSidebarSectionHeader("Audio and output", ImGuiTreeNodeFlags_DefaultOpen)) return;
+    if (!renderSectionHeader("Audio and output", ImGuiTreeNodeFlags_DefaultOpen)) return;
     ColourCore::FrameResult result{};
     const bool playback = recorderState.audioOutput && recorderState.audioOutput->getTotalFrames() > 0;
     if (playback) {
@@ -137,7 +120,7 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
                                  bool& showSpectrumAnalyser, float sidebarWidth,
                                  float sidebarPadding, float buttonHeight,
                                  ReSyne::RecorderState* recorder, float effectiveResponseSeconds, ColourPresentation::ResponseRange responseRange) {
-    if (!renderSidebarSectionHeader("Colour Smoothing")) return;
+    if (!renderSectionHeader("Colour Smoothing")) return;
     const float contentWidth = std::max(40.0f, sidebarWidth - sidebarPadding * 2.0f);
     int mode = manualSmoothing ? 1 : 0;
     ImGui::SetNextItemWidth(contentWidth);
@@ -193,7 +176,7 @@ void renderEQControlsPanel(float& lowGain,
                           float controlWidth,
                           float buttonHeight,
                           float contentWidth) {
-    if (renderSidebarSectionHeader("EQ/Gain")) {
+    if (renderSectionHeader("EQ/Gain")) {
 
         if (!enabled) {
             ImGui::TextDisabled("Live input only");
@@ -240,8 +223,8 @@ void renderAdvancedSettingsPanel(UIState& state
                                   , const std::vector<MIDIInput::DeviceInfo>* midiDevices
 #endif
                                   ) {
-    if (renderSidebarSectionHeader("Advanced Settings")) {
-        if (renderSidebarSectionHeader("Appearance", 0, SectionLayer::Secondary)) {
+    if (renderSectionHeader("Advanced Settings")) {
+        if (renderSectionHeader("Appearance", 0, SectionLayer::Secondary)) {
             ImGui::Text("Sidebar: %s", state.visibility.sidebarOnLeft ? "Left" : "Right");
             if (ImGui::Button("Swap Sides")) {
                 state.visibility.sidebarOnLeft = !state.visibility.sidebarOnLeft;
@@ -337,7 +320,7 @@ void renderAdvancedSettingsPanel(UIState& state
         }
 
 #ifdef ENABLE_OSC
-        if (renderSidebarSectionHeader("OSC", 0, SectionLayer::Secondary)) {
+        if (renderSectionHeader("OSC", 0, SectionLayer::Secondary)) {
             auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
             const auto stats = osc.getStats();
             const bool transportRunning = osc.isRunning();
@@ -438,7 +421,7 @@ void renderAdvancedSettingsPanel(UIState& state
 
 #ifdef ENABLE_MIDI
         if (midiInput && midiDevices) {
-            if (renderSidebarSectionHeader("MIDI", 0, SectionLayer::Secondary)) {
+            if (renderSectionHeader("MIDI", 0, SectionLayer::Secondary)) {
                 ImGui::Text("MIDI INPUT DEVICE");
                 MIDIDeviceManager::renderMIDIDeviceSelection(state.midiDeviceState, *midiInput, *midiDevices);
 

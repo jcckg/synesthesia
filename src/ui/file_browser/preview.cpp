@@ -48,7 +48,11 @@ void Preview::update(const std::string& trackPath, bool trackAvailable, float de
     artworkDirectory = showingTrack ? utf8(path(trackPath).parent_path())
         : selectedDirectory.empty() ? browsingDirectory : selectedDirectory;
     const auto titlePath = showingTrack ? path(trackPath).stem() : path(artworkDirectory).filename();
-    const std::string nextTitle = titlePath.empty() ? artworkDirectory : utf8(titlePath);
+    std::string nextTitle = titlePath.empty() ? artworkDirectory : utf8(titlePath);
+    if (showingTrack) {
+        const auto folder = utf8(path(artworkDirectory).filename());
+        if (!folder.empty()) nextTitle += " - " + folder;
+    }
     if (nextTitle != title) {
         previousTitle = std::move(title);
         title = nextTitle;
