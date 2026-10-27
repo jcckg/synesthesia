@@ -16,7 +16,7 @@ Frame buildFrame(const AudioColourSample& sample) {
     const auto channels = static_cast<std::size_t>(sample.channels);
     if (channels > 0 && sample.bass.size() == channels && sample.bass.front()) {
         auto mixed = std::make_shared<AudioAnalysis::BassSpectrum>(*sample.bass.front());
-        std::fill(mixed->magnitudes.begin(),mixed->magnitudes.end(),0);
+        std::fill(mixed->magnitudes.begin(),mixed->magnitudes.end(),0.0f);
         for (const auto& channel : sample.bass) {
             if (!channel || channel->sampleRate != mixed->sampleRate || channel->magnitudes.size() != mixed->magnitudes.size()) return frame;
             mixed->coverage = std::min(mixed->coverage,channel->coverage);

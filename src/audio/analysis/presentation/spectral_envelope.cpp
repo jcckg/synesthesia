@@ -80,7 +80,7 @@ LogEnvelope::Estimate LogEnvelope::update(double power, double shape, double inf
     const double observed = std::log(power);
     const double k = shape * std::clamp(information, 1e-5, 1.0);
     if (!ready_) {
-        for (auto& state : states_) state = {observed, 0, 1 / shape, 0, 1 / (shape * support * support), 1.0 / states_.size()};
+        for (auto& state : states_) state = {observed, 0, 1 / shape, 0, 1 / (shape * support * support), 1.0 / static_cast<double>(states_.size())};
         ready_ = true;
         return {std::sqrt(power), power, 0};
     }
@@ -104,8 +104,8 @@ LogEnvelope::Estimate LogEnvelope::update(double power, double shape, double inf
         auto& state = states_[index];
         // Moment-match states conditional on the Markov volatility transition before prediction.
         // https://doi.org/10.1109/9.1299 ; between-component mean differences belong in the covariance.
-        const double priorWeight = (1 - replacement) * state.weight + replacement / states_.size();
-        const double jumped = replacement / states_.size() / priorWeight, stayed = 1 - jumped;
+        const double priorWeight = (1 - replacement) * state.weight + replacement / static_cast<double>(states_.size());
+        const double jumped = replacement / static_cast<double>(states_.size()) / priorWeight, stayed = 1 - jumped;
         const double level = stayed * state.level + jumped * mixture.level;
         const double rate = stayed * state.rate + jumped * mixture.rate;
         const double localLevel = state.level - level, localRate = state.rate - rate;
@@ -181,10 +181,10 @@ void SpectralEnvelope::filter(std::vector<float>& magnitudes, const std::vector<
     std::vector<double> coherentFractions(magnitudes.size());
     for (std::size_t index = 0; index < magnitudes.size(); ++index) {
         auto& bin = bins[index];
-        const double magnitude = std::isfinite(magnitudes[index]) ? std::max(0.f, magnitudes[index]) : 0;
+        const double magnitude = static_cast<double>(std::isfinite(magnitudes[index]) ? std::max(0.f, magnitudes[index]) : 0);
         double coherent = 0;
         if (phases.size() == magnitudes.size() && std::isfinite(phases[index]) && magnitude > 1e-12) {
-            const double phase = phases[index];
+            const double phase = static_cast<double>(phases[index]);
             if (bin.hasPhase) {
                 const double expected = 2 * std::numbers::pi * static_cast<double>(index) * dt / support;
                 const double velocity = (expected + std::remainder(phase - bin.phase - expected, 2 * std::numbers::pi)) / dt;
@@ -206,7 +206,7 @@ void SpectralEnvelope::filter(std::vector<float>& magnitudes, const std::vector<
     }
     for (std::size_t index = 0; index < magnitudes.size(); ++index) {
         auto& bin = bins[index];
-        const double magnitude = std::isfinite(magnitudes[index]) ? std::max(0.f, magnitudes[index]) : 0;
+        const double magnitude = static_cast<double>(std::isfinite(magnitudes[index]) ? std::max(0.f, magnitudes[index]) : 0);
         double coherent = coherentFractions[index];
         // Real endpoint phase is only a sign. Its neighbour supplies phase-noise evidence with a different kernel.
         if (index == 0 || (nyquist && index + 1 == magnitudes.size())) {
@@ -235,11 +235,12 @@ void SpectralEnvelope::filter(std::vector<float>& magnitudes, const std::vector<
 
 Frame SpectralEnvelope::process(const Frame& source, double timestamp, const Settings& settings) {
     if (!std::isfinite(timestamp) || (!std::isfinite(source.sampleRate) || source.sampleRate < 8000 || source.sampleRate > 768000) || source.magnitudes.size() < 2) return source;
-    if (timestamp < timestamp_ || rate_ != source.sampleRate || bins_.size() != source.magnitudes.size()) *this = {};
+    const double sampleRate = static_cast<double>(source.sampleRate);
+    if (timestamp < timestamp_ || rate_ != sampleRate || bins_.size() != source.magnitudes.size()) *this = {};
     if (timestamp == timestamp_) return previous_;
     if (source.measurementFrequencies != previous_.measurementFrequencies) lineBins_.clear();
     if (source.kWeightedMagnitudes.empty() != previous_.kWeightedMagnitudes.empty()) brightness_ = {};
-    const double support = 2.0 * (source.magnitudes.size() - 1) / source.sampleRate;
+    const double support = 2.0 * static_cast<double>(source.magnitudes.size() - 1) / sampleRate;
     const double dt = std::isfinite(timestamp_) ? timestamp - timestamp_ : support;
     if (dt > std::max(2.0, 4 * support)) *this = {};
     const std::array<float, 3> gains{settings.lowGain, settings.midGain, settings.highGain};
@@ -258,19 +259,19 @@ Frame SpectralEnvelope::process(const Frame& source, double timestamp, const Set
         (!measured && (source.frequencies != previous_.frequencies ||
             source.measurementFrequencies != previous_.measurementFrequencies ||
             source.measurementPowerWeights != previous_.measurementPowerWeights))) {
-        const auto kWeighting = AudioAnalysis::kWeighting(source.sampleRate);
+        const auto kWeighting = AudioAnalysis::kWeighting(sampleRate);
         brightnessWeights_.resize(original.size());
         measuredBrightness_ = measured;
         for (std::size_t i = 0; i < original.size(); ++i) {
             double weight = i == 0 || i + 1 == original.size() ? 1 : .5;
-            if (lines && !measured && source.measurementPowerWeights.size() == original.size()) weight = source.measurementPowerWeights[i];
+            if (lines && !measured && source.measurementPowerWeights.size() == original.size()) weight = static_cast<double>(source.measurementPowerWeights[i]);
             const double frequency = !measured && lines && source.measurementFrequencies.size() == original.size() ?
                 static_cast<double>(source.measurementFrequencies[i]) :
                 (!measured && source.frequencies.size() == original.size() ?
                     static_cast<double>(source.frequencies[i]) : static_cast<double>(i) / support);
-            const bool validFrequency = std::isfinite(frequency) && frequency >= 0 && frequency <= source.sampleRate * .5;
-            if (!measured) weight *= validFrequency ? AudioAnalysis::kWeightingPower(kWeighting, frequency, source.sampleRate) : 0;
-            const double eq = validFrequency ? AudioEQ::cascadeMagnitudeResponse(equaliser, static_cast<float>(frequency), source.sampleRate) : 0;
+            const bool validFrequency = std::isfinite(frequency) && frequency >= 0 && frequency <= sampleRate * .5;
+            if (!measured) weight *= validFrequency ? AudioAnalysis::kWeightingPower(kWeighting, frequency, sampleRate) : 0;
+            const double eq = static_cast<double>(validFrequency ? AudioEQ::cascadeMagnitudeResponse(equaliser, static_cast<float>(frequency), source.sampleRate) : 0);
             weight *= eq * eq;
             weight = std::isfinite(weight) ? std::max(0.0, weight) : 0;
             brightnessWeights_[i] = weight;
@@ -280,11 +281,11 @@ Frame SpectralEnvelope::process(const Frame& source, double timestamp, const Set
     double power = 0, variance = 0, estimatedPower = 0;
     for (std::size_t i = 0; i < original.size(); ++i) {
         const double weight = brightnessWeights_[i];
-        const double value = std::isfinite(original[i]) ? original[i] : 0;
+        const double value = static_cast<double>(std::isfinite(original[i]) ? original[i] : 0);
         const double energy = value * value * weight;
         deviations[i] = energy / std::sqrt(observations[i].shape);
         power += energy;
-        estimatedPower += static_cast<double>(estimated[i]) * estimated[i] * weight;
+        estimatedPower += static_cast<double>(estimated[i]) * static_cast<double>(estimated[i]) * weight;
         variance += deviations[i] * deviations[i];
         // The squared Hann window couples adjacent complex bins by -2/3 and next-neighbours by 1/6.
         // https://www.dsprelated.com/freebooks/sasp/Spectrum_Analysis_Noise.html
@@ -300,10 +301,10 @@ Frame SpectralEnvelope::process(const Frame& source, double timestamp, const Set
         if (previous_.bass && (source.bass->sampleRate != previous_.bass->sampleRate ||
             source.bass->coverage < previous_.bass->coverage)) bassBins_.clear();
         auto bass = std::make_shared<AudioAnalysis::BassSpectrum>(*source.bass);
-        filter(bass->magnitudes, {}, bassBins_, dt, AudioAnalysis::BassSpectrum::windowSize / bass->sampleRate, false, nullptr, {}, false);
+        filter(bass->magnitudes, {}, bassBins_, dt, static_cast<double>(AudioAnalysis::BassSpectrum::windowSize / bass->sampleRate), false, nullptr, {}, false);
         output.bass = std::move(bass);
     } else bassBins_.clear();
-    rate_ = source.sampleRate;
+    rate_ = sampleRate;
     timestamp_ = timestamp;
     previous_ = output;
     return output;

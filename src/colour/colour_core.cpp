@@ -361,21 +361,21 @@ float calculateBrightnessDb(std::span<const float> magnitudes, std::span<const f
         cache.sampleRate = sampleRate;
         cache.frequencies.assign(frequencies.begin(), frequencies.end());
         cache.weights.resize(frequencies.size());
-        const auto sections = AudioAnalysis::kWeighting(sampleRate);
+        const auto sections = AudioAnalysis::kWeighting(static_cast<double>(sampleRate));
         for (std::size_t i = 0; i < frequencies.size(); ++i)
             cache.weights[i] = std::isfinite(frequencies[i]) && frequencies[i] >= 0 && frequencies[i] <= sampleRate * .5f ?
-                AudioAnalysis::kWeightingPower(sections, frequencies[i], sampleRate) : 0.0;
+                AudioAnalysis::kWeightingPower(sections, static_cast<double>(frequencies[i]), static_cast<double>(sampleRate)) : 0.0;
     }
     double power = 0.0;
     for (std::size_t i = 0; i < magnitudes.size(); ++i) {
         const double weight = layout && layout->powerWeights.size() == magnitudes.size() ?
-            layout->powerWeights[i] : (i == 0 || i + 1 == magnitudes.size() ? 1.0 : .5);
-        const double magnitude = magnitudes[i];
+            static_cast<double>(layout->powerWeights[i]) : (i == 0 || i + 1 == magnitudes.size() ? 1.0 : .5);
+        const double magnitude = static_cast<double>(magnitudes[i]);
         power += magnitude * magnitude * weight * cache.weights[i];
     }
     const auto fftSize = layout && layout->fftSize > 0 ? layout->fftSize : 2 * (magnitudes.size() - 1);
-    if (fftSize > 2) power /= .375 * static_cast<double>(fftSize - 1) / fftSize;
-    if (layout && std::isfinite(layout->brightnessPowerGain)) power *= std::max(0.0f, layout->brightnessPowerGain);
+    if (fftSize > 2) power /= .375 * static_cast<double>(fftSize - 1) / static_cast<double>(fftSize);
+    if (layout && std::isfinite(layout->brightnessPowerGain)) power *= static_cast<double>(std::max(0.0f, layout->brightnessPowerGain));
     return power > 0 ? static_cast<float>(-.691 + 10 * std::log10(power)) : -std::numeric_limits<float>::infinity();
 }
 
@@ -946,10 +946,11 @@ void XYZtoRGB(const float X, const float Y, const float Z,
               const bool applyGamutMapping) {
     const auto& definition = outputProfileDefinition(colourSpace);
     const auto& matrix = workingPrimaryProfile(colourSpace).xyzToRgb;
-    const std::array<double,3> linearRgb{
-        static_cast<double>(matrix[0]) * X + static_cast<double>(matrix[1]) * Y + static_cast<double>(matrix[2]) * Z,
-        static_cast<double>(matrix[3]) * X + static_cast<double>(matrix[4]) * Y + static_cast<double>(matrix[5]) * Z,
-        static_cast<double>(matrix[6]) * X + static_cast<double>(matrix[7]) * Y + static_cast<double>(matrix[8]) * Z};
+    const std::array<double, 3> xyz{static_cast<double>(X), static_cast<double>(Y), static_cast<double>(Z)};
+    const std::array<double, 3> linearRgb{
+        matrix[0] * xyz[0] + matrix[1] * xyz[1] + matrix[2] * xyz[2],
+        matrix[3] * xyz[0] + matrix[4] * xyz[1] + matrix[5] * xyz[2],
+        matrix[6] * xyz[0] + matrix[7] * xyz[1] + matrix[8] * xyz[2]};
 
     double linearR = linearRgb[0];
     double linearG = linearRgb[1];
@@ -960,9 +961,9 @@ void XYZtoRGB(const float X, const float Y, const float Z,
     // https://docs.scipy.org/doc/scipy/reference/generated/scipy.special.logsumexp.html
     if (applyGamutMapping) {
         if (!std::isfinite(X) || !std::isfinite(Y) || !std::isfinite(Z) || Y <= 0.0f) {
-            linearR = linearG = linearB = 0.0f;
+            linearR = linearG = linearB = 0.0;
         } else {
-            const double luminance = Y;
+            const double luminance = xyz[1];
             const std::array<double,4> distances{0.0, -linearR / luminance, -linearG / luminance, -linearB / luminance};
             const double maximum = *std::max_element(distances.begin(), distances.end());
             if (maximum > 0.0) {

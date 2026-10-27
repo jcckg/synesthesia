@@ -176,8 +176,8 @@ void paintGradientFrame(std::vector<uint16_t>& buffer, int width, int height,
         ColourPresentation::applyOutputPrecision(rgb.r, rgb.g, rgb.b);
         const std::array<uint16_t, 3> pixel{toWord(rgb.r), toWord(rgb.g), toWord(rgb.b)};
         for (int y = 0; y < height; ++y) {
-            const auto offset = (static_cast<std::size_t>(y) * width + x) * 3;
-            std::copy(pixel.begin(), pixel.end(), buffer.begin() + offset);
+            const auto offset = (static_cast<std::size_t>(y) * static_cast<std::size_t>(width) + static_cast<std::size_t>(x)) * 3;
+            std::copy(pixel.begin(), pixel.end(), buffer.data() + offset);
         }
     }
 }

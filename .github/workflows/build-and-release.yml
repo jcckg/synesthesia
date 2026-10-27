@@ -22,8 +22,10 @@ jobs:
   build-macos:
     needs: check-release-flag
     if: needs.check-release-flag.outputs.should_release == 'true'
-    runs-on: macos-14
+    runs-on: macos-15
     env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      MACOSX_DEPLOYMENT_TARGET: "14.0"
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_BASEDIRS: ${{ github.workspace }}
       SCCACHE_IGNORE_SERVER_IO_ERROR: "1"
@@ -36,6 +38,11 @@ jobs:
 
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Verify macOS toolchain
+        run: |
+          xcodebuild -version
+          xcrun clang++ --version
 
       - name: Determine FFmpeg revision
         id: ffmpeg-rev
@@ -51,7 +58,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
+          key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-xcode26.3-target14-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Verify FFmpeg cache
         id: ffmpeg-verify
@@ -62,7 +69,7 @@ jobs:
           if [[ -f "build/ffmpeg/install/bin/ffmpeg" && -f "build/ffmpeg/.configure-signature" ]]; then
             echo "FFmpeg binary exists"
             CACHED_SIG=$(cat build/ffmpeg/.configure-signature)
-            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-macOS-${{ steps.ffmpeg-script-hash.outputs.hash }}"
+            EXPECTED_SIG="${{ steps.ffmpeg-rev.outputs.hash }}-macos-${{ steps.ffmpeg-script-hash.outputs.hash }}"
 
             if [[ "$CACHED_SIG" == "$EXPECTED_SIG" ]]; then
               echo "Signature matches: $CACHED_SIG"
@@ -96,7 +103,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: build/ffmpeg
-          key: ffmpeg-${{ runner.os }}-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
+          key: ffmpeg-${{ runner.os }}-${{ runner.arch }}-xcode26.3-target14-${{ steps.ffmpeg-rev.outputs.hash }}-${{ steps.ffmpeg-script-hash.outputs.hash }}
 
       - name: Configure CMake
         working-directory: ./build
@@ -143,7 +150,7 @@ jobs:
   build-windows:
     needs: check-release-flag
     if: needs.check-release-flag.outputs.should_release == 'true'
-    runs-on: windows-latest
+    runs-on: windows-2022
     env:
       SCCACHE_GHA_ENABLED: "true"
       SCCACHE_BASEDIRS: ${{ github.workspace }}
@@ -174,14 +181,15 @@ jobs:
       - name: Set up sccache
         uses: mozilla-actions/sccache-action@v0.0.9
 
-      - name: Locate MSVC build environment
+      - name: Locate Visual Studio 2022 build environment
         shell: pwsh
         run: |
           $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          $vcvars64 = & $vswhere -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find **\vcvars64.bat
+          $vcvars64 = & $vswhere -version '[17.0,18.0)' -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find **\vcvars64.bat
           if (-not $vcvars64) {
-            throw 'Could not locate vcvars64.bat'
+            throw 'Could not locate Visual Studio 2022 C++ build tools'
           }
+          Write-Host "Using Visual Studio 2022: $vcvars64"
           "VCVARS64=$vcvars64" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Create build directory

@@ -186,7 +186,7 @@ void AudioProcessor::processBuffer(const AudioBuffer& buffer) {
         sample.channels = static_cast<std::uint32_t>(buffer.numChannels);
         const auto& frame = presentationFrames[0][i];
         const auto fftSize = 2 * (frame.magnitudes.size() - 1);
-        sample.timestamp = (frame.frameCounter * static_cast<double>(frame.hopSize) - fftSize * .5) / buffer.sampleRate;
+        sample.timestamp = (static_cast<double>(frame.frameCounter) * static_cast<double>(frame.hopSize) - static_cast<double>(fftSize) * .5) / static_cast<double>(buffer.sampleRate);
         sample.magnitudes.resize(buffer.numChannels);
         sample.phases.resize(buffer.numChannels);
         sample.bass.resize(buffer.numChannels);

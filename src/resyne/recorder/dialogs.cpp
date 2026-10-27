@@ -22,6 +22,28 @@
 
 namespace ReSyne {
 
+namespace {
+
+void loadSelection(RecorderState& state, bool directoryOnly) {
+    const auto path = ::UI::FileBrowser::chooseLoadPath(state.fileBrowser.directory,
+        true, directoryOnly);
+    if (path.empty()) {
+        state.focusRequested = true;
+        return;
+    }
+    const std::u8string utf8Path(path.begin(), path.end());
+    const std::filesystem::path selectedPath(utf8Path);
+    std::error_code error;
+    const bool directory = std::filesystem::is_directory(selectedPath, error);
+    if (directory) {
+        ::UI::FileBrowser::selectDirectory(state.fileBrowser, path);
+    } else {
+        Recorder::requestImport(state, path);
+    }
+}
+
+}
+
 bool Recorder::exportRecording(RecorderState& state,
                                const std::string& filepath,
                                RecorderExportFormat format) {
@@ -264,26 +286,11 @@ void Recorder::cancelExport(RecorderState& state) {
 }
 
 void Recorder::handleLoadDialog(RecorderState& state) {
-    const auto loadSelection = [&](bool directoryOnly) {
-        const auto path = ::UI::FileBrowser::chooseLoadPath(state.fileBrowser.directory,
-            true, directoryOnly);
-        if (path.empty()) {
-            state.focusRequested = true;
-            return;
-        }
-        std::error_code error;
-        if (std::filesystem::is_directory(std::filesystem::path(std::u8string(path.begin(), path.end())), error)) {
-            ::UI::FileBrowser::selectDirectory(state.fileBrowser, path);
-        } else {
-            requestImport(state, path);
-        }
-    };
-
 #ifdef __APPLE__
     if (!state.shouldOpenLoadDialog) return;
     state.shouldOpenLoadDialog = false;
     if (state.exportRunning.load(std::memory_order_acquire)) return;
-    loadSelection(false);
+    loadSelection(state, false);
 #else
     if (state.shouldOpenLoadDialog) {
         state.shouldOpenLoadDialog = false;
@@ -302,7 +309,7 @@ void Recorder::handleLoadDialog(RecorderState& state) {
         }
         if (chooseFile || chooseDirectory) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
-        if (chooseFile || chooseDirectory) loadSelection(chooseDirectory);
+        if (chooseFile || chooseDirectory) loadSelection(state, chooseDirectory);
     }
 #endif
 }

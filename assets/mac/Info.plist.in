@@ -21,7 +21,7 @@
     <key>CFBundleVersion</key>
     <string>${SYNESTHESIA_VERSION}</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2025 Jack Gannon | MIT License</string>
+    <string>Copyright © ${SYNESTHESIA_VERSION_MAJOR} Jack Gannon</string>
     <key>LSMinimumSystemVersion</key>
     <string>10.15</string>
     <key>NSHighResolutionCapable</key>

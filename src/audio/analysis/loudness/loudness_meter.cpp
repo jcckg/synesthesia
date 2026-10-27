@@ -24,7 +24,7 @@ void LoudnessMeter::initialiseFilters(const float sampleRate) {
 	runningEnergy = 0.0;
 	bufferPosition = 0;
 
-    const auto sections = AudioAnalysis::kWeighting(sampleRate);
+    const auto sections = AudioAnalysis::kWeighting(static_cast<double>(sampleRate));
     preFilter.b = sections[0].b;
     preFilter.a = sections[0].a;
     rlbFilter.b = sections[1].b;
@@ -54,7 +54,7 @@ void LoudnessMeter::processSamples(const std::span<const float> samples, const f
 
 	for (std::size_t i = 0; i < samples.size(); ++i) {
         const float sample = samples[i];
-		const double filtered1 = preFilter.process(std::isfinite(sample) ? sample : 0.0f);
+		const double filtered1 = preFilter.process(std::isfinite(sample) ? static_cast<double>(sample) : 0.0);
 		const double filtered2 = rlbFilter.process(filtered1);
         if (i < weightedSamples.size()) weightedSamples[i] = static_cast<float>(filtered2);
 
@@ -68,7 +68,7 @@ void LoudnessMeter::processSamples(const std::span<const float> samples, const f
 }
 
 float LoudnessMeter::loudnessFromMeanSquare(const double meanSquare) const {
-	if (meanSquare <= 0.0f)
+	if (meanSquare <= 0.0)
 		return -200.0f;
 
 	return static_cast<float>(-0.691 + 10.0 * std::log10(meanSquare));
@@ -98,7 +98,7 @@ float LoudnessMeter::combineChannelLoudness(const std::span<const float> channel
 void LoudnessMeter::reset() {
 	preFilter.reset();
 	rlbFilter.reset();
-	std::fill(audioBuffer.begin(), audioBuffer.end(), 0.0f);
+	std::fill(audioBuffer.begin(), audioBuffer.end(), 0.0);
 	bufferPosition = 0;
     runningEnergy = 0.0;
 }

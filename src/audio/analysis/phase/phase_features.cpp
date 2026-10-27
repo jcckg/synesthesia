@@ -209,7 +209,7 @@ PhaseFeatureMetrics LiveFrameTracker::update(const SpectralPresentation::Frame& 
         magnitudes.size() == frame.magnitudes.size();
     if (sameLayout && counter == previousCounter) return cached;
     const float delta = sameLayout && counter > previousCounter && frame.sampleRate > 0.0f
-        ? static_cast<float>((counter - previousCounter) * static_cast<double>(hopSize) / frame.sampleRate)
+        ? static_cast<float>(static_cast<double>(counter - previousCounter) * static_cast<double>(hopSize) / static_cast<double>(frame.sampleRate))
         : 0.0f;
     cached = analyseTransition(magnitudes, phases, frame.magnitudes, frame.phases,
         frame.frequencies, frame.sampleRate, delta);

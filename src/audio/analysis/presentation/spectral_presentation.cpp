@@ -57,11 +57,11 @@ EmissionLines combineBass(const Frame& frame, const Settings& settings, const st
         magnitude = std::isfinite(magnitude) ? std::max(0.f, magnitude) : 0.f;
         magnitude *= AudioEQ::cascadeMagnitudeResponse(cascade, frequency, frame.sampleRate);
     }
-    const double resolution = frame.sampleRate / resolveFftSize(shortMagnitudes.size());
+    const double resolution = static_cast<double>(frame.sampleRate / static_cast<float>(resolveFftSize(shortMagnitudes.size())));
     std::vector<double> allocated(bassMagnitudes.size());
     std::vector<double> bassFrequencies(bassMagnitudes.size()), bassWeights(bassMagnitudes.size());
     for (std::size_t j = 0; j < bassMagnitudes.size(); ++j) {
-        bassFrequencies[j] = j * frame.bass->sampleRate / 1024;
+        bassFrequencies[j] = static_cast<double>(static_cast<float>(j) * frame.bass->sampleRate / 1024);
         bassWeights[j] = bassWeight(bassFrequencies[j]);
     }
     result.magnitudes.reserve(shortMagnitudes.size() + bassMagnitudes.size());
@@ -71,7 +71,7 @@ EmissionLines combineBass(const Frame& frame, const Settings& settings, const st
     // https://www.dsprelated.com/freebooks/sasp/FFT_Filter_Banks.html
     for (std::size_t i = 0; i < shortMagnitudes.size(); ++i) {
         const float frequency = frequencyAt(i);
-        const double weight = bassWeight(frequency) * std::clamp(static_cast<double>(frame.bass->coverage), 0.0, 1.0);
+        const double weight = bassWeight(static_cast<double>(frequency)) * std::clamp(static_cast<double>(frame.bass->coverage), 0.0, 1.0);
         if (weight == 0 || shortMagnitudes[i] == 0) {
             result.magnitudes.push_back(shortMagnitudes[i]);
             result.frequencies.push_back(frequency);
@@ -80,16 +80,16 @@ EmissionLines combineBass(const Frame& frame, const Settings& settings, const st
         double mass = 0;
         for (std::size_t j = 0; j < bassMagnitudes.size(); ++j) {
             const double longFrequency = bassFrequencies[j];
-            mass += bassMagnitudes[j] * bassWeights[j] * std::max(0.0, 1 - std::abs(longFrequency - frequency) / resolution);
+            mass += static_cast<double>(bassMagnitudes[j]) * bassWeights[j] * std::max(0.0, 1 - std::abs(longFrequency - static_cast<double>(frequency)) / resolution);
         }
-        const double transferred = mass > 1e-20 ? shortMagnitudes[i] * weight : 0;
-        result.magnitudes.push_back(static_cast<float>(shortMagnitudes[i] - transferred));
+        const double transferred = mass > 1e-20 ? static_cast<double>(shortMagnitudes[i]) * weight : 0;
+        result.magnitudes.push_back(static_cast<float>(static_cast<double>(shortMagnitudes[i]) - transferred));
         result.frequencies.push_back(frequency);
         if (transferred <= 0) continue;
         for (std::size_t j = 0; j < bassMagnitudes.size(); ++j) {
             const double longFrequency = bassFrequencies[j];
-            allocated[j] += transferred * bassMagnitudes[j] * bassWeights[j] *
-                std::max(0.0, 1 - std::abs(longFrequency - frequency) / resolution) / mass;
+            allocated[j] += transferred * static_cast<double>(bassMagnitudes[j]) * bassWeights[j] *
+                std::max(0.0, 1 - std::abs(longFrequency - static_cast<double>(frequency)) / resolution) / mass;
         }
     }
     for (std::size_t j = 0; j < allocated.size(); ++j) {
@@ -207,7 +207,7 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
         if (magnitudes[channel].size() != numBins) continue;
         std::vector<double> cumulative(numBins + 1);
         for (std::size_t bin = 0; bin < numBins; ++bin) {
-            const double value = magnitudes[channel][bin];
+            const double value = static_cast<double>(magnitudes[channel][bin]);
             cumulative[bin + 1] = cumulative[bin] + (std::isfinite(value) && value > 0 ? value * value : 0);
         }
         for (std::size_t bin = 0; bin < numBins; ++bin) {
@@ -228,7 +228,7 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
             auto& pair = crossSpectra[a][b];
             pair.cross.resize(numBins); pair.firstPower.resize(numBins); pair.secondPower.resize(numBins);
             for (std::size_t j = 0; j < numBins; ++j) {
-                const double ma = magnitudes[a][j], mb = magnitudes[b][j];
+                const double ma = static_cast<double>(magnitudes[a][j]), mb = static_cast<double>(magnitudes[b][j]);
                 if (!std::isfinite(ma) || !std::isfinite(mb) || ma < 0 || mb < 0 ||
                     !std::isfinite(phases[a][j]) || !std::isfinite(phases[b][j])) continue;
                 pair.firstPower[j] = ma * ma; pair.secondPower[j] = mb * mb;
@@ -259,7 +259,7 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
                     for (auto j = first; j < last; ++j) {
                         aa += pair.firstPower[j]; bb += pair.secondPower[j]; cross += pair.cross[j];
                     }
-                    const double samples = (last - first) / (1 + 8.0 / 9 + 1.0 / 18);
+                    const double samples = static_cast<double>(last - first) / (1 + 8.0 / 9 + 1.0 / 18);
                     const double chance = 1 / samples;
                     coherence = aa > 0 && bb > 0 && chance < 1 ?
                         std::clamp((std::norm(cross) / (aa * bb) - chance) / (1 - chance), 0.0, 1.0) : 1;
@@ -283,7 +283,7 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
     bool differentMappings = false;
     const auto frequencyAt = [&](size_t channel, size_t bin) {
         return channel < frequencies.size() && frequencies[channel].size() == numBins
-            ? frequencies[channel][bin] : static_cast<float>(bin) * sampleRate / resolveFftSize(numBins);
+            ? frequencies[channel][bin] : static_cast<float>(bin) * sampleRate / static_cast<float>(resolveFftSize(numBins));
     };
     for (size_t ch = 1; ch < channelLimit; ++ch) {
         for (size_t bin = 0; bin < numBins; ++bin) {
@@ -301,7 +301,7 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
                 if (!std::isfinite(frequency) || frequency < 0.0f || frequency > sampleRate * 0.5f ||
                     !std::isfinite(magnitude) || magnitude < 0.0f) continue;
                 auto& line = lines[frequency];
-                const double energy = static_cast<double>(magnitude) * magnitude / contributingMagnitudeChannels;
+                const double energy = static_cast<double>(magnitude) * static_cast<double>(magnitude) / static_cast<double>(contributingMagnitudeChannels);
                 line.energy += energy;
                 line.power += energy * (bin == 0 || bin + 1 == numBins ? 1.0 : 0.5);
             }

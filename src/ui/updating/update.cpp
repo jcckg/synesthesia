@@ -14,7 +14,9 @@
 #include <iostream>
 
 #ifdef _WIN32
+    #ifndef NOMINMAX
     #define NOMINMAX
+    #endif
     #include <windows.h>
     #include <shellapi.h>
     #include <winhttp.h>

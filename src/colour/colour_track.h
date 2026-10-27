@@ -1,9 +1,9 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "colour/colour_core.h"
@@ -40,6 +40,7 @@ private:
     struct Block {
         Block() = default;
         Block(const Block& other) : points(other.points), integral(other.integral), precedingIntegral(other.precedingIntegral) {}
+        mutable std::mutex projectionMutex;
         mutable std::array<std::shared_ptr<const std::vector<ColourTriple>>,6> projectedIntegrals{};
         std::vector<TrackPoint> points;
         std::vector<ColourTriple> integral;

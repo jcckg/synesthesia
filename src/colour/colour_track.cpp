@@ -78,7 +78,10 @@ void ColourTrack::append(const TrackPoint& point) {
     }
     if (blocks_.back().use_count() > 1) blocks_.back() = std::make_shared<Block>(*blocks_.back());
     auto& block = *std::const_pointer_cast<Block>(blocks_.back());
-    for (auto& cache : block.projectedIntegrals) std::atomic_store(&cache,std::shared_ptr<const std::vector<ColourTriple>>{});
+    {
+        std::lock_guard lock(block.projectionMutex);
+        block.projectedIntegrals.fill(nullptr);
+    }
     if (!block.points.empty() && point.time == block.points.back().time) {
         block.points.back() = point;
         if (block.points.size() > 1) {
@@ -167,16 +170,20 @@ std::shared_ptr<const std::vector<ColourTriple>> ColourTrack::projectionData(
     const Block& block, ColourCore::ColourSpace space, bool gamut) const {
     const std::size_t profile = space == ColourCore::ColourSpace::Rec2020 ? 0 :
         space == ColourCore::ColourSpace::DisplayP3 ? 1 : 2;
-    auto& cache = block.projectedIntegrals[profile * 2 + static_cast<std::size_t>(gamut)];
-    auto existing = std::atomic_load(&cache);
-    if (existing) return existing;
+    const std::size_t index = profile * 2 + static_cast<std::size_t>(gamut);
+    {
+        std::lock_guard lock(block.projectionMutex);
+        const auto cached = block.projectedIntegrals[index];
+        if (cached) return cached;
+    }
     auto integral = std::make_shared<std::vector<ColourTriple>>(block.points.size());
     for (std::size_t i = 1; i < block.points.size(); ++i)
         (*integral)[i] = add((*integral)[i-1], displayedSegmentIntegral(block.points[i-1], block.points[i],
             block.points[i-1].time, block.points[i].time, space, gamut));
-    std::shared_ptr<const std::vector<ColourTriple>> immutable = integral;
-    if (std::atomic_compare_exchange_strong(&cache,&existing,immutable)) return immutable;
-    return existing;
+    std::lock_guard lock(block.projectionMutex);
+    auto& cached = block.projectedIntegrals[index];
+    if (!cached) cached = std::move(integral);
+    return cached;
 }
 
 void ColourTrack::prepareProjection(ColourCore::ColourSpace space, bool gamut) const {

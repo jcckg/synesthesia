@@ -11,7 +11,7 @@ void ContributionHistory::seed(const ColourPresentation::SpectralContributions& 
     for (const auto& contribution : contributions) {
         if (contribution.band >= bands_.size()) continue;
         for (std::size_t c = 0; c < 3; ++c)
-            if (std::isfinite(contribution.xyz[c])) bands_[contribution.band].xyz[c] += contribution.xyz[c];
+            if (std::isfinite(contribution.xyz[c])) bands_[contribution.band].xyz[c] += static_cast<double>(contribution.xyz[c]);
     }
     seeded_ = true;
 }
@@ -30,7 +30,7 @@ const ColourPresentation::SpectralContributions& ContributionHistory::process(
     constexpr auto count = ColourPresentation::contributionBandCount;
     static const auto frequencies = [] {
         std::array<double, count> values{};
-        for (std::size_t i = 0; i < count; ++i) values[i] = ColourPresentation::contributionBandFrequency(i);
+        for (std::size_t i = 0; i < count; ++i) values[i] = static_cast<double>(ColourPresentation::contributionBandFrequency(i));
         return values;
     }();
     std::array<std::array<double, 3>, count> targetXYZ{};
@@ -38,14 +38,14 @@ const ColourPresentation::SpectralContributions& ContributionHistory::process(
     for (const auto& target : targets) {
         if (target.band >= count) continue;
         for (std::size_t c = 0; c < 3; ++c)
-            if (std::isfinite(target.xyz[c])) targetXYZ[target.band][c] += target.xyz[c];
-        if (std::isfinite(target.magnitude)) magnitudes[target.band] += std::max(0.0f, target.magnitude);
+            if (std::isfinite(target.xyz[c])) targetXYZ[target.band][c] += static_cast<double>(target.xyz[c]);
+        if (std::isfinite(target.magnitude)) magnitudes[target.band] += static_cast<double>(std::max(0.0f, target.magnitude));
     }
     frequencyResolution = std::isfinite(frequencyResolution) ? std::max(0.0f, frequencyResolution) : 0.0f;
-    const double analysisDuration = frequencyResolution > 0.0f ? 1.0 / frequencyResolution : std::max(dt, 1.0 / 60.0);
+    const double analysisDuration = frequencyResolution > 0.0f ? 1.0 / static_cast<double>(frequencyResolution) : std::max(dt, 1.0 / 60.0);
     const double response95 = std::log(20.0);
     const double derivativeWeight = -std::expm1(-2.0 * std::numbers::pi * dt);
-    const double base = manualResponseTime(amount);
+    const double base = static_cast<double>(manualResponseTime(amount));
     std::array<double, 3> combined{};
     double weightedResponse = 0.0, presence = 0.0, positiveFlux = 0.0, totalMagnitude = 0.0;
     presented_.clear();
@@ -77,7 +77,7 @@ const ColourPresentation::SpectralContributions& ContributionHistory::process(
             ColourCore::XYZtoOklab(static_cast<float>(local[0]), static_cast<float>(local[1]),
                 static_cast<float>(local[2]), perceptual[0], perceptual[1], perceptual[2]);
             for (std::size_t c = 0; c < 3; ++c) {
-                const double coordinate = perceptual[c] / 100.0;
+                const double coordinate = static_cast<double>(perceptual[c]) / 100.0;
                 const double change = !primeManual && dt > 0.0 ? (coordinate - band.previousTarget[c]) / dt : 0.0;
                 if (primeManual) band.derivative[c] = 0.0;
                 band.derivative[c] += derivativeWeight * (change - band.derivative[c]);

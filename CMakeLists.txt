@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.20)
 
 set(SYNESTHESIA_VERSION_MAJOR 2026)
-set(SYNESTHESIA_VERSION_MINOR 09)
-set(SYNESTHESIA_VERSION_PATCH 30)
+set(SYNESTHESIA_VERSION_MINOR 10)
+set(SYNESTHESIA_VERSION_PATCH 27)
 set(SYNESTHESIA_VERSION "${SYNESTHESIA_VERSION_MAJOR}.${SYNESTHESIA_VERSION_MINOR}.${SYNESTHESIA_VERSION_PATCH}")
 
 project(Synesthesia VERSION ${SYNESTHESIA_VERSION})
@@ -28,6 +28,8 @@ option(BUILD_MACOS_BUNDLE "Build as macOS .app bundle" OFF)
 option(ENABLE_NEON_OPTIMISATIONS "Enable ARM NEON SIMD optimisations" ON)
 option(ENABLE_OSC "Enable OSC transport" ON)
 option(ENABLE_MIDI "Enable MIDI input support" ON)
+
+include(cmake/compiler_features.cmake)
 
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/updating/version.h.in"

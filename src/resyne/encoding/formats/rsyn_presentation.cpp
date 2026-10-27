@@ -79,25 +79,25 @@ RSYNPresentationFrame ReplayState::analyse(const AudioColourSample& sample, Spec
     const auto& responses = s.envelope.responses();
     double weightedResponse = 0, presence = 0;
     for (auto& band : *automatic) {
-        const double frequency = ColourPresentation::contributionBandFrequency(band.band);
+        const double frequency = static_cast<double>(ColourPresentation::contributionBandFrequency(band.band));
         double times = 0, mass = 0;
         std::size_t first = 0, last = responses.size();
         if (estimatedSource.frequencies.size() != responses.size() && prepared.frequencyResolution > 0) {
-            const double position = std::floor(frequency / prepared.frequencyResolution);
+            const double position = std::floor(frequency / static_cast<double>(prepared.frequencyResolution));
             first = static_cast<std::size_t>(std::clamp(position - 2, 0.0, static_cast<double>(last)));
             last = static_cast<std::size_t>(std::clamp(position + 3, 0.0, static_cast<double>(last)));
         }
         for (std::size_t index = first; index < last; ++index) {
             const double sourceFrequency = estimatedSource.frequencies.size() == responses.size() ?
-                estimatedSource.frequencies[index] : index * static_cast<double>(prepared.frequencyResolution);
-            const double weight = estimatedSource.magnitudes[index] * std::max(0.0,
-                1 - std::abs(sourceFrequency - frequency) / prepared.frequencyResolution);
-            times += weight * responses[index];
+                static_cast<double>(estimatedSource.frequencies[index]) : static_cast<double>(index) * static_cast<double>(prepared.frequencyResolution);
+            const double weight = static_cast<double>(estimatedSource.magnitudes[index]) * std::max(0.0,
+                1 - std::abs(sourceFrequency - frequency) / static_cast<double>(prepared.frequencyResolution));
+            times += weight * static_cast<double>(responses[index]);
             mass += weight;
         }
         band.responseSeconds = mass > 0 ? static_cast<float>(times / mass) : 0;
-        const double size = std::abs(band.xyz[0]) + std::abs(band.xyz[1]) + std::abs(band.xyz[2]);
-        weightedResponse += size * band.responseSeconds;
+        const double size = static_cast<double>(std::abs(band.xyz[0]) + std::abs(band.xyz[1]) + std::abs(band.xyz[2]));
+        weightedResponse += size * static_cast<double>(band.responseSeconds);
         presence += size;
     }
     frame.automaticContributions = std::move(automatic);
