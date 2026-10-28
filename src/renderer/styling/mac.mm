@@ -11,7 +11,35 @@
 #import <QuartzCore/CAMetalLayer.h>
 #import <QuartzCore/CATransaction.h>
 
+@protocol SynesthesiaRuntimeCornerRadii <NSObject>
+@property (readonly) CGFloat topLeft;
+@property (readonly) CGFloat topRight;
+@property (readonly) CGFloat bottomLeft;
+@property (readonly) CGFloat bottomRight;
+@end
+
+@protocol SynesthesiaRuntimeCornerView <NSObject>
+@property (readonly, copy) id<SynesthesiaRuntimeCornerRadii> effectiveCornerRadii;
+@end
+
 namespace Renderer::Styling {
+
+namespace {
+
+std::optional<float> windowCornerRadius(GLFWwindow* window, bool left, bool top) {
+    if (window == nullptr) return std::nullopt;
+    NSWindow* nativeWindow = glfwGetCocoaWindow(window);
+    NSView* view = nativeWindow.contentView;
+    if (![view respondsToSelector:@selector(effectiveCornerRadii)]) return std::nullopt;
+    id<SynesthesiaRuntimeCornerView> roundedView = (id<SynesthesiaRuntimeCornerView>)view;
+    id<SynesthesiaRuntimeCornerRadii> radii = roundedView.effectiveCornerRadii;
+    if (radii == nil) return std::nullopt;
+    const CGFloat radius = top ? (left ? radii.topLeft : radii.topRight) :
+        (left ? radii.bottomLeft : radii.bottomRight);
+    return static_cast<float>(radius);
+}
+
+}
 
 bool allowsAutomaticResize(GLFWwindow* window) {
     if (window == nullptr) return false;
@@ -43,35 +71,11 @@ void resizeWindow(GLFWwindow* window, int width, int height, int offsetX, bool p
 }
 
 std::optional<float> windowBottomCornerRadius(GLFWwindow* window, bool left) {
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 270000
-    if (@available(macOS 27.0, *)) {
-        if (window != nullptr) {
-            NSWindow* nativeWindow = glfwGetCocoaWindow(window);
-            NSViewCornerRadii* radii = nativeWindow.contentView.effectiveCornerRadii;
-            if (radii != nil) return static_cast<float>(left ? radii.bottomLeft : radii.bottomRight);
-        }
-    }
-#else
-    (void)window;
-    (void)left;
-#endif
-    return std::nullopt;
+    return windowCornerRadius(window, left, false);
 }
 
 std::optional<float> windowTopCornerRadius(GLFWwindow* window, bool left) {
-#if __MAC_OS_X_VERSION_MAX_ALLOWED >= 270000
-    if (@available(macOS 27.0, *)) {
-        if (window != nullptr) {
-            NSWindow* nativeWindow = glfwGetCocoaWindow(window);
-            NSViewCornerRadii* radii = nativeWindow.contentView.effectiveCornerRadii;
-            if (radii != nil) return static_cast<float>(left ? radii.topLeft : radii.topRight);
-        }
-    }
-#else
-    (void)window;
-    (void)left;
-#endif
-    return std::nullopt;
+    return windowCornerRadius(window, left, true);
 }
 
 // https://developer.apple.com/documentation/quartzcore/cametallayer/colorspace
