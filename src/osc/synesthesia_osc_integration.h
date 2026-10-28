@@ -33,6 +33,8 @@ private:
     SynesthesiaOSCIntegration() = default;
 
     OSCRuntime runtime_;
+    OSCFrameBuilder frameBuilder_;
+    std::mutex frameMutex_;
 
     static std::unique_ptr<SynesthesiaOSCIntegration> instance_;
     static std::mutex instanceMutex_;

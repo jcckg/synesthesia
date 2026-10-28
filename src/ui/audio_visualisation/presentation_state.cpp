@@ -51,15 +51,24 @@ SpectralPresentation::Settings buildPlaybackPresentationSettings(const UIState& 
 }
 
 #ifdef ENABLE_OSC
-void sendOSCFrame(const std::vector<float>& magnitudes,
+void sendOSCFrame(UIState& state, const RSYNPresentationSettings& settings,
+                  const std::vector<float>& magnitudes,
                   const SpectralPresentation::Frame& frame,
                   const ColourCore::FrameResult& colourResult,
                   const float displayR,
                   const float displayG,
                   const float displayB,
                   const Synesthesia::OSC::OSCAnalysisSignals& analysisSignals,
-                  const ColourCore::XYZ& presentedXYZ, double timestamp, int fftSize = 0) {
+                  const ColourCore::XYZ& presentedXYZ, double timestamp, float responseSeconds,
+                  ColourPresentation::ResponseRange responseRange, uint64_t sourceId, int fftSize = 0) {
     Synesthesia::OSC::OSCFrameUpdate update{};
+    const auto& recorder = state.resyneState.recorderState;
+    update.status = Synesthesia::OSC::playbackStatus(recorder.importPhase != 0, recorder.isRecording,
+        recorder.audioOutput && recorder.audioOutput->getTotalFrames() > 0 ? recorder.audioOutput->isPlaying() : true);
+    update.sourceId = sourceId;
+    update.sourceAvailable = recorder.importPhase == 0;
+    update.smoothing = {settings.smoothingEnabled, settings.manualSmoothing, settings.smoothingAmount,
+        responseSeconds, responseRange.minimum, responseRange.maximum};
     update.magnitudes = std::span<const float>(magnitudes.data(), magnitudes.size());
     update.phases = std::span<const float>(frame.phases.data(), frame.phases.size());
     update.frequencies = frame.frequencies;
@@ -68,7 +77,7 @@ void sendOSCFrame(const std::vector<float>& magnitudes,
     update.colourResult = colourResult;
     update.displayColour = ColourCore::RGB{displayR, displayG, displayB};
     update.analysisSignals = analysisSignals;
-    update.presentedXYZ = presentedXYZ;
+    update.presentedXYZ = update.sourceAvailable ? presentedXYZ : ColourCore::XYZ{NAN, NAN, NAN};
     update.sourceTimestamp = timestamp;
 
     auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
@@ -86,6 +95,23 @@ void displaySpectrum(UIState& state, const ColourPresentation::SpectralContribut
     }
 }
 
+}
+
+void sendOSCStatus(UIState& state, bool liveInput) {
+#ifdef ENABLE_OSC
+    const auto& recorder = state.resyneState.recorderState;
+    Synesthesia::OSC::OSCFrameUpdate update;
+    update.status = Synesthesia::OSC::playbackStatus(recorder.importPhase != 0, recorder.isRecording,
+        recorder.audioOutput && recorder.audioOutput->getTotalFrames() > 0 ? recorder.audioOutput->isPlaying() : liveInput);
+    update.sourceAvailable = false;
+    update.smoothing = {state.visualSettings.smoothingEnabled, state.visualSettings.manualSmoothing,
+        state.visualSettings.colourSmoothingSpeed};
+    update.displayColour = {state.resyneState.displayColour[0], state.resyneState.displayColour[1], state.resyneState.displayColour[2]};
+    Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance().updateFrameData(update);
+#else
+    static_cast<void>(state);
+    static_cast<void>(liveInput);
+#endif
 }
 
 void syncRecorderPresentationSettings(UIState& state) {
@@ -142,11 +168,15 @@ void processPlaybackState(AudioInput& audioInput,
     std::vector<float> analysisMagnitudes;
     ColourCore::FrameResult playbackColourResult{};
     bool hasPlaybackColourResult = false;
+    state.presentationResponseSeconds = 0.0f;
+    state.presentationResponseRange = {};
     if (presentation && presentation->colours->size() > 0) {
         const auto rgb = presentation->colours->rgbAt(time, presentation->settings.colourSpace,
                                                      presentation->settings.applyGamutMapping);
         playbackColour = {rgb.r, rgb.g, rgb.b, 1.0f};
         const auto xyz = presentation->colours->xyzAt(time);
+        state.presentationResponseSeconds = presentation->colours->pointAt(time).responseSeconds;
+        if (presentation->analysis) state.presentationResponseRange = ColourPresentation::responseRange(presentation->analysis->contributionsAt(time));
         ctx.displayXYZ = {static_cast<float>(xyz[0]), static_cast<float>(xyz[1]), static_cast<float>(xyz[2])};
         ctx.displayXYZValid = true;
         if (presentation->analysis && !presentation->analysis->empty()) {
@@ -192,7 +222,7 @@ void processPlaybackState(AudioInput& audioInput,
     if (hasPlaybackColourResult) {
         const Synesthesia::OSC::OSCAnalysisSignals analysisSignals{
             playbackSignals.spectralFlux, playbackSignals.onsetDetected};
-        sendOSCFrame(
+        sendOSCFrame(state, presentation->settings,
             analysisMagnitudes,
             frame,
             playbackColourResult,
@@ -200,8 +230,9 @@ void processPlaybackState(AudioInput& audioInput,
             currentDisplayG,
             currentDisplayB,
             analysisSignals,
-            ctx.displayXYZ, time, recorderState.metadata.fftSize);
-    }
+            ctx.displayXYZ, time, state.presentationResponseSeconds, state.presentationResponseRange,
+            presentation->sourceGeneration * 2 + 1, recorderState.metadata.fftSize);
+    } else sendOSCStatus(state, false);
 #endif
 
     ReSyne::updateFromFFT(
@@ -233,9 +264,16 @@ void processLiveAudioState(AudioInput& audioInput,
     audioInput.copySpectralData(liveSpectralScratch);
     const auto& spectralData = liveSpectralScratch;
     const auto& live = spectralData.presentation;
-    if (!live) return;
+    if (!live) {
+        sendOSCStatus(state, true);
+        return;
+    }
     auto displayedContributions = live->frame.presentedContributions;
     double displayedTimestamp = live->frame.timestamp;
+#ifdef ENABLE_OSC
+    auto displayedSettings = live->settings;
+    uint64_t displayedSourceId = static_cast<uint64_t>(state.deviceState.selectedDeviceIndex + 1) * 2;
+#endif
     const auto& colourResult = live->frame.analysis;
     const auto& analysisMagnitudes = live->prepared.analysisMagnitudes;
     const auto& liveSignals = live->frame.smoothingSignals;
@@ -253,6 +291,10 @@ void processLiveAudioState(AudioInput& audioInput,
         if (presentation && presentation->colours->size() > 0) {
             const double time = presentation->colours->endTime();
             displayedTimestamp = time;
+#ifdef ENABLE_OSC
+            displayedSettings = presentation->settings;
+            displayedSourceId = presentation->sourceGeneration * 2 + 1;
+#endif
             const auto xyz = presentation->colours->xyzAt(time);
             const auto recordedRgb = presentation->colours->rgbAt(time, state.visualSettings.colourSpace,
                 state.visualSettings.gamutMappingEnabled);
@@ -282,7 +324,7 @@ void processLiveAudioState(AudioInput& audioInput,
         liveSignals.spectralFlux, liveSignals.onsetDetected};
     const auto frame = SpectralPresentation::mixChannels(spectralData.magnitudes, spectralData.phases, {},
         static_cast<std::uint32_t>(spectralData.magnitudes.size()), spectralData.sampleRate);
-    sendOSCFrame(
+    sendOSCFrame(state, displayedSettings,
         analysisMagnitudes,
         frame,
         colourResult,
@@ -290,7 +332,8 @@ void processLiveAudioState(AudioInput& audioInput,
         currentDisplayG,
         currentDisplayB,
         analysisSignals,
-        ctx.displayXYZ, displayedTimestamp);
+        ctx.displayXYZ, displayedTimestamp, state.presentationResponseSeconds,
+        state.presentationResponseRange, displayedSourceId);
 #endif
 
     ReSyne::updateFromFFT(

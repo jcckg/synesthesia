@@ -448,6 +448,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 
 	if (!hasPlaybackSession && !hasMicInput) {
+        UI::AudioVisualisation::sendOSCStatus(state, false);
         state.displayXYZValid = false;
 		processIdleState(clear_colour, deltaTime);
 		currentDisplayR = clear_colour[0];

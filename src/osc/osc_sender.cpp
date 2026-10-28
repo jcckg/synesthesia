@@ -1,6 +1,8 @@
 #include "osc_sender.h"
 
 #include "osc_addresses.h"
+#include "osc_analysis_fields.h"
+#include "ui/smoothing/smoothing.h"
 
 #include "ip/UdpSocket.h"
 #include "osc/OscOutboundPacketStream.h"
@@ -34,15 +36,39 @@ void appendBoolValue(osc::OutboundPacketStream& packet, const char* address, con
            << osc::EndMessage;
 }
 
+template <typename Data, std::size_t Size>
+void appendFields(osc::OutboundPacketStream& packet, const Data& data,
+                  const std::array<OSCFloatField<Data>, Size>& fields, bool source = false) {
+    for (const auto& field : fields) appendFloatValue(packet, source ? field.sourceAddress : field.legacyAddress, data.*field.value);
+}
+
+void appendStringValue(osc::OutboundPacketStream& packet, const char* address, const char* value) {
+    packet << osc::BeginMessage(address) << value << osc::EndMessage;
+}
+
 void appendNamedValueMessages(osc::OutboundPacketStream& packet, const OSCFrameData& frame) {
+    appendStringValue(packet, kFrameStatusAddress, statusName(frame.status));
     appendInt32Value(packet, kFrameMetaSampleRateAddress, frame.meta.sampleRate);
     appendInt32Value(packet, kFrameMetaFftSizeAddress, frame.meta.fftSize);
     appendInt64Value(packet, kFrameMetaTimestampAddress, frame.meta.frameTimestamp);
 
-    appendFloatValue(packet, kFrameSignalDominantFrequencyAddress, frame.signal.dominantFrequencyHz);
-    appendFloatValue(packet, kFrameSignalDominantWavelengthAddress, frame.signal.dominantWavelengthNm);
-    appendFloatValue(packet, kFrameSignalDominantMagnitudeAddress, frame.signal.dominantMagnitude);
-    appendFloatValue(packet, kFrameSignalPhaseRadiansAddress, frame.signal.phaseRadians);
+    appendBoolValue(packet, kFrameSmoothingEnabledAddress, frame.smoothing.enabled);
+    appendStringValue(packet, kFrameSmoothingModeAddress, smoothingMode(frame.smoothing));
+    appendFloatValue(packet, kFrameSmoothingAmountAddress, frame.smoothing.amount);
+    appendFloatValue(packet, kFrameSmoothingManualResponseAddress, manualResponseTime(frame.smoothing.amount));
+    appendFloatValue(packet, kFrameSmoothingResponseAddress, frame.smoothing.responseSeconds);
+    appendFloatValue(packet, kFrameSmoothingMinimumResponseAddress, frame.smoothing.minimumResponseSeconds);
+    appendFloatValue(packet, kFrameSmoothingMaximumResponseAddress, frame.smoothing.maximumResponseSeconds);
+
+    appendBoolValue(packet, kFrameSourceAnalysisAvailableAddress, frame.sourceAnalysis.available);
+    appendFields(packet, frame.signal, signalFields, true);
+    appendFields(packet, frame.spectral, spectralFields, true);
+    appendFields(packet, frame.loudness, loudnessFields, true);
+    appendFields(packet, frame.phase, phaseFields, true);
+    for (const auto& field : colourAnalysisFields) appendFloatValue(packet, field.sourceAddress, frame.sourceAnalysis.*field.value);
+
+    appendBoolValue(packet, kFramePresentedAnalysisAvailableAddress, frame.presentedAnalysis.available);
+    for (const auto& field : colourAnalysisFields) appendFloatValue(packet, field.presentedAddress, frame.presentedAnalysis.*field.value);
 
     appendFloatValue(packet, kFrameColourDisplayRAddress, frame.colour.displayR);
     appendFloatValue(packet, kFrameColourDisplayGAddress, frame.colour.displayG);
@@ -58,27 +84,12 @@ void appendNamedValueMessages(osc::OutboundPacketStream& packet, const OSCFrameD
     appendFloatValue(packet, kFrameColourOklabAAddress, frame.colour.oklabA);
     appendFloatValue(packet, kFrameColourOklabBAddress, frame.colour.oklabB);
 
-    appendFloatValue(packet, kFrameAnalysisSpectralFlatnessAddress, frame.spectral.flatness);
-    appendFloatValue(packet, kFrameAnalysisSpectralCentroidAddress, frame.spectral.centroidHz);
-    appendFloatValue(packet, kFrameAnalysisSpectralSpreadAddress, frame.spectral.spreadHz);
-    appendFloatValue(packet, kFrameAnalysisSpectralSpreadNormalisedAddress, frame.spectral.normalisedSpread);
-    appendFloatValue(packet, kFrameAnalysisSpectralRelativeSpreadAddress, frame.spectral.relativeSpreadNormalised);
-    appendFloatValue(packet, kFrameAnalysisSpectralRolloffNormalisedAddress, frame.spectral.rolloffNormalised);
-    appendFloatValue(packet, kFrameAnalysisSpectralCrestNormalisedAddress, frame.spectral.crestNormalised);
-    appendFloatValue(packet, kFrameAnalysisSpectralRolloffAddress, frame.spectral.rolloffHz);
-    appendFloatValue(packet, kFrameAnalysisSpectralCrestAddress, frame.spectral.crestFactor);
+    appendFields(packet, frame.signal, signalFields);
+    appendFields(packet, frame.spectral, spectralFields);
+    appendFields(packet, frame.loudness, loudnessFields);
+    appendFields(packet, frame.phase, phaseFields);
     appendFloatValue(packet, kFrameAnalysisSpectralFluxAddress, frame.spectral.spectralFlux);
-
-    appendFloatValue(packet, kFrameAnalysisLoudnessNormalisedAddress, frame.loudness.loudnessNormalised);
-    appendFloatValue(packet, kFrameAnalysisFrameLoudnessDbAddress, frame.loudness.frameLoudnessDb);
-    appendFloatValue(packet, kFrameAnalysisMomentaryLoudnessAddress, frame.loudness.momentaryLoudnessLUFS);
-    appendFloatValue(packet, kFrameAnalysisBrightnessNormalisedAddress, frame.loudness.brightnessNormalised);
-
     appendBoolValue(packet, kFrameAnalysisOnsetDetectedAddress, frame.transient.onsetDetected);
-
-    appendFloatValue(packet, kFrameAnalysisPhaseInstabilityAddress, frame.phase.instabilityNorm);
-    appendFloatValue(packet, kFrameAnalysisPhaseCoherenceAddress, frame.phase.coherenceNorm);
-    appendFloatValue(packet, kFrameAnalysisPhaseTransientAddress, frame.phase.transientNorm);
 }
 
 }

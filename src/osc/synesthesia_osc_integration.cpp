@@ -8,14 +8,18 @@ std::unique_ptr<SynesthesiaOSCIntegration> SynesthesiaOSCIntegration::instance_;
 std::mutex SynesthesiaOSCIntegration::instanceMutex_;
 
 bool SynesthesiaOSCIntegration::start(const OSCConfig& config) {
+    std::lock_guard lock(frameMutex_);
     if (!runtime_.updateConfig(config)) {
         return false;
     }
+    frameBuilder_.reset();
     return runtime_.start();
 }
 
 void SynesthesiaOSCIntegration::stop() {
+    std::lock_guard lock(frameMutex_);
     runtime_.stop();
+    frameBuilder_.reset();
 }
 
 bool SynesthesiaOSCIntegration::isRunning() const {
@@ -23,7 +27,10 @@ bool SynesthesiaOSCIntegration::isRunning() const {
 }
 
 bool SynesthesiaOSCIntegration::updateConfig(const OSCConfig& config) {
-    return runtime_.updateConfig(config);
+    std::lock_guard lock(frameMutex_);
+    const bool updated = runtime_.updateConfig(config);
+    if (updated) frameBuilder_.reset();
+    return updated;
 }
 
 OSCConfig SynesthesiaOSCIntegration::getConfig() const {
@@ -35,11 +42,12 @@ std::string SynesthesiaOSCIntegration::getLastError() const {
 }
 
 void SynesthesiaOSCIntegration::updateFrameData(const OSCFrameUpdate& update) {
+    std::lock_guard lock(frameMutex_);
     if (!runtime_.isRunning()) {
         return;
     }
 
-    runtime_.sendFrame(buildFrameData(update));
+    runtime_.sendFrame(frameBuilder_.build(update));
 }
 
 PendingOSCSettings SynesthesiaOSCIntegration::consumePendingSettings() {

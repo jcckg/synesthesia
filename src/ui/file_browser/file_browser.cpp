@@ -257,6 +257,7 @@ void refresh(State& state) {
 }
 
 void update(State& state, float deltaSeconds) {
+    state.contextMenu.update(state.error);
     const float delta = std::clamp(deltaSeconds, 0.0f, 0.1f);
     state.hoverElapsed += delta;
     if (state.animatedSelection != state.selectedPath) {
@@ -448,6 +449,11 @@ bool drawEntry(State& state, const Entry& entry, bool canLoad, bool playing, con
     else drawList->AddText(ImVec2(textLeft, y), ImGui::GetColorU32(ImGuiCol_Text), entry.name.c_str());
     drawList->PopClipRect();
     ImGui::EndDisabled();
+    if (state.contextMenu.attachToItem(entry)) {
+        state.selectedPath = entry.path;
+        state.selectedDirectory = entry.directory;
+        state.preview.select(entry.directory ? entry.path : utf8(filesystemPath(entry.path).parent_path()));
+    }
     ImGui::PopID();
     return activated;
 }
@@ -645,6 +651,7 @@ void draw(State& state, bool canLoad, const ImVec2& displaySize, Input::Scrollin
         state.hoverElapsed = 0.0f;
     }
     drawArtwork(state, coverSpace, displaySize);
+    state.contextMenu.draw(state.isOpen);
 
     const float scale = std::max(ImGui::GetIO().DisplayFramebufferScale.x, 1.0f);
     const float dividerWidth = 1.0f / scale;

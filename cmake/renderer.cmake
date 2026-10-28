@@ -55,6 +55,7 @@ elseif(APPLE)
         ${SRC_DIR}/ui/menu/menu_bar_mac.mm
         ${SRC_DIR}/ui/help/help_mac.mm
         ${SRC_DIR}/ui/file_browser/load_dialog_mac.mm
+        ${SRC_DIR}/utilities/platform/file_manager_mac.mm
         ${SRC_DIR}/renderer/event_tracking_frames_mac.mm
     )
     set(OBJC_FLAGS "-ObjC++ -fobjc-arc -fobjc-weak")
@@ -126,6 +127,7 @@ elseif(APPLE)
     set_source_files_properties(${SRC_DIR}/ui/menu/menu_bar_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/help/help_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/file_browser/load_dialog_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
+    set_source_files_properties(${SRC_DIR}/utilities/platform/file_manager_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/renderer/event_tracking_frames_mac.mm PROPERTIES COMPILE_FLAGS "${OBJC_FLAGS}")
     set_source_files_properties(${SRC_DIR}/ui/updating/update.cpp PROPERTIES COMPILE_FLAGS "-Wno-nan-infinity-disabled")
 
@@ -208,6 +210,7 @@ elseif(WIN32)
         vendor_imgui_backends
         dwmapi
         ole32
+        shell32
         setupapi
         uuid
         windowsapp

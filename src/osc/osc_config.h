@@ -12,7 +12,7 @@ struct OSCConfig {
     std::string destinationHost = kLoopbackHost;
     uint16_t transmitPort = 7000;
     uint16_t receivePort = 7001;
-    std::size_t outputBufferSize = 4096;
+    std::size_t outputBufferSize = 8192;
 };
 
 struct OSCDestinationValidationResult {

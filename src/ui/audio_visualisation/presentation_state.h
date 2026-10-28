@@ -12,6 +12,8 @@ struct ColourUpdateContext {
     bool& displayXYZValid;
 };
 
+void sendOSCStatus(UIState& state, bool liveInput);
+
 void syncRecorderPresentationSettings(UIState& state);
 
 bool hasPlaybackSession(const ReSyne::RecorderState& recorderState);

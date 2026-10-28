@@ -2,6 +2,17 @@
 
 namespace Synesthesia::OSC {
 
+inline constexpr const char* kFrameStatusAddress = "/synesthesia/frame/status";
+inline constexpr const char* kFrameSmoothingEnabledAddress = "/synesthesia/frame/smoothing/enabled";
+inline constexpr const char* kFrameSmoothingModeAddress = "/synesthesia/frame/smoothing/mode";
+inline constexpr const char* kFrameSmoothingAmountAddress = "/synesthesia/frame/smoothing/amount";
+inline constexpr const char* kFrameSmoothingManualResponseAddress = "/synesthesia/frame/smoothing/manual_response_seconds";
+inline constexpr const char* kFrameSmoothingResponseAddress = "/synesthesia/frame/smoothing/response_seconds";
+inline constexpr const char* kFrameSmoothingMinimumResponseAddress = "/synesthesia/frame/smoothing/minimum_response_seconds";
+inline constexpr const char* kFrameSmoothingMaximumResponseAddress = "/synesthesia/frame/smoothing/maximum_response_seconds";
+inline constexpr const char* kFrameSourceAnalysisAvailableAddress = "/synesthesia/frame/analysis/source/available";
+inline constexpr const char* kFramePresentedAnalysisAvailableAddress = "/synesthesia/frame/analysis/presented/available";
+
 inline constexpr const char* kFrameMetaSampleRateAddress = "/synesthesia/frame/meta/sample_rate";
 inline constexpr const char* kFrameMetaFftSizeAddress = "/synesthesia/frame/meta/fft_size";
 inline constexpr const char* kFrameMetaTimestampAddress = "/synesthesia/frame/meta/frame_timestamp_micros";

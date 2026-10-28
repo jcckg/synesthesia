@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "ui/file_browser/animation.h"
+#include "ui/file_browser/context_menu.h"
 #include "ui/file_browser/preview.h"
 #include "ui/input/scroll_motion.h"
 #include "ui/file_browser/resizing.h"
@@ -59,6 +60,7 @@ struct State {
     PanelAnimation panelAnimation;
     PanelAnimation resizeReveal{.value = 1.0f, .start = 1.0f, .target = 1.0f};
     Preview preview;
+    ContextMenu contextMenu;
     Input::ScrollMotion scrolling;
     std::map<std::string, DirectoryLocation> locations;
     uint64_t navigationSequence = 0;

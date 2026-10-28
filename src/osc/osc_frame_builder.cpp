@@ -12,6 +12,42 @@ namespace Synesthesia::OSC {
 
 namespace {
 
+bool validXYZ(const ColourCore::XYZ& xyz) {
+    return std::isfinite(xyz.X) && std::isfinite(xyz.Y) && std::isfinite(xyz.Z) && xyz.Y >= 0.0f;
+}
+
+OSCFrameColourAnalysis analyseColour(const ColourCore::XYZ& xyz, bool available) {
+    OSCFrameColourAnalysis result;
+    if (!available || !validXYZ(xyz)) return result;
+    result.available = true;
+    result.luminanceY = xyz.Y;
+    const float sum = xyz.X + xyz.Y + xyz.Z;
+    if (sum > 1e-12f) {
+        result.chromaticityX = xyz.X / sum;
+        result.chromaticityY = xyz.Y / sum;
+    }
+    float a, b;
+    ColourCore::XYZtoOklab(xyz.X, xyz.Y, xyz.Z, result.lightness, a, b);
+    result.chroma = std::hypot(a, b);
+    if (result.chroma > 1e-5f) {
+        const float hue = std::atan2(b, a) * 180.0f / std::numbers::pi_v<float>;
+        result.hueDegrees = hue < 0.0f ? hue + 360.0f : hue;
+    }
+    return result;
+}
+
+float colourChange(const ColourCore::XYZ& previous, const ColourCore::XYZ& current, double dt) {
+    if (!validXYZ(previous) || !validXYZ(current) || !std::isfinite(dt) || dt < 0.0) return NAN;
+    const bool same = previous.X == current.X && previous.Y == current.Y && previous.Z == current.Z;
+    if (dt == 0.0) return same ? 0.0f : NAN;
+    float previousL, previousA, previousB, currentL, currentA, currentB;
+    ColourCore::XYZtoOklab(previous.X, previous.Y, previous.Z, previousL, previousA, previousB);
+    ColourCore::XYZtoOklab(current.X, current.Y, current.Z, currentL, currentA, currentB);
+    const double change = std::hypot(static_cast<double>(currentL) - static_cast<double>(previousL),
+        static_cast<double>(currentA) - static_cast<double>(previousA), static_cast<double>(currentB) - static_cast<double>(previousB)) / dt;
+    return change <= static_cast<double>(std::numeric_limits<float>::max()) ? static_cast<float>(change) : NAN;
+}
+
 struct SpectralPosition {
     std::size_t lower;
     std::size_t upper;
@@ -80,6 +116,17 @@ int32_t resolveFftSize(const std::span<const float> magnitudes) {
 
 OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     OSCFrameData frame{};
+    frame.status = update.status;
+    frame.smoothing = update.smoothing;
+    frame.smoothing.amount = std::isfinite(frame.smoothing.amount) ? std::clamp(frame.smoothing.amount, 0.0f, 1.0f) : 0.6f;
+    const auto response = [&](float value) {
+        return frame.smoothing.enabled && std::isfinite(value) ? std::max(0.0f, value) : 0.0f;
+    };
+    frame.smoothing.responseSeconds = response(frame.smoothing.responseSeconds);
+    frame.smoothing.minimumResponseSeconds = response(frame.smoothing.minimumResponseSeconds);
+    frame.smoothing.maximumResponseSeconds = response(frame.smoothing.maximumResponseSeconds);
+    frame.sourceAnalysis = analyseColour({update.colourResult.X, update.colourResult.Y, update.colourResult.Z}, update.sourceAvailable);
+    frame.presentedAnalysis = analyseColour(update.presentedXYZ, validXYZ(update.presentedXYZ));
     const auto features = UI::Smoothing::buildSignalFeatures(update.colourResult);
     frame.meta.sampleRate = std::isfinite(update.sampleRate) && update.sampleRate > 0.0f &&
         static_cast<double>(update.sampleRate) <= std::numeric_limits<int32_t>::max()
@@ -132,6 +179,31 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.phase.transientNorm = update.colourResult.phaseTransientNorm;
 
     return frame;
+}
+
+OSCFrameData OSCFrameBuilder::build(const OSCFrameUpdate& update) {
+    auto frame = buildFrameData(update);
+    const bool sameSource = sourceId_ == update.sourceId && status_ == update.status &&
+        sampleRate_ == frame.meta.sampleRate && fftSize_ == frame.meta.fftSize &&
+        smoothing_.enabled == frame.smoothing.enabled && smoothing_.manual == frame.smoothing.manual &&
+        smoothing_.amount == frame.smoothing.amount;
+    const double dt = sameSource ? update.sourceTimestamp - previousTimestamp_ : std::numeric_limits<double>::quiet_NaN();
+    const ColourCore::XYZ source{update.colourResult.X, update.colourResult.Y, update.colourResult.Z};
+    if (frame.sourceAnalysis.available) frame.sourceAnalysis.colourChangePerSecond = colourChange(previousSource_, source, dt);
+    if (frame.presentedAnalysis.available) frame.presentedAnalysis.colourChangePerSecond = colourChange(previousPresented_, update.presentedXYZ, dt);
+    previousSource_ = frame.sourceAnalysis.available ? source : ColourCore::XYZ{NAN, NAN, NAN};
+    previousPresented_ = frame.presentedAnalysis.available ? update.presentedXYZ : ColourCore::XYZ{NAN, NAN, NAN};
+    previousTimestamp_ = update.sourceTimestamp;
+    sourceId_ = update.sourceId;
+    status_ = update.status;
+    smoothing_ = frame.smoothing;
+    sampleRate_ = frame.meta.sampleRate;
+    fftSize_ = frame.meta.fftSize;
+    return frame;
+}
+
+void OSCFrameBuilder::reset() {
+    *this = OSCFrameBuilder{};
 }
 
 }

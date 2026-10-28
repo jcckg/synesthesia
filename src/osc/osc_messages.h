@@ -9,6 +9,46 @@
 
 namespace Synesthesia::OSC {
 
+enum class OSCPlaybackStatus { Idle, Playing, Loading, Recording };
+
+constexpr OSCPlaybackStatus playbackStatus(bool loading, bool recording, bool playing) {
+    return loading ? OSCPlaybackStatus::Loading : recording ? OSCPlaybackStatus::Recording :
+        playing ? OSCPlaybackStatus::Playing : OSCPlaybackStatus::Idle;
+}
+
+constexpr const char* statusName(OSCPlaybackStatus status) {
+    switch (status) {
+        case OSCPlaybackStatus::Playing: return "playing";
+        case OSCPlaybackStatus::Loading: return "loading";
+        case OSCPlaybackStatus::Recording: return "recording";
+        default: return "idle";
+    }
+}
+
+struct OSCFrameSmoothingData {
+    bool enabled = true;
+    bool manual = false;
+    float amount = 0.6f;
+    float responseSeconds = 0.0f;
+    float minimumResponseSeconds = 0.0f;
+    float maximumResponseSeconds = 0.0f;
+};
+
+constexpr const char* smoothingMode(const OSCFrameSmoothingData& smoothing) {
+    return !smoothing.enabled ? "disabled" : smoothing.manual ? "manual" : "automatic";
+}
+
+struct OSCFrameColourAnalysis {
+    bool available = false;
+    float luminanceY = NAN;
+    float chromaticityX = NAN;
+    float chromaticityY = NAN;
+    float lightness = NAN;
+    float chroma = NAN;
+    float hueDegrees = NAN;
+    float colourChangePerSecond = NAN;
+};
+
 struct OSCFrameMetaData {
     int32_t sampleRate = 0;
     int32_t fftSize = 0;
@@ -67,6 +107,10 @@ struct OSCFramePhaseData {
 };
 
 struct OSCFrameData {
+    OSCPlaybackStatus status = OSCPlaybackStatus::Idle;
+    OSCFrameSmoothingData smoothing;
+    OSCFrameColourAnalysis sourceAnalysis;
+    OSCFrameColourAnalysis presentedAnalysis;
     OSCFrameMetaData meta;
     OSCFrameSignalData signal;
     OSCFrameColourData colour;
