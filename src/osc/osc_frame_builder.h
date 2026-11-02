@@ -29,6 +29,8 @@ struct OSCFrameUpdate {
     ColourCore::XYZ presentedXYZ{NAN, NAN, NAN};
     double sourceTimestamp = std::numeric_limits<double>::quiet_NaN();
     OSCAnalysisSignals analysisSignals{};
+    std::shared_ptr<const ColourPresentation::SpectralContributions> sourceContributions;
+    std::shared_ptr<const ColourPresentation::SpectralContributions> presentedContributions;
 };
 
 OSCFrameData buildFrameData(const OSCFrameUpdate& update);

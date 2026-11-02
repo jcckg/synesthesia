@@ -21,8 +21,9 @@ struct GestureFrame {
     double cursorY = 0.0;
 };
 
-void attach(GLFWwindow* window);
+void attach(GLFWwindow* window, bool primary = true);
+void detach(GLFWwindow* window);
 void shutdown();
-GestureFrame consume();
+GestureFrame consume(GLFWwindow* window = nullptr);
 
 }

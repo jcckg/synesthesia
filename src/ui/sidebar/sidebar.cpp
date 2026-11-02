@@ -65,7 +65,7 @@ void renderViewTabs(RenderArgs& args) {
     ImGui::SetCursorPosX(horizontalPadding);
 
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(buttonSpacing, style.ItemSpacing.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 1.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, UIStyler::cornerRadius);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14.0f, 4.0f));
 
     struct TabDefinition {

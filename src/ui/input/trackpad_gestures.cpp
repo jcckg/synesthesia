@@ -4,11 +4,13 @@
 
 namespace TrackpadGestures {
 
-void attach(GLFWwindow*) {}
+void attach(GLFWwindow*, bool) {}
+
+void detach(GLFWwindow*) {}
 
 void shutdown() {}
 
-GestureFrame consume() {
+GestureFrame consume(GLFWwindow*) {
     return GestureFrame{};
 }
 

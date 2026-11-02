@@ -9,6 +9,9 @@
 #include "renderer/render_utils.h"
 #include "renderer/window.h"
 
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
 namespace Renderer {
 
 ImGuiWindowContext::~ImGuiWindowContext() {
@@ -53,6 +56,7 @@ bool ImGuiWindowContext::initialise(const Window& window, const bgfx::ViewId vie
         return false;
     }
 
+    window_ = &window;
     initialised_ = true;
     return true;
 }
@@ -93,6 +97,12 @@ void ImGuiWindowContext::beginFrame(bool acceptInput) const {
     }
     ImGui_Implbgfx_NewFrame();
     ImGui_ImplGlfw_NewFrame();
+    if (acceptInput && window_ != nullptr && glfwGetWindowAttrib(window_->handle(), GLFW_HOVERED) &&
+        glfwGetInputMode(window_->handle(), GLFW_CURSOR) != GLFW_CURSOR_DISABLED) {
+        double x = 0.0, y = 0.0;
+        glfwGetCursorPos(window_->handle(), &x, &y);
+        io.AddMousePosEvent(static_cast<float>(x), static_cast<float>(y));
+    }
     ImGui::NewFrame();
 }
 
@@ -115,6 +125,7 @@ bool ImGuiWindowContext::isInitialised() const {
 }
 
 void ImGuiWindowContext::destroyContexts() {
+    window_ = nullptr;
     if (implotContext_ != nullptr) {
         ImPlot::DestroyContext(implotContext_);
         implotContext_ = nullptr;

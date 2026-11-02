@@ -120,6 +120,9 @@ function(add_osc_sources)
     if(ENABLE_OSC)
         list(APPEND SOURCES
             ${SRC_DIR}/osc/osc_config.cpp
+            ${SRC_DIR}/osc/osc_routing.cpp
+            ${SRC_DIR}/osc/osc_routing_config.cpp
+            ${SRC_DIR}/renderer/osc_routing_window.cpp
             ${SRC_DIR}/osc/osc_command_queue.cpp
             ${SRC_DIR}/osc/osc_frame_builder.cpp
             ${SRC_DIR}/osc/osc_packet_listener.cpp

@@ -76,13 +76,13 @@ void UIStyler::restoreOriginalStyle(ImGuiStyle& style, StyleState& state) {
 
 void UIStyler::setDimensions(ImGuiStyle& style) {
     style.WindowRounding = 0.0f;
-    style.FrameRounding = 1.0f;
+    style.FrameRounding = cornerRadius;
     style.ScrollbarRounding = 5.0f;
     style.ScrollbarSize = 12.0f;
-    style.GrabRounding = 1.0f;
-    style.TabRounding = 1.0f;
-    style.ChildRounding = 1.0f;
-    style.PopupRounding = 1.0f;
+    style.GrabRounding = cornerRadius;
+    style.TabRounding = cornerRadius;
+    style.ChildRounding = cornerRadius;
+    style.PopupRounding = cornerRadius;
     style.Alpha = 1.0f;
     style.ItemSpacing = ImVec2(10, 12);
     style.FramePadding = ImVec2(8, 6);

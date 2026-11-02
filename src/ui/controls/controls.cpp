@@ -350,6 +350,13 @@ void renderAdvancedSettingsPanel(UIState& state
 	            state.oscSettings.receivePort = std::clamp(state.oscSettings.receivePort, 1, 65535);
 
 	            ImGui::Spacing();
+            ImGui::BeginDisabled(!state.oscSettings.routingWindowAvailable);
+            if (ImGui::Button("OSC Routing", ImVec2(ImGui::GetContentRegionAvail().x, 0)))
+                state.oscSettings.routingWindowRequested = true;
+            ImGui::EndDisabled();
+            if (!state.oscSettings.routingWindowAvailable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+                ImGui::SetTooltip("A separate routing window is unavailable with the current renderer");
+            ImGui::Spacing();
             ImGui::Text("Transport Status: %s", transportRunning ? "Running" : "Stopped");
             ImGui::Text("Frames Sent: %llu", static_cast<unsigned long long>(stats.framesSent));
             ImGui::Text("Messages Received: %llu", static_cast<unsigned long long>(stats.messagesReceived));
@@ -387,7 +394,7 @@ void renderAdvancedSettingsPanel(UIState& state
             if (transportRunning && hasPendingConfigChanges) {
                 ImGui::BeginDisabled(!destinationValidation.valid);
                 if (ImGui::Button("Apply Settings", ImVec2(ImGui::GetContentRegionAvail().x, 0))) {
-                    Synesthesia::OSC::OSCConfig config;
+                    auto config = osc.getConfig();
                     config.destinationHost = state.oscSettings.destinationHost;
                     config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
                     config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);
@@ -406,7 +413,7 @@ void renderAdvancedSettingsPanel(UIState& state
                     state.oscEnabled = false;
                     osc.stop();
                 } else {
-                    Synesthesia::OSC::OSCConfig config;
+                    auto config = osc.getConfig();
                     config.destinationHost = state.oscSettings.destinationHost;
                     config.transmitPort = static_cast<uint16_t>(state.oscSettings.transmitPort);
                     config.receivePort = static_cast<uint16_t>(state.oscSettings.receivePort);

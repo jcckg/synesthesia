@@ -32,6 +32,7 @@ private:
 
     ImGuiContext* imguiContext_ = nullptr;
     ImPlotContext* implotContext_ = nullptr;
+    const Window* window_ = nullptr;
     bool initialised_ = false;
     mutable bool inputSuppressed_ = false;
     mutable int frameConfigFlags_ = 0;

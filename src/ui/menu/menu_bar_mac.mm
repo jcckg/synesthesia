@@ -25,7 +25,7 @@
 }
 
 - (void)updatePresentation:(NSMenuItem*)item state:(const UI::Menu::State&)state {
-    if (!state.title.empty()) item.title = [NSString stringWithUTF8String:state.title.c_str()];
+    item.title = state.title.empty() ? (NSString*)item.representedObject : [NSString stringWithUTF8String:state.title.c_str()];
     item.state = state.checked ? NSControlStateValueOn : NSControlStateValueOff;
     NSString* subtitle = state.subtitle.empty() ? nil : [NSString stringWithUTF8String:state.subtitle.c_str()];
 #if __MAC_OS_X_VERSION_MAX_ALLOWED >= 140400
@@ -107,9 +107,11 @@ struct MenuBar::Impl {
             action:definition.command == Command::None ? nullptr : @selector(performCommand:)
             keyEquivalent:shortcut];
         if (definition.command != Command::None) {
+            item.representedObject = title;
             item.target = target;
             item.tag = static_cast<NSInteger>(definition.command);
             item.keyEquivalentModifierMask = NSEventModifierFlagCommand;
+            if (definition.optionShortcut) item.keyEquivalentModifierMask |= NSEventModifierFlagOption;
             if (definition.shiftShortcut) item.keyEquivalentModifierMask |= NSEventModifierFlagShift;
         }
         if (!definition.children.empty()) {

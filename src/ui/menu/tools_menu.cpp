@@ -13,7 +13,9 @@ namespace UI::Menu {
 std::span<const Item> toolsMenuItems() {
     static constexpr std::array items{
         Item{.title = "Enable OSC", .command = Command::ToggleOSC, .shortcut = "o",
-             .showsSubtitle = true, .shiftShortcut = true, .shortcutTitle = "Enable / disable OSC"}
+             .showsSubtitle = true, .optionShortcut = true, .shortcutTitle = "Enable / disable OSC"},
+        Item{.title = "OSC Routing", .command = Command::OSCRouting, .shortcut = "r",
+             .optionShortcut = true, .shortcutTitle = "Open OSC routing"}
     };
     return items;
 }
@@ -21,6 +23,10 @@ std::span<const Item> toolsMenuItems() {
 State queryToolsCommand(Command command, UIState& state) {
     State result;
 #ifdef ENABLE_OSC
+    if (command == Command::OSCRouting) {
+        result.enabled = state.oscSettings.routingWindowAvailable;
+        return result;
+    }
     if (command != Command::ToggleOSC) return result;
 
     auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
@@ -47,6 +53,10 @@ bool executeToolsCommand(Command command, UIState& state) {
     if (!queryToolsCommand(command, state).enabled) return false;
 
 #ifdef ENABLE_OSC
+    if (command == Command::OSCRouting) {
+        state.oscSettings.routingWindowRequested = true;
+        return true;
+    }
     auto& osc = Synesthesia::OSC::SynesthesiaOSCIntegration::getInstance();
     if (osc.isRunning()) {
         state.oscEnabled = false;

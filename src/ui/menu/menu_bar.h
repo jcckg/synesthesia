@@ -23,6 +23,7 @@ enum class Command {
     ToggleExplorer,
     SearchExplorer,
     ToggleOSC,
+    OSCRouting,
     ToggleInterface,
     ToggleSpectrumAnalyser,
     ToggleFollowScrubber,
@@ -38,6 +39,7 @@ struct Item {
     std::span<const Item> children = {};
     bool showsSubtitle = false;
     bool shiftShortcut = false;
+    bool optionShortcut = false;
     bool isHelpMenu = false;
     const char* shortcutTitle = nullptr;
 };

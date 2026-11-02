@@ -474,45 +474,6 @@ void prepareScrolling(State& state, Input::Scrolling& scrolling, const ImVec2& o
     ImGui::SetNextWindowScroll(ImVec2(0.0f, scroll.position));
 }
 
-void scrollbar(State& state, bool draw) {
-    auto& scroll = state.scrolling;
-    auto* window = ImGui::GetCurrentWindow();
-    const float maximum = ImGui::GetScrollMaxY();
-    if (maximum <= 0.0f) {
-        scroll.dragging = scroll.thumbHovered = false;
-        return;
-    }
-    if (scroll.opacity < 0.01f && !scroll.dragging) return;
-    const ImRect area(ImVec2(window->InnerRect.Max.x - 10.0f, window->InnerRect.Min.y), window->InnerRect.Max);
-    const float height = area.GetHeight();
-    const float thumbHeight = std::clamp(height * height / (height + maximum), std::min(24.0f, height), height);
-    const float travel = height - thumbHeight;
-    const float top = area.Min.y + (travel > 0.0f ? scroll.position / maximum * travel : 0.0f);
-    const ImRect thumb(ImVec2(area.Min.x, top), ImVec2(area.Max.x, top + thumbHeight));
-    if (draw) {
-        const ImGuiCol colour = scroll.dragging ? ImGuiCol_ScrollbarGrabActive :
-            scroll.thumbHovered ? ImGuiCol_ScrollbarGrabHovered : ImGuiCol_ScrollbarGrab;
-        window->DrawList->AddRectFilled(ImVec2(area.Max.x - 4.0f, top), ImVec2(area.Max.x, top + thumbHeight),
-            ImGui::GetColorU32(colour, scroll.opacity), 2.0f);
-        return;
-    }
-    const ImGuiID id = window->GetID("OverlayScrollbar");
-    ImGui::KeepAliveID(id);
-    bool hovered = false;
-    bool held = false;
-    ImGui::ButtonBehavior(area, id, &hovered, &held);
-    if (held && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        scroll.dragOffset = thumb.Contains(ImGui::GetIO().MousePos) ? ImGui::GetIO().MousePos.y - top : thumbHeight * 0.5f;
-    }
-    scroll.dragging = held;
-    scroll.thumbHovered = hovered;
-    if (held && travel > 0.0f) {
-        scroll.position = scroll.target = std::clamp((ImGui::GetIO().MousePos.y - area.Min.y - scroll.dragOffset) / travel, 0.0f, 1.0f) * maximum;
-        scroll.idleSeconds = 0.0f;
-    }
-
-}
-
 float artworkSpace(State& state, const ImVec2& displaySize) {
     const auto& directory = state.preview.artworkDirectory;
     if (directory != state.artworkDirectory) {
@@ -622,7 +583,7 @@ void draw(State& state, bool canLoad, const ImVec2& displaySize, Input::Scrollin
     if (ImGui::BeginChild("Files", ImVec2(0.0f, listHeight), ImGuiChildFlags_None,
             ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
             (state.isOpen ? ImGuiWindowFlags_None : ImGuiWindowFlags_NoInputs))) {
-        scrollbar(state, false);
+        Input::overlayScrollbar(state.scrolling, false);
         ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0.0f, 1.0f));
         const float rowHeight = ImGui::GetTextLineHeight() + 5.0f;
         ImGuiListClipper clipper;
@@ -643,7 +604,7 @@ void draw(State& state, bool canLoad, const ImVec2& displaySize, Input::Scrollin
             ImGui::TextDisabled("%s", state.files.empty() ? "No supported files or folders" : "No matching files or folders");
         }
         ImGui::PopStyleVar();
-        scrollbar(state, true);
+        Input::overlayScrollbar(state.scrolling, true);
     }
     ImGui::EndChild();
     if (!state.entryHovered) {

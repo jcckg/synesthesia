@@ -26,6 +26,8 @@ bool OSCRuntime::start() {
     running_ = true;
     fpsWindowStart_ = std::chrono::steady_clock::now();
     framesInWindow_ = 0;
+    bytesInWindow_ = 0;
+    bytesPerSecond_ = 0.0;
     currentFps_ = 0;
     lastError_.clear();
     return true;
@@ -78,6 +80,12 @@ bool OSCRuntime::updateConfig(const OSCConfig& config) {
     return true;
 }
 
+void OSCRuntime::setRouting(const OSCRouting& routing) {
+    std::lock_guard lock(mutex_);
+    sender_.setRouting(routing);
+    config_.routing = routing;
+}
+
 OSCConfig OSCRuntime::getConfig() const {
     std::lock_guard<std::mutex> lock(mutex_);
     return config_;
@@ -113,11 +121,16 @@ std::vector<OSCCommand> OSCRuntime::popPendingCommands() {
 
 OSCStats OSCRuntime::getStats() const {
     std::lock_guard<std::mutex> lock(mutex_);
+    const bool recent = running_ && std::chrono::steady_clock::now() - fpsWindowStart_ < std::chrono::seconds(2);
     return OSCStats{
         framesSent_,
         receiver_.getReceivedMessageCount(),
-        currentFps_,
-        averageSendTimeMs_
+        recent ? currentFps_ : 0,
+        averageSendTimeMs_,
+        lastSize_.bytes,
+        lastSize_.packets,
+        lastSize_.largestPacket,
+        recent ? bytesPerSecond_ : 0.0
     };
 }
 
@@ -127,6 +140,9 @@ void OSCRuntime::recordSendSample(const float durationMs) {
         return;
     }
 
+    lastSize_ = sender_.lastSize();
+    if (lastSize_.packets == 0) return;
+    bytesInWindow_ += lastSize_.bytes;
     ++framesSent_;
     ++framesInWindow_;
 
@@ -140,6 +156,8 @@ void OSCRuntime::recordSendSample(const float durationMs) {
     const float elapsedSeconds = std::chrono::duration<float>(now - fpsWindowStart_).count();
     if (elapsedSeconds >= 1.0f) {
         currentFps_ = static_cast<uint32_t>(static_cast<float>(framesInWindow_) / elapsedSeconds);
+        bytesPerSecond_ = static_cast<double>(bytesInWindow_) / static_cast<double>(elapsedSeconds);
+        bytesInWindow_ = 0;
         fpsWindowStart_ = now;
         framesInWindow_ = 0;
     }

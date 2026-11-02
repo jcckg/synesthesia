@@ -19,13 +19,16 @@ void collectShortcuts(std::span<const Item> items, std::vector<Shortcut>& shortc
     for (const auto& item : items) {
         if (item.command != Command::None && item.shortcut[0] != '\0') {
 #ifdef __APPLE__
-            std::string keys = "Cmd + ";
+            std::string keys;
+            if (item.optionShortcut) keys += "Option + ";
+            if (item.shiftShortcut) keys += "Shift + ";
+            keys += "Cmd + ";
 #else
             if (item.command != Command::ToggleExplorer && item.command != Command::SearchExplorer &&
                 item.command != Command::Export) continue;
             std::string keys = "Ctrl + ";
-#endif
             if (item.shiftShortcut) keys += "Shift + ";
+#endif
             for (const char* key = item.shortcut; *key != '\0'; ++key) {
                 keys += static_cast<char>(std::toupper(static_cast<unsigned char>(*key)));
             }
@@ -71,6 +74,7 @@ State queryCommand(Command command, UIState& state) {
             result = queryViewCommand(command, state);
             break;
         case Command::ToggleOSC:
+        case Command::OSCRouting:
             result = queryToolsCommand(command, state);
             break;
         case Command::KeyboardShortcuts:
@@ -106,6 +110,7 @@ bool executeCommand(Command command, UIState& state) {
         case Command::SwapSidebarSides:
             return executeViewCommand(command, state);
         case Command::ToggleOSC:
+        case Command::OSCRouting:
             return executeToolsCommand(command, state);
         case Command::KeyboardShortcuts:
         case Command::ProjectPage:

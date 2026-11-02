@@ -13,18 +13,19 @@ std::span<const Item> viewMenuItems() {
         Item{},
         Item{.title = "Detach Visualiser", .command = Command::DetachVisualiser,
              .shortcut = "2", .shiftShortcut = true, .shortcutTitle = "Detach / reattach visualiser"},
-        Item{"Explorer", Command::ToggleExplorer, "e"},
+        Item{.title = "Explorer", .command = Command::ToggleExplorer,
+             .shortcut = "e", .optionShortcut = true},
         Item{.title = "Search Explorer", .command = Command::SearchExplorer, .shortcut = "f"},
         Item{},
         Item{.title = "Show/Hide Interface", .command = Command::ToggleInterface,
-             .shortcut = "h", .shiftShortcut = true},
+             .shortcut = "u", .optionShortcut = true},
         Item{.title = "Spectrum Analyser", .command = Command::ToggleSpectrumAnalyser,
-             .shortcut = "s", .shiftShortcut = true},
+             .shortcut = "s", .optionShortcut = true},
         Item{.title = "Follow Scrubber", .command = Command::ToggleFollowScrubber,
-             .shortcut = "f", .shiftShortcut = true},
+             .shortcut = "p", .optionShortcut = true},
         Item{},
         Item{.title = "Swap Sidebar Sides", .command = Command::SwapSidebarSides,
-             .shortcut = "l", .shiftShortcut = true}
+             .shortcut = "l", .optionShortcut = true}
     };
     return items;
 }
@@ -50,7 +51,7 @@ State queryViewCommand(Command command, UIState& state) {
             result.checked = state.resyneState.recorderState.fileBrowser.isOpen;
             break;
         case Command::SearchExplorer:
-            result.enabled = state.resyneState.recorderState.fileBrowser.isOpen;
+            result.enabled = !state.resyneState.recorderState.fileBrowser.rootDirectory.empty();
             break;
         case Command::ToggleInterface:
             result.enabled = state.visualSettings.activeView == UIState::View::Visualisation;
@@ -96,6 +97,7 @@ bool executeViewCommand(Command command, UIState& state) {
             state.visibility.showUI = true;
             return true;
         case Command::SearchExplorer:
+            recorder.fileBrowser.isOpen = true;
             recorder.fileBrowser.searchOpen = true;
             recorder.fileBrowser.searchFocus = true;
             state.visibility.showUI = true;

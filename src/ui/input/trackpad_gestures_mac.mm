@@ -11,13 +11,14 @@
 
 #include <cmath>
 #include <mutex>
+#include <unordered_map>
 
 namespace {
 
 struct SharedState {
     std::mutex mutex;
     GLFWwindow* window = nullptr;
-    TrackpadGestures::GestureFrame pending;
+    std::unordered_map<GLFWwindow*, TrackpadGestures::GestureFrame> pending;
     id localMonitor = nil;
 };
 
@@ -26,17 +27,17 @@ SharedState& sharedState() {
     return state;
 }
 
-void updatePointer(SharedState& state) {
-    if (!state.window) {
+void updatePointer(GLFWwindow* window, TrackpadGestures::GestureFrame& pending) {
+    if (!window) {
         return;
     }
 
     double cursorX = 0.0;
     double cursorY = 0.0;
-    glfwGetCursorPos(state.window, &cursorX, &cursorY);
-    state.pending.pointerValid = true;
-    state.pending.cursorX = cursorX;
-    state.pending.cursorY = cursorY;
+    glfwGetCursorPos(window, &cursorX, &cursorY);
+    pending.pointerValid = true;
+    pending.cursorX = cursorX;
+    pending.cursorY = cursorY;
 }
 
 NSEvent* handleEvent(NSEvent* event) {
@@ -44,33 +45,34 @@ NSEvent* handleEvent(NSEvent* event) {
 
     std::lock_guard<std::mutex> lock(state.mutex);
 
-    if (!state.window) {
-        return event;
+    auto target = state.pending.end();
+    for (auto iterator = state.pending.begin(); iterator != state.pending.end(); ++iterator) {
+        if (glfwGetCocoaWindow(iterator->first) == [event window]) {
+            target = iterator;
+            break;
+        }
     }
-
-    NSWindow* targetWindow = glfwGetCocoaWindow(state.window);
-    if (!targetWindow || [event window] != targetWindow) {
-        return event;
-    }
+    if (target == state.pending.end()) return event;
+    auto& pending = target->second;
 
     const NSEventType type = [event type];
     if (type == NSEventTypeMagnify) {
         const double magnification = [event magnification];
         if (std::fabs(magnification) > 1e-5) {
-            state.pending.hasPinch = true;
-            state.pending.pinchDelta += magnification;
-            updatePointer(state);
+            pending.hasPinch = true;
+            pending.pinchDelta += magnification;
+            updatePointer(target->first, pending);
         }
     } else if (type == NSEventTypeScrollWheel) {
         const bool precise = [event hasPreciseScrollingDeltas];
-        state.pending.hasScroll = true;
-        state.pending.scrollMomentum = [event momentumPhase] != NSEventPhaseNone;
-        state.pending.scrollGestureBegan |= [event phase] == NSEventPhaseBegan;
-        if (precise) state.pending.scrollPixelsY += [event scrollingDeltaY];
-        else state.pending.scrollStepsY += [event scrollingDeltaY];
+        pending.hasScroll = true;
+        pending.scrollMomentum = [event momentumPhase] != NSEventPhaseNone;
+        pending.scrollGestureBegan |= [event phase] == NSEventPhaseBegan;
+        if (precise) pending.scrollPixelsY += [event scrollingDeltaY];
+        else pending.scrollStepsY += [event scrollingDeltaY];
 
         if (precise) {
-            updatePointer(state);
+            updatePointer(target->first, pending);
 
             const double deltaX = [event scrollingDeltaX];
             if (std::fabs(deltaX) > 1e-5) {
@@ -79,8 +81,8 @@ NSEvent* handleEvent(NSEvent* event) {
 
                 if (phase == NSEventPhaseBegan || phase == NSEventPhaseChanged ||
                     momentumPhase == NSEventPhaseChanged) {
-                    state.pending.hasHorizontalPan = true;
-                    state.pending.panDeltaX += deltaX;
+                    pending.hasHorizontalPan = true;
+                    pending.panDeltaX += deltaX;
                 }
             }
         }
@@ -111,17 +113,25 @@ void removeMonitor(SharedState& state) {
 
 namespace TrackpadGestures {
 
-void attach(GLFWwindow* window) {
+void attach(GLFWwindow* window, bool primary) {
     SharedState& state = sharedState();
     std::lock_guard<std::mutex> lock(state.mutex);
-
-    state.window = window;
-    state.pending = GestureFrame{};
-    if (window != nullptr) {
-        installMonitor(state);
-    } else {
-        removeMonitor(state);
+    if (primary) {
+        if (state.window && state.window != window) state.pending.erase(state.window);
+        state.window = window;
     }
+    if (window != nullptr) {
+        state.pending[window] = GestureFrame{};
+        installMonitor(state);
+    } else if (state.pending.empty()) removeMonitor(state);
+}
+
+void detach(GLFWwindow* window) {
+    SharedState& state = sharedState();
+    std::lock_guard<std::mutex> lock(state.mutex);
+    state.pending.erase(window);
+    if (state.window == window) state.window = nullptr;
+    if (state.pending.empty()) removeMonitor(state);
 }
 
 void shutdown() {
@@ -129,14 +139,16 @@ void shutdown() {
     std::lock_guard<std::mutex> lock(state.mutex);
     state.window = nullptr;
     removeMonitor(state);
-    state.pending = GestureFrame{};
+    state.pending.clear();
 }
 
-GestureFrame consume() {
+GestureFrame consume(GLFWwindow* window) {
     SharedState& state = sharedState();
     std::lock_guard<std::mutex> lock(state.mutex);
-    GestureFrame frame = state.pending;
-    state.pending = GestureFrame{};
+    const auto target = state.pending.find(window ? window : state.window);
+    if (target == state.pending.end()) return {};
+    const auto frame = target->second;
+    target->second = GestureFrame{};
     return frame;
 }
 

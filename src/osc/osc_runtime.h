@@ -24,6 +24,7 @@ public:
 
     bool updateConfig(const OSCConfig& config);
     OSCConfig getConfig() const;
+    void setRouting(const OSCRouting& routing);
     std::string getLastError() const;
 
     void sendFrame(const OSCFrameData& frame);
@@ -45,6 +46,9 @@ private:
     uint32_t framesInWindow_ = 0;
     std::chrono::steady_clock::time_point fpsWindowStart_{};
     std::string lastError_;
+    OSCOutputSize lastSize_;
+    std::size_t bytesInWindow_ = 0;
+    double bytesPerSecond_ = 0.0;
 };
 
 }

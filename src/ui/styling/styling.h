@@ -15,6 +15,8 @@ struct StyleState {
 
 class UIStyler {
 public:
+    static constexpr float cornerRadius = 1.0f;
+
     static void applyCustomStyle(ImGuiStyle& style, StyleState& state);
     static void applyCustomStyleWithTheme(ImGuiStyle& style, StyleState& state, UITheme theme);
     static void restoreOriginalStyle(ImGuiStyle& style, StyleState& state);

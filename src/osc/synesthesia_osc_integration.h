@@ -26,6 +26,9 @@ public:
 
     PendingOSCSettings consumePendingSettings();
     OSCStats getStats() const;
+    void setRouting(const OSCRouting& routing);
+    void setMonitoring(bool enabled);
+    std::shared_ptr<const OSCFrameData> latestFrame() const;
 
     static SynesthesiaOSCIntegration& getInstance();
 
@@ -34,7 +37,10 @@ private:
 
     OSCRuntime runtime_;
     OSCFrameBuilder frameBuilder_;
-    std::mutex frameMutex_;
+    mutable std::mutex frameMutex_;
+    std::shared_ptr<const OSCFrameData> latestFrame_;
+    uint64_t nextFrameId_ = 0;
+    bool monitoring_ = false;
 
     static std::unique_ptr<SynesthesiaOSCIntegration> instance_;
     static std::mutex instanceMutex_;

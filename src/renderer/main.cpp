@@ -1,5 +1,8 @@
 #include "renderer/bgfx_context.h"
 #include "renderer/detached_visualisation_window.h"
+#ifdef ENABLE_OSC
+#include "renderer/osc_routing_window.h"
+#endif
 #include "renderer/event_tracking_frames.h"
 #include "renderer/imgui_window_context.h"
 #include "renderer/presentation_resources.h"
@@ -183,12 +186,26 @@ int app_main(int, char**) {
     recorderState.presentationResources = uiState.presentationResources;
     recorderState.detachedVisualisation.available = bgfxContext.supportsMultipleWindows();
     Renderer::DetachedVisualisationWindow detachedVisualisationWindow;
+#ifdef ENABLE_OSC
+    uiState.oscSettings.routingWindowAvailable = bgfxContext.supportsMultipleWindows();
+    Renderer::OSCRoutingWindow oscRoutingWindow;
+#endif
     UI::Menu::MenuBar menuBar(UI::Menu::applicationMenus(),
-        [&uiState](UI::Menu::Command command) {
+        [&](UI::Menu::Command command) {
+#ifdef ENABLE_OSC
+            if (oscRoutingWindow.isCommandTarget(command)) return oscRoutingWindow.queryCommand(command);
+#endif
             return UI::Menu::queryCommand(command, uiState);
         },
-        [&uiState, &window](UI::Menu::Command command) {
+        [&](UI::Menu::Command command) {
+#ifdef ENABLE_OSC
+            if (oscRoutingWindow.isCommandTarget(command)) {
+                oscRoutingWindow.executeCommand(command);
+                return;
+            }
+#endif
             if (UI::Menu::executeCommand(command, uiState) && command != UI::Menu::Command::ToggleOSC &&
+                command != UI::Menu::Command::OSCRouting &&
                 command != UI::Menu::Command::ToggleSpectrumAnalyser && command != UI::Menu::Command::ProjectPage) {
                 window.show();
             }
@@ -312,6 +329,18 @@ int app_main(int, char**) {
             mainWindowContext.makeCurrent();
         }
 
+#ifdef ENABLE_OSC
+        if (!nativeTracking && uiState.oscSettings.routingWindowRequested) {
+            uiState.oscSettings.routingWindowRequested = false;
+            if (!oscRoutingWindow.open(bgfxContext.colourFormat()))
+                UI::Notifications::showStatusPrompt(uiState.statusPrompt, "Unable to open OSC routing window");
+            mainWindowContext.makeCurrent();
+        }
+        if (oscRoutingWindow.isOpen()) {
+            oscRoutingWindow.renderFrame(uiState);
+            mainWindowContext.makeCurrent();
+        }
+#endif
         bgfx::frame();
     };
 
@@ -337,6 +366,10 @@ int app_main(int, char**) {
         mainWindowContext.makeCurrent();
     }
 
+#ifdef ENABLE_OSC
+    oscRoutingWindow.close();
+    mainWindowContext.makeCurrent();
+#endif
     menuBar.shutdown();
     UI::FileBrowser::releaseArtwork(recorderState.fileBrowser);
     presentationResources.shutdown();

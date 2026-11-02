@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include "osc_routing.h"
 
 namespace Synesthesia::OSC {
 
@@ -13,6 +14,7 @@ struct OSCConfig {
     uint16_t transmitPort = 7000;
     uint16_t receivePort = 7001;
     std::size_t outputBufferSize = 8192;
+    OSCRouting routing = defaultRouting();
 };
 
 struct OSCDestinationValidationResult {
@@ -21,6 +23,9 @@ struct OSCDestinationValidationResult {
     std::string canonicalHost;
     std::string errorMessage;
 };
+
+bool saveRoutingConfig(const std::string& path, const OSCConfig& config, std::string& error);
+bool loadRoutingConfig(const std::string& path, OSCConfig& config, std::string& error);
 
 OSCDestinationValidationResult validateOSCDestination(const std::string& destinationHost);
 

@@ -116,6 +116,13 @@ int32_t resolveFftSize(const std::span<const float> magnitudes) {
 
 OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     OSCFrameData frame{};
+    frame.sourceId = update.sourceId;
+    frame.sourceAvailable = update.sourceAvailable;
+    frame.magnitudes.assign(update.magnitudes.begin(), update.magnitudes.end());
+    frame.phases.assign(update.phases.begin(), update.phases.end());
+    frame.frequencies.assign(update.frequencies.begin(), update.frequencies.end());
+    frame.sourceContributions = update.sourceContributions;
+    frame.presentedContributions = update.presentedContributions;
     frame.status = update.status;
     frame.smoothing = update.smoothing;
     frame.smoothing.amount = std::isfinite(frame.smoothing.amount) ? std::clamp(frame.smoothing.amount, 0.0f, 1.0f) : 0.6f;
@@ -144,6 +151,14 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.signal.dominantMagnitude = interpolateMagnitude(update.magnitudes, position);
     frame.signal.phaseRadians = interpolatePhase(update, position);
 
+    frame.sourceColour.displayR = update.colourResult.r;
+    frame.sourceColour.displayG = update.colourResult.g;
+    frame.sourceColour.displayB = update.colourResult.b;
+    frame.sourceColour.cieX = update.colourResult.X;
+    frame.sourceColour.cieY = update.colourResult.Y;
+    frame.sourceColour.cieZ = update.colourResult.Z;
+    ColourCore::XYZtoOklab(frame.sourceColour.cieX, frame.sourceColour.cieY, frame.sourceColour.cieZ,
+        frame.sourceColour.oklabL, frame.sourceColour.oklabA, frame.sourceColour.oklabB);
     frame.colour.displayR = update.displayColour.r;
     frame.colour.displayG = update.displayColour.g;
     frame.colour.displayB = update.displayColour.b;

@@ -301,18 +301,11 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		state.visibility.showUI = !state.visibility.showUI;
 	}
 
-	auto toggleActiveView = [&state]() {
-		state.visualSettings.activeView = (state.visualSettings.activeView == UIState::View::ReSyne)
-		                       ? UIState::View::Visualisation
-		                       : UIState::View::ReSyne;
-	};
-
-	if (interfaceShortcutsEnabled && !recorderState.detachedVisualisation.isOpen &&
-	    state.visibility.showUI &&
-	    ImGui::IsKeyPressed(ImGuiKey_Tab, false) &&
-	    io.KeyShift) {
-		toggleActiveView();
-	}
+    if (interfaceShortcutsEnabled && !recorderState.detachedVisualisation.isOpen &&
+        state.visibility.showUI && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) {
+        state.visualSettings.activeView = state.visualSettings.activeView == UIState::View::ReSyne
+            ? UIState::View::Visualisation : UIState::View::ReSyne;
+    }
 
     DeviceManager::populateDeviceNames(state.deviceState, devices);
 	const bool hasPlaybackSession = UI::AudioVisualisation::hasPlaybackSession(recorderState);

@@ -19,12 +19,14 @@ public:
     bool configure(const OSCConfig& config, std::string& errorMessage);
     void reset();
     bool sendFrame(const OSCFrameData& frame);
+    OSCOutputSize lastSize() const;
+    void setRouting(const OSCRouting& routing);
 
 private:
-    std::mutex mutex_;
+    mutable std::mutex mutex_;
+    OSCOutputSize lastSize_;
     OSCConfig config_;
     std::unique_ptr<UdpTransmitSocket> socket_;
-    std::vector<char> buffer_;
 };
 
 }

@@ -43,11 +43,11 @@ std::string SynesthesiaOSCIntegration::getLastError() const {
 
 void SynesthesiaOSCIntegration::updateFrameData(const OSCFrameUpdate& update) {
     std::lock_guard lock(frameMutex_);
-    if (!runtime_.isRunning()) {
-        return;
-    }
-
-    runtime_.sendFrame(frameBuilder_.build(update));
+    if (!monitoring_ && !runtime_.isRunning()) return;
+    auto frame = std::make_shared<OSCFrameData>(frameBuilder_.build(update));
+    frame->frameId = ++nextFrameId_;
+    latestFrame_ = frame;
+    runtime_.sendFrame(*frame);
 }
 
 PendingOSCSettings SynesthesiaOSCIntegration::consumePendingSettings() {
@@ -72,6 +72,21 @@ PendingOSCSettings SynesthesiaOSCIntegration::consumePendingSettings() {
     }
 
     return pendingSettings;
+}
+
+void SynesthesiaOSCIntegration::setMonitoring(bool enabled) {
+    std::lock_guard lock(frameMutex_);
+    monitoring_ = enabled;
+}
+
+void SynesthesiaOSCIntegration::setRouting(const OSCRouting& routing) {
+    std::lock_guard lock(frameMutex_);
+    runtime_.setRouting(routing);
+}
+
+std::shared_ptr<const OSCFrameData> SynesthesiaOSCIntegration::latestFrame() const {
+    std::lock_guard lock(frameMutex_);
+    return latestFrame_;
 }
 
 OSCStats SynesthesiaOSCIntegration::getStats() const {

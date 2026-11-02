@@ -65,6 +65,8 @@ struct OSCSettings {
     std::string destinationHost = "127.0.0.1";
     int transmitPort = 7000;
     int receivePort = 7001;
+    bool routingWindowRequested = false;
+    bool routingWindowAvailable = false;
 };
 
 struct PresentationDiagnostics {

@@ -5,6 +5,9 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <memory>
+#include <vector>
+#include "colour/spectral_contributions.h"
 #include <variant>
 
 namespace Synesthesia::OSC {
@@ -107,6 +110,14 @@ struct OSCFramePhaseData {
 };
 
 struct OSCFrameData {
+    bool sourceAvailable = false;
+    uint64_t frameId = 0;
+    uint64_t sourceId = 0;
+    std::vector<float> magnitudes;
+    std::vector<float> phases;
+    std::vector<float> frequencies;
+    std::shared_ptr<const ColourPresentation::SpectralContributions> sourceContributions;
+    std::shared_ptr<const ColourPresentation::SpectralContributions> presentedContributions;
     OSCPlaybackStatus status = OSCPlaybackStatus::Idle;
     OSCFrameSmoothingData smoothing;
     OSCFrameColourAnalysis sourceAnalysis;
@@ -114,6 +125,7 @@ struct OSCFrameData {
     OSCFrameMetaData meta;
     OSCFrameSignalData signal;
     OSCFrameColourData colour;
+    OSCFrameColourData sourceColour;
     OSCFrameSpectralData spectral;
     OSCFrameLoudnessData loudness;
     OSCFrameTransientData transient;
@@ -125,6 +137,10 @@ struct OSCStats {
     uint64_t messagesReceived = 0;
     uint32_t currentFps = 0;
     float averageSendTimeMs = 0.0f;
+    std::size_t bytesPerFrame = 0;
+    std::size_t packetsPerFrame = 0;
+    std::size_t largestPacket = 0;
+    double bytesPerSecond = 0.0;
 };
 
 struct SetSmoothingEnabledCommand {

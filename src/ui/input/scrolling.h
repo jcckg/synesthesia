@@ -8,6 +8,8 @@
 
 namespace UI::Input {
 
+void overlayScrollbar(ScrollMotion& motion, bool draw);
+
 class Scrolling {
 public:
     void beginFrame(const TrackpadGestures::GestureFrame& gestures, bool enabled = true);
