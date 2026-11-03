@@ -1,11 +1,13 @@
 #pragma once
 
-#include <cstddef>
+#include <imgui.h>
 
 namespace ReSyne::UI {
 
-inline constexpr float kToolbarButtonHeight = 26.0f;
-inline constexpr float kToolbarVerticalPadding = 6.0f;
+inline float toolbarButtonHeight() { return ImGui::GetFrameHeight(); }
+inline constexpr float kToolbarEdgePadding = 6.0f;
+inline constexpr float kToolbarVerticalPadding = kToolbarEdgePadding;
+inline constexpr float kToolbarHorizontalPadding = kToolbarEdgePadding;
 
 inline constexpr const char* kDetachedVisualisationTooltip =
     "Open Visualisation Mode in another window";

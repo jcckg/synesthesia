@@ -29,7 +29,7 @@ void renderHeader(const RenderArgs& args) {
 
 void renderFooter(const RenderArgs& args, bool showHideHint) {
     if (showHideHint) {
-        constexpr float footerHeight = ReSyne::UI::kToolbarButtonHeight +
+        const float footerHeight = ReSyne::UI::toolbarButtonHeight() +
                                        ReSyne::UI::kToolbarVerticalPadding * 2.0f;
         const float footerTop = std::max(ImGui::GetCursorPosY(), ImGui::GetWindowHeight() - footerHeight);
         ImGui::SetCursorPos(ImVec2(args.layout.padding, footerTop));
