@@ -1,3 +1,4 @@
+#include "resyne/recorder/presentation_worker.h"
 #include "resyne/ui/recorder/utils.h"
 
 #include <algorithm>
@@ -8,7 +9,7 @@ std::optional<float> computePlaybackNormalisedPosition(const RecorderState& stat
     if (state.audioOutput && !state.playbackAudio.empty()) {
         size_t total = state.audioOutput->getTotalFrames();
         if (total > 0) {
-            const double position = state.audioOutput->getPresentationPosition();
+            const double position = ReSyne::recorderPlaybackPosition(state);
             float normalised = static_cast<float>(position) / static_cast<float>(total);
             return std::clamp(normalised, 0.0f, 1.0f);
         }

@@ -1,3 +1,4 @@
+#include "utilities/cancellation.h"
 #include "pghi.h"
 
 #include <algorithm>
@@ -86,6 +87,7 @@ std::vector<std::vector<float>> reconstructPhasePGHI(
     }
     if (!std::isfinite(gamma) || gamma <= 0.0) throw std::invalid_argument("Invalid PGHI window width");
     for (std::size_t frame = 0; frame < frames; ++frame) {
+        Utilities::checkCancellation();
         if (magnitudes[frame].size() != bins || suppliedPhases[frame].size() != bins || knownPhase[frame].size() != bins) {
             throw std::invalid_argument("Inconsistent PGHI frame dimensions");
         }
@@ -94,12 +96,14 @@ std::vector<std::vector<float>> reconstructPhasePGHI(
     std::vector<std::uint8_t> unknown(frames * bins, 0);
     double peak = 0.0;
     for (std::size_t frame = 0; frame < frames; ++frame) {
+        Utilities::checkCancellation();
         for (std::size_t bin = 0; bin < bins; ++bin) peak = std::max(peak, coefficientMagnitude(magnitudes, frame, bin));
     }
     using Node = std::pair<double, std::size_t>;
     std::priority_queue<Node> heap;
     std::vector<Node> seeds;
     for (std::size_t frame = 0; frame < frames; ++frame) {
+        Utilities::checkCancellation();
         for (std::size_t bin = 0; bin < bins; ++bin) {
             const auto index = frame * bins + bin;
             const bool reliable = knownPhase[frame][bin] && std::isfinite(phases[frame][bin]);
@@ -134,6 +138,7 @@ std::vector<std::vector<float>> reconstructPhasePGHI(
     std::size_t seedPosition = 0;
     for (;;) {
         while (heap.empty() && seedPosition < seeds.size()) {
+        Utilities::checkCancellation();
             const auto [magnitude, index] = seeds[seedPosition++];
             if (!unknown[index]) continue;
             unknown[index] = 0;
@@ -158,6 +163,7 @@ std::vector<std::vector<float>> reconstructPhasePGHI(
         }
     }
     for (std::size_t frame = 0; frame < frames; ++frame) {
+        Utilities::checkCancellation();
         for (const std::size_t bin : {std::size_t{0}, bins - 1}) {
             if (!knownPhase[frame][bin] || !std::isfinite(suppliedPhases[frame][bin])) phases[frame][bin] = std::cos(phases[frame][bin]) < 0.0f
                 ? std::numbers::pi_v<float> : 0.0f;

@@ -7,6 +7,9 @@
 #include "osc_sender.h"
 
 #include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <thread>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -18,6 +21,7 @@ class OSCRuntime {
 public:
     explicit OSCRuntime(const OSCConfig& config = {});
 
+    ~OSCRuntime();
     bool start();
     void stop();
     bool isRunning() const;
@@ -27,12 +31,17 @@ public:
     void setRouting(const OSCRouting& routing);
     std::string getLastError() const;
 
-    void sendFrame(const OSCFrameData& frame);
+    void sendFrame(std::shared_ptr<const OSCFrameData> frame);
     std::vector<OSCCommand> popPendingCommands();
     OSCStats getStats() const;
 
 private:
     void recordSendSample(float durationMs);
+    void transmit();
+    std::condition_variable wake_;
+    std::thread transmitThread_;
+    std::deque<std::shared_ptr<const OSCFrameData>> pendingFrames_;
+    std::uint64_t skippedFrames_ = 0, failedFrames_ = 0;
 
     mutable std::mutex mutex_;
     OSCConfig config_;

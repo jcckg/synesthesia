@@ -50,36 +50,9 @@ void calculateLoudnessFromSpectralFrames(std::vector<AudioColourSample>& samples
 
 	const uint32_t numChannels = !samples.empty() ? samples.front().channels : 1;
 
-	std::vector<SpectralSample> spectralSamples;
-	spectralSamples.reserve(samples.size());
-
-	for (const auto& sample : samples) {
-        if (progress) progress(0.1f * static_cast<float>(spectralSamples.size()) / static_cast<float>(samples.size()));
-		SpectralSample spectral;
-		spectral.timestamp = sample.timestamp;
-		spectral.sampleRate = sample.sampleRate > 0.0f ? sample.sampleRate : metadata.sampleRate;
-		spectral.magnitudes.resize(numChannels);
-		spectral.phases.resize(numChannels);
-		spectral.frequencies.resize(numChannels);
-
-		for (uint32_t ch = 0; ch < numChannels; ++ch) {
-			if (ch < sample.magnitudes.size()) {
-				spectral.magnitudes[ch] = sample.magnitudes[ch];
-			}
-			if (ch < sample.phases.size()) {
-				spectral.phases[ch] = sample.phases[ch];
-			}
-			if (ch < sample.frequencies.size()) {
-				spectral.frequencies[ch] = sample.frequencies[ch];
-			}
-		}
-
-		spectralSamples.push_back(std::move(spectral));
-	}
-
 	// Rebuild analysis at the source level; the audio-export peak guard would alter full-scale loudness.
 	const auto reconstructionResult = WAVEncoder::reconstructFromSpectralData(
-		spectralSamples, metadata.sampleRate, fftSize, hopSize, metadata.analysisLeadingSamples, metadata.originalSampleCount, false,
+		std::span<const AudioColourSample>(samples), metadata.sampleRate, fftSize, hopSize, metadata.analysisLeadingSamples, metadata.originalSampleCount, false,
         [&](float fraction) { if (progress) progress(0.1f + 0.5f * fraction); });
 
 	if (!reconstructionResult.success || reconstructionResult.audioSamples.empty()) {

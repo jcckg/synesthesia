@@ -2,6 +2,7 @@
 
 #include "renderer/imgui_window_context.h"
 #include "renderer/window.h"
+#include "osc/osc_routing.h"
 #include "ui/input/scrolling.h"
 #include "ui/menu/menu_bar.h"
 
@@ -52,6 +53,17 @@ private:
     UI::Input::ScrollMotion scroll_;
     ImGuiSelectionBasicStorage selection_;
     std::vector<std::size_t> visibleRows_;
+    std::string filteredSearch_;
+    std::vector<bool> filteredEnabled_;
+    bool filteredEnabledOnly_ = false;
+    bool filterValid_ = false;
+    struct OutputSizeKey {
+        std::size_t type = 0, length = 0;
+        bool vector = false, available = false;
+        bool operator==(const OutputSizeKey&) const = default;
+    };
+    std::vector<OutputSizeKey> outputSizeKeys_;
+    std::vector<Synesthesia::OSC::OSCOutputSize> outputSizes_;
     std::string message_;
     std::string configurationPath_;
     bool error_ = false;

@@ -96,6 +96,7 @@ void processIdleState(float* clearColour, float deltaTime) {
 void handleFileDropEvents(const std::vector<FileDropManager::FileDropEvent>& dropEvents,
 						  UIState& state) {
     auto& recorderState = state.resyneState.recorderState;
+    recorderState.presentationFrameActive = false;
 	if (dropEvents.empty() || recorderState.isRecording ||
         recorderState.exportRunning.load(std::memory_order_acquire) || recorderState.recordingCountdownActive ||
         recorderState.showExportDialog || recorderState.showClearTimelineDialog || state.nativeMenuTracking ||
@@ -291,7 +292,15 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		}
 	}
 
-    UIHandlers::ImportHandler::processFileImport(state);
+    ReSyne::Recorder::advancePlaybackPreparation(recorderState);
+    if (recorderState.playbackRouteFailed) {
+        recorderState.playbackRouteFailed = false;
+        state.deviceState.selectedOutputDeviceIndex = -1;
+        for (std::size_t i = 0; i < outputDevices.size(); ++i)
+            if (outputDevices[i].paIndex == recorderState.activeOutputDeviceIndex)
+                state.deviceState.selectedOutputDeviceIndex = static_cast<int>(i);
+    }
+    if (!state.deviceState.refreshing) UIHandlers::ImportHandler::processFileImport(state);
 
     const bool interfaceShortcutsEnabled = !state.nativeMenuTracking && !state.helpState.showKeyboardShortcuts && !io.WantTextInput &&
         !io.KeyCtrl && !io.KeySuper && !io.KeyAlt &&
@@ -318,17 +327,17 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 		cancelPlaybackRouteRefresh(recorderState);
 	}
 
-	if (protectedSelectedInput && recordingNeedsInput) {
+	if (!state.deviceState.refreshing && protectedSelectedInput && recordingNeedsInput) {
 		if (!ensureSelectedInputStream(state.deviceState, audioInput, devices)) {
 			recorderState.recordingCountdownActive = false;
 			recorderState.recordingCountdownRemaining = 0.0f;
 		}
-	} else if (protectedSelectedInput && ReSyne::Recorder::hasLoadedAudio(recorderState) && audioInput.isStreamActive()) {
+	} else if (!state.deviceState.refreshing && protectedSelectedInput && ReSyne::Recorder::hasLoadedAudio(recorderState) && audioInput.isStreamActive()) {
 		audioInput.closeStream();
 		schedulePlaybackRouteRefresh(recorderState);
 	}
 
-	ReSyne::Recorder::completePendingPlaybackRouteRefresh(recorderState);
+	if (!state.deviceState.refreshing) ReSyne::Recorder::completePendingPlaybackRouteRefresh(recorderState);
 
     int activeInputPaIndex = -1;
     if (state.deviceState.selectedDeviceIndex >= 0 &&
@@ -341,19 +350,6 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     DeviceManager::populateOutputDeviceNames(state.deviceState, outputDevices);
 
     const int previousOutputDeviceIndex = recorderState.outputDeviceIndex;
-    int fallbackOutputDeviceSelection = -1;
-    if (previousOutputDeviceIndex >= 0) {
-        auto fallbackIt = std::find_if(
-            outputDevices.begin(),
-            outputDevices.end(),
-            [previousOutputDeviceIndex](const AudioOutput::DeviceInfo& device) {
-                return device.paIndex == previousOutputDeviceIndex;
-            });
-        if (fallbackIt != outputDevices.end()) {
-            fallbackOutputDeviceSelection = static_cast<int>(std::distance(outputDevices.begin(), fallbackIt));
-        }
-    }
-
     int requestedOutputDeviceIndex = -1;
     if (state.deviceState.selectedOutputDeviceIndex >= 0 &&
         static_cast<size_t>(state.deviceState.selectedOutputDeviceIndex) < outputDevices.size()) {
@@ -364,36 +360,13 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     recorderState.outputDeviceIndex = requestedOutputDeviceIndex;
 
     const bool outputDeviceChanged = requestedOutputDeviceIndex != previousOutputDeviceIndex;
-    if (outputDeviceChanged && recorderState.audioOutput) {
-        const bool wasPlaying = recorderState.audioOutput->isPlaying();
-        const size_t playbackPosition = static_cast<size_t>(recorderState.audioOutput->getPresentationPosition());
-
-        recorderState.audioOutput->pause();
-
-        float sampleRate = recorderState.metadata.sampleRate;
-        if (sampleRate <= 0.0f) {
-            sampleRate = recorderState.fallbackSampleRate;
-        }
-        if (sampleRate <= 0.0f) {
-            sampleRate = UIConstants::DEFAULT_SAMPLE_RATE;
-        }
-        const int channelCount = recorderState.metadata.channels > 0 ? static_cast<int>(recorderState.metadata.channels) : 1;
-
-        if (!recorderState.audioOutput->initOutputStream(sampleRate, channelCount, requestedOutputDeviceIndex)) {
-            recorderState.outputDeviceIndex = previousOutputDeviceIndex;
-            state.deviceState.selectedOutputDeviceIndex = fallbackOutputDeviceSelection;
-            recorderState.statusMessage = "Unable to switch output device";
-            recorderState.statusMessageTimer = 4.0f;
-        } else {
-            recorderState.audioOutput->seek(playbackPosition);
-            if (wasPlaying) {
-                recorderState.audioOutput->play();
-            }
-        }
+    if (outputDeviceChanged && (recorderState.audioOutput || recorderState.playbackPreparing)) {
+        ReSyne::Recorder::refreshPlaybackOutput(recorderState);
     }
 
 	float deltaTime = io.DeltaTime;
 	UI::AudioVisualisation::syncRecorderPresentationSettings(state);
+    ReSyne::beginPresentationFrame(recorderState);
 
 	constexpr float SIDEBAR_WIDTH = 280.0f;
 	constexpr float SIDEBAR_PADDING = 12.0f;
@@ -422,10 +395,12 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
 	}
 
 	const bool hasMicInput =
+        !state.deviceState.refreshing &&
 		state.deviceState.selectedDeviceIndex >= 0 &&
 		!state.deviceState.streamError &&
 		audioInput.isStreamActive();
     const bool canStartRecording =
+        !state.deviceState.refreshing && !recorderState.recordingFinishing &&
         selectedInputIsValid(state.deviceState, devices) &&
         (audioInput.isStreamActive() || protectedSelectedInput);
 
@@ -459,7 +434,7 @@ void updateUI(AudioInput& audioInput, const std::vector<AudioInput::DeviceInfo>&
     float surfaceR = currentDisplayR, surfaceG = currentDisplayG, surfaceB = currentDisplayB;
     if (hasPlaybackSession || hasMicInput) {
         if (state.displayXYZValid) {
-            const auto rgb = ColourPresentation::projectXYZ({state.displayXYZ.X, state.displayXYZ.Y, state.displayXYZ.Z},
+            const auto rgb = ColourPresentation::projectXYZ({static_cast<double>(state.displayXYZ.X), static_cast<double>(state.displayXYZ.Y), static_cast<double>(state.displayXYZ.Z)},
                 ColourCore::ColourSpace::SRGB, state.visualSettings.gamutMappingEnabled);
             surfaceR = rgb.r; surfaceG = rgb.g; surfaceB = rgb.b;
         } else ColourPresentation::convertToSRGB(surfaceR, surfaceG, surfaceB, state.visualSettings.colourSpace);

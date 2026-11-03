@@ -19,6 +19,12 @@ struct Chunk {
     bool allowCompression = true;
 };
 
+struct ChunkSource {
+    std::uint32_t tag = 0;
+    std::function<bool(std::vector<std::uint8_t>&)> build;
+    bool allowCompression = true;
+};
+
 struct ChunkLocator {
     std::uint32_t tag = 0;
     Compression compression = Compression::None;
@@ -42,6 +48,9 @@ bool writeFile(const std::string& filepath,
                const std::vector<Chunk>& chunks,
                int compressionLevel = 0,
                const std::function<void(float)>& progress = {});
+
+bool writeFile(const std::string& filepath, const std::vector<ChunkSource>& chunks, int compressionLevel = 0,
+    const std::function<void(float)>& progress = {});
 
 bool readIndex(const std::string& filepath,
                ChunkIndex& index,

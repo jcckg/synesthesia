@@ -21,6 +21,7 @@ public:
     void setEqualiserSettings(float low, float mid, float high);
     void setOutputSettings(ColourCore::ColourSpace colourSpace, bool gamutMapping);
     void setSmoothingSettings(bool enabled, bool manual, float amount);
+    [[nodiscard]] std::shared_ptr<const SpectralPresentation::Frame> sourceFrame() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> state;

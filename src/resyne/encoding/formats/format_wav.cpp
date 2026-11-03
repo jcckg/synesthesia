@@ -20,28 +20,9 @@ bool exportToWAV(const std::string& filepath,
 
 	emitProgress(samples.empty() ? 1.0f : 0.0f);
 
-	std::vector<SpectralSample> spectralSamples;
-	spectralSamples.reserve(samples.size());
-
-	for (size_t index = 0; index < samples.size(); ++index) {
-		const auto& sample = samples[index];
-		SpectralSample spectral;
-		spectral.magnitudes = sample.magnitudes;
-		spectral.phases = sample.phases;
-		spectral.frequencies = sample.frequencies;
-		spectral.timestamp = sample.timestamp;
-		spectral.sampleRate = sample.sampleRate;
-		spectralSamples.push_back(spectral);
-
-		if (!samples.empty()) {
-			const float progressRatio = static_cast<float>(index + 1) /
-				static_cast<float>(samples.size());
-			emitProgress(progressRatio * 0.3f);
-		}
-	}
 
 	auto result = WAVEncoder::reconstructFromSpectralData(
-		spectralSamples,
+		samples,
 		metadata.sampleRate,
 		metadata.fftSize,
 		metadata.hopSize,

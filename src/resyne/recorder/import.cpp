@@ -65,7 +65,7 @@ void applyImportedSequence(RecorderState& state,
 }
 
 void Recorder::requestImport(RecorderState& state, const std::string& filepath) {
-    if (!isSupportedImportFile(filepath) || state.isRecording || state.exportRunning.load(std::memory_order_acquire)) return;
+    if (!isSupportedImportFile(filepath) || state.isRecording || state.recordingFinishing || state.audioDevicesRefreshing || state.exportRunning.load(std::memory_order_acquire)) return;
     state.pendingImportPath = filepath;
     if (state.importPhase >= 3 || state.importRunning.load(std::memory_order_acquire)) {
         state.importCancellation.request_stop();
@@ -186,6 +186,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
                                       ColourCore::ColourSpace colourSpace,
                                       bool applyGamutMapping) {
     const auto cancellation = state.importCancellation.get_token();
+    Utilities::CancellationScope scope(cancellation);
     Utilities::checkCancellation(cancellation);
     state.importRunning.store(true, std::memory_order_release);
     state.importComplete.store(false, std::memory_order_release);
@@ -333,6 +334,7 @@ void Recorder::importFromFileThreaded(RecorderState& state,
             }
 
             state.importedSamples = std::move(samples);
+            state.previewSamples = state.importedSamples;
             state.importedMetadata = std::move(metadata);
             state.importErrorMessage.clear();
 

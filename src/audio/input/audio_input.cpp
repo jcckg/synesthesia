@@ -1,4 +1,5 @@
 #include "audio_input.h"
+#include "audio/device_control.h"
 #include "audio/analysis/meter_response.h"
 
 #include <algorithm>
@@ -586,28 +587,70 @@ AudioInput::AudioInput()
 	: stream(nullptr),
 	  sampleRate(44100.0f),
 	  channelCount(1),
-	  activeChannel(0),
+	  activeChannel(-1),
 	  leftLevel(0.0f),
 	  rightLevel(0.0f) {
 #ifdef __linux__
 	ALSAErrorSuppressor suppressor;
 #endif
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (const PaError err = Pa_Initialize(); err != paNoError) {
 		throw std::runtime_error("PortAudio initialisation failed: " +
 								 std::string(Pa_GetErrorText(err)));
 	}
 
 	processor.start();
+    processor.setCaptureActive(false);
 }
 
 AudioInput::~AudioInput() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	stopStream();
 	Pa_Terminate();
 
 	processor.stop();
 }
 
+std::string AudioInput::deviceIdentifier(int index) {
+    std::lock_guard control(AudioDevices::controlMutex());
+    const auto* info = Pa_GetDeviceInfo(index);
+    if (!info) return {};
+#ifdef __APPLE__
+    if (const auto device = coreAudioDeviceIdForPortAudioDevice(index, *info)) {
+        CFStringRef uid = nullptr;
+        UInt32 size = sizeof(uid);
+        if (getAudioObjectProperty(*device, kAudioDevicePropertyDeviceUID, kAudioObjectPropertyScopeGlobal,
+            kAudioObjectPropertyElementMain, size, &uid) && uid) {
+            std::array<char, 2048> text{};
+            const bool valid = CFStringGetCString(uid, text.data(), text.size(), kCFStringEncodingUTF8);
+            CFRelease(uid);
+            if (valid) return text.data();
+        }
+    }
+#elif defined(_WIN32)
+    const auto* api = Pa_GetHostApiInfo(info->hostApi);
+    if (api && api->type == paWASAPI) {
+        ScopedComInitialiser com;
+        void* rawDevice = nullptr;
+        if (com.available() && PaWasapi_GetIMMDevice(index, &rawDevice) == paNoError && rawDevice) {
+            LPWSTR id = nullptr;
+            if (SUCCEEDED(static_cast<IMMDevice*>(rawDevice)->GetId(&id)) && id) {
+                const auto length = WideCharToMultiByte(CP_UTF8, 0, id, -1, nullptr, 0, nullptr, nullptr);
+                std::string text(static_cast<std::size_t>(std::max(0, length)), '\0');
+                if (length > 0) WideCharToMultiByte(CP_UTF8, 0, id, -1, text.data(), length, nullptr, nullptr);
+                CoTaskMemFree(id);
+                if (!text.empty()) { text.pop_back(); return text; }
+            }
+        }
+    }
+#endif
+    const auto* host = Pa_GetHostApiInfo(info->hostApi);
+    return std::to_string(host ? host->type : paInDevelopment) + ":" + info->name + ":" +
+        std::to_string(info->maxInputChannels) + ":" + std::to_string(info->maxOutputChannels);
+}
+
 std::vector<AudioInput::DeviceInfo> AudioInput::getInputDevices() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	std::vector<DeviceInfo> devices;
 
 #ifdef __linux__
@@ -632,7 +675,8 @@ std::vector<AudioInput::DeviceInfo> AudioInput::getInputDevices() {
 					i,
 					deviceInfo->maxInputChannels,
 					!passiveMonitoringProtected,
-					passiveMonitoringProtected
+					passiveMonitoringProtected,
+                    deviceIdentifier(i)
 				});
 			}
 		}
@@ -641,6 +685,7 @@ std::vector<AudioInput::DeviceInfo> AudioInput::getInputDevices() {
 }
 
 bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
+    std::lock_guard control(AudioDevices::controlMutex());
 	stopStream();
 
 	const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(deviceIndex);
@@ -660,7 +705,7 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 		channelCount = 1;
 	}
 
-	activeChannel = 0;
+	setActiveChannel(-1);
 
 	PaStreamParameters inputParameters{};
 	inputParameters.device = deviceIndex;
@@ -697,10 +742,13 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 		return false;
 	}
 	sampleRate = static_cast<float>(streamInfo->sampleRate);
+    inputLatency = streamInfo->inputLatency;
 
     processor.stop();
     processor.reset(true);
     processor.start();
+    Pa_SetStreamFinishedCallback(stream, streamFinished);
+    processor.setCaptureActive(true);
 
 	if (const PaError startErr = Pa_StartStream(stream); startErr != paNoError) {
 		std::cerr << "AudioInput: Failed to start stream: " << Pa_GetErrorText(startErr) << std::endl;
@@ -708,6 +756,7 @@ bool AudioInput::initStream(const int deviceIndex, const int numChannels) {
 		return false;
 	}
 
+	streamActive.store(true);
 	return true;
 }
 
@@ -716,8 +765,11 @@ AudioProcessor::SpectralData AudioInput::getSpectralData() const {
 }
 
 bool AudioInput::pauseStream() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (stream && Pa_IsStreamActive(stream) == 1) {
 		if (Pa_StopStream(stream) == paNoError) {
+            streamActive.store(false);
+            processor.setCaptureActive(false);
 			return true;
 		}
 	}
@@ -725,10 +777,14 @@ bool AudioInput::pauseStream() {
 }
 
 bool AudioInput::resumeStream() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (stream && Pa_IsStreamStopped(stream) == 1) {
+		processor.setCaptureActive(true);
 		if (Pa_StartStream(stream) == paNoError) {
+            streamActive.store(true);
 			return true;
 		}
+        processor.setCaptureActive(false);
 	}
 	return false;
 }
@@ -738,10 +794,19 @@ void AudioInput::closeStream() {
 }
 
 bool AudioInput::isStreamActive() const {
-	return stream && Pa_IsStreamActive(stream) == 1;
+	return streamActive.load();
+}
+
+void AudioInput::streamFinished(void* context) {
+    auto* input = static_cast<AudioInput*>(context);
+    input->streamActive.store(false);
+    input->processor.markCaptureStopped();
 }
 
 void AudioInput::stopStream() {
+    std::lock_guard control(AudioDevices::controlMutex());
+    streamActive.store(false);
+    processor.setCaptureActive(false);
 	if (stream) {
 		Pa_StopStream(stream);
 		Pa_CloseStream(stream);
@@ -762,23 +827,28 @@ void AudioInput::resetStereoLevels() {
 
 int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 							  const unsigned long frameCount,
-							  [[maybe_unused]] const PaStreamCallbackTimeInfo* timeInfo,
-							  [[maybe_unused]] PaStreamCallbackFlags statusFlags,
+							  const PaStreamCallbackTimeInfo* timeInfo,
+							  PaStreamCallbackFlags statusFlags,
 							  void* userData) {
 	auto* audio = static_cast<AudioInput*>(userData);
 
-	if (!input) {
-		return paContinue;
-	}
+    AudioCaptureTiming timing;
+    if (timeInfo) {
+        timing.adcTime = timeInfo->inputBufferAdcTime;
+        timing.callbackTime = timeInfo->currentTime;
+    }
+    timing.overflow = (statusFlags & paInputOverflow) != 0;
+    timing.underflow = (statusFlags & paInputUnderflow) != 0;
 
 	try {
 		const auto* inBuffer = static_cast<const float*>(input);
-
-		audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount), audio->sampleRate, static_cast<size_t>(audio->channelCount));
+        audio->processor.queueAudioData(inBuffer, frameCount * static_cast<size_t>(audio->channelCount),
+            audio->sampleRate, static_cast<size_t>(audio->channelCount), timing);
+        if (!input) return paContinue;
 
 		constexpr size_t MAX_LEVEL_CHANNELS = 16;
 		std::array<float, MAX_LEVEL_CHANNELS> channelPeaks{};
-		const size_t channels = static_cast<size_t>(std::max(audio->channelCount, 1));
+		const size_t channels = static_cast<size_t>(std::max(audio->channelCount.load(), 1));
 		const size_t meteredChannels = std::min(channels, channelPeaks.size());
 		for (unsigned long frame = 0; frame < frameCount; ++frame) {
 			const size_t offset = static_cast<size_t>(frame) * channels;
@@ -805,7 +875,7 @@ int AudioInput::audioCallback(const void* input, [[maybe_unused]] void* output,
 			rightPeak = secondStrongestPeak > 0.0f ? secondStrongestPeak : strongestPeak;
 		}
 
-		audio->updateStereoLevels(leftPeak, rightPeak, static_cast<double>(frameCount) / static_cast<double>(std::max(1.0f, audio->sampleRate)));
+		audio->updateStereoLevels(leftPeak, rightPeak, static_cast<double>(frameCount) / static_cast<double>(std::max(1.0f, audio->sampleRate.load())));
 	}
 	catch (const std::exception& e) {
 		std::cerr << "[Audio] Exception in audio callback: " << e.what() << std::endl;
@@ -838,6 +908,7 @@ AudioInputLevelMonitor::~AudioInputLevelMonitor() {
 
 void AudioInputLevelMonitor::syncDevices(const std::vector<AudioInput::DeviceInfo>& devices,
 										 const int selectedPaIndex) {
+	if (suspended_.load()) return;
 	bool topologyChanged = monitoredDevices_.size() != devices.size();
 	if (!topologyChanged) {
 		for (size_t i = 0; i < devices.size(); ++i) {
@@ -884,7 +955,7 @@ void AudioInputLevelMonitor::syncDevices(const std::vector<AudioInput::DeviceInf
 }
 
 std::array<float, 2> AudioInputLevelMonitor::getStereoLevels(const size_t deviceListIndex) const {
-	if (deviceListIndex >= monitoredDevices_.size() || !monitoredDevices_[deviceListIndex]) {
+	if (suspended_.load() || deviceListIndex >= monitoredDevices_.size() || !monitoredDevices_[deviceListIndex]) {
 		return {0.0f, 0.0f};
 	}
 
@@ -902,6 +973,7 @@ void AudioInputLevelMonitor::stopAll() {
 }
 
 void AudioInputLevelMonitor::stopDevice(MonitoredDevice& device) {
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (device.stream) {
 		Pa_StopStream(device.stream);
 		Pa_CloseStream(device.stream);
@@ -913,6 +985,7 @@ void AudioInputLevelMonitor::stopDevice(MonitoredDevice& device) {
 }
 
 bool AudioInputLevelMonitor::startDevice(MonitoredDevice& device) {
+    std::lock_guard control(AudioDevices::controlMutex());
 	device.startAttempted = true;
 
 	const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(device.paIndex);

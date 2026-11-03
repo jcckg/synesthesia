@@ -17,6 +17,7 @@ public:
 		std::string name;
 		int paIndex;
 		int maxChannels;
+        std::string identifier;
 	};
 
 	AudioOutput();
@@ -25,6 +26,7 @@ public:
 	static std::vector<DeviceInfo> getOutputDevices();
 	bool initOutputStream(float sampleRate, int channelCount = 1, int deviceIndex = -1, int framesPerBuffer = 512);
 	void setAudioData(const std::vector<float>& audioSamples, size_t channelCount = 1);
+    void setAudioData(std::shared_ptr<const std::vector<float>> audioSamples, size_t channelCount = 1);
 
 	void play();
 	void pause();
@@ -41,6 +43,8 @@ public:
             ? pendingSeekPosition_.load() : playbackPosition_.load();
     }
     double getPresentationPosition() const;
+    std::uint64_t getUnderflowCount() const { return underflows_.load(std::memory_order_relaxed); }
+    std::uint64_t getOverflowCount() const { return overflows_.load(std::memory_order_relaxed); }
 	size_t getTotalSamples() const { return totalSamples_.load(); }
 	size_t getTotalFrames() const {
 		const size_t channelCount = channelCount_.load();
@@ -61,7 +65,7 @@ private:
     static_assert(std::atomic<void*>::is_always_lock_free);
 	PaStream* stream_;
     struct AudioStorage {
-        std::vector<float> samples;
+        std::shared_ptr<const std::vector<float>> samples;
         std::size_t channels = 1;
         std::uint64_t generation = 0;
     };
@@ -69,6 +73,7 @@ private:
     std::vector<std::unique_ptr<AudioStorage>> retiredBuffers_;
     std::atomic<const AudioStorage*> publishedBuffer_{nullptr};
     std::atomic<std::uint32_t> callbackReaders_{0};
+    std::atomic<std::uint64_t> underflows_{0}, overflows_{0};
     std::atomic<std::uint64_t> presentationGeneration_{0};
     std::uint64_t nextGeneration_ = 0;
     std::uint64_t activeGeneration_ = 0;

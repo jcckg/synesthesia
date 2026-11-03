@@ -60,4 +60,17 @@ inline std::vector<float> curveHeights(std::span<const float> contributions, std
     return result;
 }
 
+class CurveCache {
+public:
+    const std::vector<float>& update(std::span<const float> contributions, std::size_t count) {
+        if (heights_.size() != count || !std::equal(contributions.begin(), contributions.end(), contributions_.begin(), contributions_.end())) {
+            contributions_.assign(contributions.begin(), contributions.end());
+            heights_ = curveHeights(contributions, count);
+        }
+        return heights_;
+    }
+private:
+    std::vector<float> contributions_, heights_;
+};
+
 }

@@ -61,10 +61,10 @@ bool MIDIInput::initMIDIInput(int deviceIndex) {
 		}
 
 		midiIn->openPort(static_cast<unsigned int>(deviceIndex));
+		processor.start();
 		midiIn->setCallback(&MIDIInput::midiCallback, this);
 		midiIn->ignoreTypes(false, false, false);
 
-		processor.start();
 		isActive = true;
 
 		std::cout << "[MIDI] Opened MIDI device: " << midiIn->getPortName(static_cast<unsigned int>(deviceIndex)) << std::endl;
@@ -80,8 +80,9 @@ bool MIDIInput::initMIDIInput(int deviceIndex) {
 void MIDIInput::closeMIDIInput() {
 	if (midiIn && isActive) {
 		try {
-			processor.stop();
+			midiIn->cancelCallback();
 			midiIn->closePort();
+			processor.stop();
 			isActive = false;
 			std::cout << "[MIDI] Closed MIDI input" << std::endl;
 		} catch (RtMidiError& error) {

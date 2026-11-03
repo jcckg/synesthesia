@@ -219,9 +219,22 @@ void OSCRoutingWindow::renderContents(UIState& state) {
     const auto frame = osc.latestFrame();
     const OSCFrameData emptyFrame;
     const auto& currentFrame = frame ? *frame : emptyFrame;
-    const auto outputs = buildOutputs(currentFrame, config.routing);
+    const auto outputs = buildOutputs(currentFrame, config.routing, true, false);
     const auto& catalogue = outputCatalogue();
     const auto stats = osc.getStats();
+    const bool newCatalogue = outputSizes_.size() != outputs.size();
+    outputSizeKeys_.resize(outputs.size());
+    outputSizes_.resize(outputs.size());
+    for (std::size_t i = 0; i < outputs.size(); ++i) {
+        const auto& output = outputs[i];
+        const auto* text = std::get_if<std::string>(&output.value);
+        const OutputSizeKey key{output.value.index(), output.vector ? output.length() : text ? text->size() : 0,
+            output.vector, output.available};
+        if (newCatalogue || !(outputSizeKeys_[i] == key)) {
+            outputSizes_[i] = outputSize(output);
+            outputSizeKeys_[i] = key;
+        }
+    }
     const bool running = osc.isRunning();
     OSCOutputSize total;
     std::size_t enabled = 0;
@@ -230,7 +243,7 @@ void OSCRoutingWindow::renderContents(UIState& state) {
         const auto setting = config.routing.find(outputs[i].address);
         if (setting == config.routing.end() || !setting->second.enabled) continue;
         ++enabled;
-        const auto size = outputSize(outputs[i]);
+        const auto size = outputSizes_[i];
         if (!outputs[i].vector) builtInBytes += size.bytes;
         else {
             total.bytes += size.bytes;
@@ -291,6 +304,8 @@ void OSCRoutingWindow::renderContents(UIState& state) {
         enabled, formattedBytes(total.bytes).c_str(), total.packets, total.packets == 1 ? "packet" : "packets",
         formattedBytes(total.largestPacket).c_str(), stats.bytesPerSecond / 1000.0);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("Encoded OSC sizes include addresses, arguments, padding and bundle overhead.\nTransfer rate is measured while sending. Disabled rows show their potential size.\nOptional packets are limited to 1,200 B; the existing built-in bundle is preserved.");
+    if ((stats.skippedFrames > 0 || stats.failedFrames > 0) && ImGui::IsItemHovered())
+        ImGui::SetTooltip("%llu queued frames replaced; %llu failed sends. Older queued frames are replaced to keep OSC current.", static_cast<unsigned long long>(stats.skippedFrames), static_cast<unsigned long long>(stats.failedFrames));
     const auto setupColumns = [] {
         ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 68);
         ImGui::TableSetupColumn("Output", ImGuiTableColumnFlags_WidthStretch);
@@ -306,20 +321,38 @@ void OSCRoutingWindow::renderContents(UIState& state) {
         ImGui::TableHeadersRow();
         ImGui::EndTable();
     }
-    std::vector<std::size_t> visible;
-    const ImGuiTextFilter filter(search_.data());
-    for (std::size_t i = 0; i < outputs.size(); ++i) {
-        const auto& route = catalogue[i];
-        const auto setting = config.routing.find(route.address);
-        if (enabledOnly_ && (setting == config.routing.end() || !setting->second.enabled)) continue;
-        const auto searchable = route.group + " " + route.name + " " + route.address;
-        if (filter.PassFilter(searchable.c_str())) visible.push_back(i);
+    static const auto searchableOutputs = [] {
+        std::vector<std::string> values;
+        for (const auto& route : outputCatalogue()) values.push_back(route.group + " " + route.name + " " + route.address);
+        return values;
+    }();
+    std::vector<bool> enabledRoutes;
+    if (enabledOnly_) {
+        enabledRoutes.reserve(catalogue.size());
+        for (const auto& route : catalogue) {
+            const auto setting = config.routing.find(route.address);
+            enabledRoutes.push_back(setting != config.routing.end() && setting->second.enabled);
+        }
     }
-    const bool visibleChanged = visible != visibleRows_;
-    if (visibleChanged) {
-        selection_.Clear();
-        visibleRows_ = visible;
+    bool visibleChanged = false;
+    if (!filterValid_ || filteredSearch_ != search_.data() || filteredEnabledOnly_ != enabledOnly_ || filteredEnabled_ != enabledRoutes) {
+        std::vector<std::size_t> visible;
+        const ImGuiTextFilter filter(search_.data());
+        for (std::size_t i = 0; i < outputs.size(); ++i) {
+            if (enabledOnly_ && !enabledRoutes[i]) continue;
+            if (filter.PassFilter(searchableOutputs[i].c_str())) visible.push_back(i);
+        }
+        visibleChanged = visible != visibleRows_;
+        if (visibleChanged) {
+            selection_.Clear();
+            visibleRows_ = std::move(visible);
+        }
+        filteredSearch_ = search_.data();
+        filteredEnabledOnly_ = enabledOnly_;
+        filteredEnabled_ = std::move(enabledRoutes);
+        filterValid_ = true;
     }
+    const auto& visible = visibleRows_;
     selection_.UserData = &visibleRows_;
     selection_.AdapterIndexToStorageId = [](ImGuiSelectionBasicStorage* selection, int row) {
         return static_cast<ImGuiID>((*static_cast<const std::vector<std::size_t>*>(selection->UserData))[static_cast<std::size_t>(row)]);
@@ -362,7 +395,7 @@ void OSCRoutingWindow::renderContents(UIState& state) {
                     ImGui::PushID(route.address.c_str());
                     ImGui::TableNextRow(ImGuiTableRowFlags_None, rowHeight);
                     ImGui::TableSetColumnIndex(0);
-                    ImGui::TextDisabled("%s", formattedBytes(outputSize(output).bytes).c_str());
+                    ImGui::TextDisabled("%s", formattedBytes(outputSizes_[index].bytes).c_str());
                     ImGui::TableSetColumnIndex(1);
                     const auto prefixLength = std::string_view("/synesthesia/frame/").size();
                     const char* address = route.address.c_str() + prefixLength;
@@ -395,7 +428,7 @@ void OSCRoutingWindow::renderContents(UIState& state) {
                     }
                     ImGui::TableSetColumnIndex(3);
                     if (!frame || !output.available) ImGui::TextDisabled("Unavailable");
-                    else if (output.vector) ImGui::Text("%zu values", output.samples.size());
+                    else if (output.vector) ImGui::Text("%zu values", output.length());
                     else ImGui::TextUnformatted(scalarPreview(output.value).c_str());
                     ImGui::TableSetColumnIndex(4);
                     rowChanged |= slidingToggle("Send", setting.enabled);

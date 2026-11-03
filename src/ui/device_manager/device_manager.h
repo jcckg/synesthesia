@@ -7,6 +7,7 @@
 #include <string>
 
 struct DeviceState {
+    bool refreshing = false;
     int selectedDeviceIndex = -1;
     int selectedChannelIndex = 0;
     bool streamError = false;

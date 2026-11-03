@@ -1,7 +1,8 @@
 #pragma once
 
 #include <atomic>
-#include <condition_variable>
+#include <cstdint>
+#include <semaphore>
 #include <mutex>
 #include <thread>
 
@@ -18,7 +19,7 @@ public:
 	void start();
 	void stop();
 
-	MIDIAnalyser& getAnalyser() { return analyser; }
+    std::uint64_t getDroppedEventCount() const { return droppedEvents.load(std::memory_order_relaxed); }
 
 private:
 	static constexpr size_t QUEUE_SIZE = 256;
@@ -28,8 +29,9 @@ private:
 	std::atomic<size_t> readIndex;
 	std::thread workerThread;
 	std::atomic<bool> running;
-	std::condition_variable dataAvailable;
-	std::mutex queueMutex;
+    std::counting_semaphore<> dataAvailable{0};
+    std::atomic<bool> resetRequested{false};
+    std::atomic<std::uint64_t> droppedEvents{0};
 
 	MIDIAnalyser analyser;
 	mutable std::mutex stateMutex;

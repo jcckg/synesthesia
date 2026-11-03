@@ -51,5 +51,7 @@ private:
 };
 
 std::shared_ptr<const PresentationSnapshot> recorderPresentation(RecorderState& state);
+void beginPresentationFrame(RecorderState& state);
+double recorderPlaybackPosition(const RecorderState& state);
 
 }

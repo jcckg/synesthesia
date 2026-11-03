@@ -1,3 +1,4 @@
+#include "utilities/io.h"
 #include "resyne/encoding/formats/rsyn_container.h"
 
 #include <algorithm>
@@ -6,6 +7,7 @@
 #include <cstdint>
 #include <fstream>
 #include <limits>
+#include <memory>
 #include <utility>
 #include <vector>
 #include <type_traits>
@@ -131,7 +133,14 @@ std::uint32_t crc32For(const std::vector<std::uint8_t>& data) {
     if (data.empty()) {
         return 0;
     }
-    return static_cast<std::uint32_t>(mz_crc32(MZ_CRC32_INIT, data.data(), data.size()));
+    mz_ulong value = MZ_CRC32_INIT;
+    for (std::size_t offset = 0; offset < data.size();) {
+        Utilities::checkCancellation();
+        const auto count = std::min<std::size_t>(data.size() - offset, 1024 * 1024);
+        value = mz_crc32(value, data.data() + offset, count);
+        offset += count;
+    }
+    return static_cast<std::uint32_t>(value);
 }
 
 bool compressPayload(const std::vector<std::uint8_t>& input,
@@ -144,29 +153,35 @@ bool compressPayload(const std::vector<std::uint8_t>& input,
         return true;
     }
 
-    mz_ulong bound = compressBound(static_cast<mz_ulong>(input.size()));
-    if (bound == 0 || bound > static_cast<mz_ulong>(std::numeric_limits<std::size_t>::max())) {
-        return false;
+    mz_stream stream{};
+    if (mz_deflateInit(&stream, compressionLevel) != MZ_OK) return false;
+    const auto end = [](mz_stream* value) { mz_deflateEnd(value); };
+    std::unique_ptr<mz_stream, decltype(end)> guard(&stream, end);
+    std::vector<std::uint8_t> compressed;
+    std::array<std::uint8_t, 65536> block;
+    std::size_t offset = 0;
+    int status = MZ_OK;
+    while (status != MZ_STREAM_END) {
+        Utilities::checkCancellation();
+        if (stream.avail_in == 0 && offset < input.size()) {
+            const auto count = std::min<std::size_t>(input.size() - offset, 1024 * 1024);
+            stream.next_in = input.data() + offset;
+            stream.avail_in = static_cast<unsigned int>(count);
+            offset += count;
+        }
+        stream.next_out = block.data();
+        stream.avail_out = static_cast<unsigned int>(block.size());
+        status = mz_deflate(&stream, offset == input.size() ? MZ_FINISH : MZ_NO_FLUSH);
+        if (status != MZ_OK && status != MZ_STREAM_END) return false;
+        compressed.insert(compressed.end(), block.begin(), block.begin() + static_cast<std::ptrdiff_t>(block.size() - stream.avail_out));
     }
-
-    std::vector<std::uint8_t> compressed(static_cast<std::size_t>(bound));
-    mz_ulong compressedSize = bound;
-    const int result = compress2(
-        compressed.data(),
-        &compressedSize,
-        input.data(),
-        static_cast<mz_ulong>(input.size()),
-        compressionLevel);
-
-    if (result != MZ_OK || compressedSize >= input.size()) {
+    if (compressed.size() >= input.size()) {
         compression = Compression::None;
-        output = input;
-        return true;
+        output.clear();
+    } else {
+        compression = Compression::Deflate;
+        output = std::move(compressed);
     }
-
-    compressed.resize(static_cast<std::size_t>(compressedSize));
-    compression = Compression::Deflate;
-    output = std::move(compressed);
     return true;
 }
 
@@ -184,16 +199,33 @@ bool decompressPayload(const Compression compression,
     }
 
     output.resize(expectedSize);
-    mz_ulong decodedSize = static_cast<mz_ulong>(expectedSize);
-    const int result = uncompress(
-        output.data(),
-        &decodedSize,
-        input.data(),
-        static_cast<mz_ulong>(input.size()));
-    if (result != MZ_OK || decodedSize != expectedSize) {
-        return false;
+    mz_stream stream{};
+    if (mz_inflateInit(&stream) != MZ_OK) return false;
+    const auto end = [](mz_stream* value) { mz_inflateEnd(value); };
+    std::unique_ptr<mz_stream, decltype(end)> guard(&stream, end);
+    std::size_t inputOffset = 0, outputOffset = 0;
+    int status = MZ_OK;
+    while (status != MZ_STREAM_END) {
+        Utilities::checkCancellation();
+        if (stream.avail_in == 0 && inputOffset < input.size()) {
+            const auto count = std::min<std::size_t>(input.size() - inputOffset, 1024 * 1024);
+            stream.next_in = input.data() + inputOffset;
+            stream.avail_in = static_cast<unsigned int>(count);
+            inputOffset += count;
+        }
+        if (stream.avail_out == 0 && outputOffset < output.size()) {
+            const auto count = std::min<std::size_t>(output.size() - outputOffset, 1024 * 1024);
+            stream.next_out = output.data() + outputOffset;
+            stream.avail_out = static_cast<unsigned int>(count);
+            outputOffset += count;
+        }
+        const auto before = stream.total_out;
+        const auto consumed = stream.total_in;
+        status = mz_inflate(&stream, MZ_NO_FLUSH);
+        if (status != MZ_OK && status != MZ_STREAM_END) return false;
+        if (status != MZ_STREAM_END && before == stream.total_out && consumed == stream.total_in) return false;
     }
-    return true;
+    return stream.total_out == expectedSize && stream.total_in == input.size();
 }
 
 std::vector<std::uint8_t> readBytes(std::ifstream& file, const std::uint64_t offset, const std::uint64_t size) {
@@ -208,8 +240,7 @@ std::vector<std::uint8_t> readBytes(std::ifstream& file, const std::uint64_t off
     }
 
     if (!buffer.empty()) {
-        file.read(reinterpret_cast<char*>(buffer.data()), static_cast<std::streamsize>(buffer.size()));
-        if (!file.good()) {
+        if (!Utilities::readBytes(file, buffer.data(), buffer.size())) {
             return {};
         }
     }
@@ -226,8 +257,9 @@ void emitProgress(const std::function<void(float)>& progress, const float value)
 
 }
 
-bool writeFile(const std::string& filepath,
-               const std::vector<Chunk>& chunks,
+template <typename Source>
+bool writeChunks(const std::string& filepath,
+               const std::vector<Source>& chunks,
                const int compressionLevel,
                const std::function<void(float)>& progress) {
     std::ofstream file(filepath, std::ios::binary);
@@ -249,20 +281,27 @@ bool writeFile(const std::string& filepath,
     tocEntries.reserve(chunks.size());
 
     for (std::size_t index = 0; index < chunks.size(); ++index) {
+        Utilities::checkCancellation();
+        std::vector<std::uint8_t> generated;
+        const std::vector<std::uint8_t>* payload;
+        if constexpr (std::is_same_v<Source, Chunk>) payload = &chunks[index].payload;
+        else {
+            if (!chunks[index].build(generated)) return false;
+            payload = &generated;
+        }
         Compression compression = Compression::None;
         std::vector<std::uint8_t> compressedPayload;
-        const std::vector<std::uint8_t>* storedPayload = &chunks[index].payload;
+        const std::vector<std::uint8_t>* storedPayload = payload;
         if (compressionLevel > 0 && chunks[index].allowCompression) {
-            if (!compressPayload(chunks[index].payload, compressionLevel, compression, compressedPayload)) {
+            if (!compressPayload(*payload, compressionLevel, compression, compressedPayload)) {
                 return false;
             }
-            storedPayload = &compressedPayload;
+            if (compression != Compression::None) storedPayload = &compressedPayload;
         }
 
         const std::uint64_t payloadOffset = static_cast<std::uint64_t>(file.tellp());
         if (!storedPayload->empty()) {
-            file.write(reinterpret_cast<const char*>(storedPayload->data()), static_cast<std::streamsize>(storedPayload->size()));
-            if (!file.good()) {
+            if (!Utilities::writeBytes(file, storedPayload->data(), storedPayload->size())) {
                 return false;
             }
         }
@@ -272,8 +311,8 @@ bool writeFile(const std::string& filepath,
         entry.compression = static_cast<std::uint32_t>(compression);
         entry.offset = payloadOffset;
         entry.storedSize = storedPayload->size();
-        entry.unpackedSize = chunks[index].payload.size();
-        entry.crc32 = crc32For(chunks[index].payload);
+        entry.unpackedSize = payload->size();
+        entry.crc32 = crc32For(*payload);
         tocEntries.push_back(entry);
 
         emitProgress(progress, static_cast<float>(index + 1) / static_cast<float>(std::max<std::size_t>(1, chunks.size())) * 0.8f);
@@ -298,6 +337,14 @@ bool writeFile(const std::string& filepath,
 
     emitProgress(progress, 1.0f);
     return true;
+}
+
+bool writeFile(const std::string& path, const std::vector<Chunk>& chunks, int level, const std::function<void(float)>& progress) {
+    return writeChunks(path, chunks, level, progress);
+}
+
+bool writeFile(const std::string& path, const std::vector<ChunkSource>& chunks, int level, const std::function<void(float)>& progress) {
+    return writeChunks(path, chunks, level, progress);
 }
 
 bool readIndex(const std::string& filepath,

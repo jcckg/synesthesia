@@ -4,6 +4,7 @@
 #include "renderer/osc_routing_window.h"
 #endif
 #include "renderer/event_tracking_frames.h"
+#include "renderer/frame_pacing.h"
 #include "renderer/imgui_window_context.h"
 #include "renderer/presentation_resources.h"
 #include "renderer/render_utils.h"
@@ -11,6 +12,7 @@
 #include "renderer/window.h"
 
 #include "audio_input.h"
+#include "ui/device_manager/device_topology.h"
 #include "audio_output.h"
 #include "ui.h"
 #include "ui/dragdrop/file_drop_manager.h"
@@ -40,7 +42,6 @@ constexpr int kDefaultWindowHeight = 750;
 constexpr int kMinimumWindowWidth = 900;
 constexpr int kMinimumWindowHeight = 550;
 constexpr int kTargetFramesPerSecond = 120;
-constexpr int kTargetFrameDurationMicroseconds = 1'000'000 / kTargetFramesPerSecond;
 
 struct FrameScope {
     bool& rendering;
@@ -151,7 +152,7 @@ int app_main(int, char**) {
     TrackpadGestures::attach(window.handle());
 
     auto& ffmpegLocator = Utilities::Video::FFmpegLocator::instance();
-    ffmpegLocator.refresh();
+    ffmpegLocator.refreshAsync();
 
     AudioInput audioInput;
     std::vector<AudioInput::DeviceInfo> inputDevices = AudioInput::getInputDevices();
@@ -166,6 +167,7 @@ int app_main(int, char**) {
     getThemeBackgroundColour(clearColour);
 
     UIState uiState;
+    UI::DeviceTopology deviceTopology(audioInput, uiState, inputDevices, outputDevices);
     uiState.presentationDiagnostics.displaySurfacePrecision =
         displaySurfacePrecisionFromFormat(bgfxContext.colourFormat());
     Renderer::PresentationResources presentationResources;
@@ -215,7 +217,8 @@ int app_main(int, char**) {
     initialiseMidiState(uiState, midiInput, midiDevices);
 #endif
 
-    constexpr auto targetFrameDuration = std::chrono::microseconds(kTargetFrameDurationMicroseconds);
+    constexpr auto targetFrameDuration = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(1.0 / kTargetFramesPerSecond));
 
     int previousWidth = std::max(initialSize.width, 1);
     int previousHeight = std::max(initialSize.height, 1);
@@ -233,6 +236,7 @@ int app_main(int, char**) {
     const auto renderFrame = [&](bool nativeTracking) {
         if (renderingFrame || window.shouldClose()) return;
         FrameScope frameScope(renderingFrame, uiState.nativeMenuTracking, nativeTracking);
+        if (!nativeTracking) deviceTopology.update();
         mainWindowContext.makeCurrent();
         if (!nativeTracking) {
             auto& browser = recorderState.fileBrowser;
@@ -346,17 +350,15 @@ int app_main(int, char**) {
 
     Renderer::EventTrackingFrames trackingFrames([&] { renderFrame(true); }, kTargetFramesPerSecond);
 
+    Renderer::FramePacing framePacing(std::chrono::steady_clock::now(), targetFrameDuration);
     while (!window.shouldClose()) {
-        const auto frameStart = std::chrono::steady_clock::now();
         window.pollEvents();
         trackingFrames.rethrowPendingException();
         renderFrame(false);
 
         const auto frameEnd = std::chrono::steady_clock::now();
-        const auto frameDuration = frameEnd - frameStart;
-        if (frameDuration < targetFrameDuration) {
-            std::this_thread::sleep_for(targetFrameDuration - frameDuration);
-        }
+        const auto deadline = framePacing.finish(frameEnd);
+        if (deadline > frameEnd) std::this_thread::sleep_until(deadline);
     }
 
     trackingFrames.shutdown();

@@ -18,6 +18,8 @@ struct OSCOutput {
     std::vector<float> samples;
     bool vector = false;
     bool available = true;
+    std::size_t sampleCount = 0;
+    std::size_t length() const { return samples.empty() ? sampleCount : samples.size(); }
 };
 
 struct OSCRoute {
@@ -50,7 +52,7 @@ inline constexpr std::size_t kOptionalPacketLimit = 1200;
 
 const std::vector<OSCRoute>& outputCatalogue();
 OSCRouting defaultRouting();
-std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting& routing, bool includeDisabled = true);
+std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting& routing, bool includeDisabled = true, bool includeSamples = true);
 std::vector<OSCPacket> encodePackets(const OSCFrameData& frame, std::span<const OSCOutput> outputs, const OSCRouting& routing, std::size_t scalarBufferSize = 8192);
 OSCOutputSize outputSize(const OSCOutput& output);
 

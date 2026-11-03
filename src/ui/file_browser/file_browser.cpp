@@ -305,7 +305,7 @@ void drawToolbarButton(State& state, float height) {
 
 bool canLoadFiles(UIState& state) {
     const auto& recorder = state.resyneState.recorderState;
-    return !state.nativeMenuTracking && !state.helpState.showKeyboardShortcuts && !recorder.isRecording &&
+    return !state.nativeMenuTracking && !state.helpState.showKeyboardShortcuts && !recorder.isRecording && !recorder.recordingFinishing && !recorder.audioDevicesRefreshing &&
         !recorder.recordingCountdownActive && !recorder.exportRunning.load(std::memory_order_acquire) &&
         !recorder.showExportingDialog && !recorder.showExportDialog && !recorder.showClearTimelineDialog &&
         !recorder.shouldOpenLoadDialog && !recorder.shouldOpenSaveDialog &&

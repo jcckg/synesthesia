@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -34,6 +36,9 @@ private:
     AudioInput audioInput;
     ColourCore::ColourSpace oscColourSpace = ColourCore::ColourSpace::Rec2020;
     bool oscGamutMappingEnabled = true;
+    std::string deviceFingerprint_, preferredDeviceId_;
+    std::chrono::steady_clock::time_point nextDeviceCheck_{};
+    void refreshDevices();
     std::string oscDestination_ = "127.0.0.1";
     uint16_t oscSendPort_ = 7000;
     uint16_t oscReceivePort_ = 7001;

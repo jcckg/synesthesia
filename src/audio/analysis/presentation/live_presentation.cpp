@@ -8,6 +8,10 @@ void LivePresentation::restart() {
 }
 
 void LivePresentation::setSettings(const RSYNPresentationSettings& settings) {
+    if (settings_.colourSpace == settings.colourSpace && settings_.applyGamutMapping == settings.applyGamutMapping &&
+        settings_.lowGain == settings.lowGain && settings_.midGain == settings.midGain && settings_.highGain == settings.highGain &&
+        settings_.smoothingEnabled == settings.smoothingEnabled && settings_.manualSmoothing == settings.manualSmoothing &&
+        settings_.smoothingAmount == settings.smoothingAmount) return;
     settings_ = settings;
     if (replay_) {
         replay_->setEqualiserSettings(settings.lowGain, settings.midGain, settings.highGain);
@@ -24,6 +28,7 @@ const LiveResult& LivePresentation::process(const AudioColourSample& sample) {
     sampleRate_ = sample.sampleRate;
     channels_ = sample.channels;
     result_.frame = replay_->process(sample, &result_.prepared);
+    result_.source = replay_->sourceFrame();
     result_.settings = settings_;
     ++result_.processedFrames;
     ready_ = true;

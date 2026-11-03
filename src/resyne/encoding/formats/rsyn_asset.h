@@ -32,6 +32,7 @@ struct RSYNPresentationSettings {
     bool smoothingEnabled = true;
     bool manualSmoothing = false;
     float smoothingAmount = 0.6f;
+    bool operator==(const RSYNPresentationSettings&) const = default;
 };
 
 struct RSYNPresentationFrame {

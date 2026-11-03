@@ -36,7 +36,7 @@ private:
     struct Bin {
         LogEnvelope envelope;
         double phase = 0, velocity = 0, coherence = 0;
-        double shape = 1;
+        double shape = 1, coherentFraction = 0;
         bool hasPhase = false, hasVelocity = false;
     };
     std::vector<Bin> bins_, weightedBins_, lineBins_, bassBins_;
@@ -46,7 +46,7 @@ private:
     Frame previous_;
     LogEnvelope brightness_;
     std::array<float, 3> equaliser_{1, 1, 1};
-    std::vector<double> brightnessWeights_;
+    std::vector<double> brightnessWeights_, brightnessDeviations_;
     bool measuredBrightness_ = false;
     void filter(std::vector<float>& magnitudes, const std::vector<float>& phases,
         std::vector<Bin>& bins, double dt, double support, bool powerOutput,

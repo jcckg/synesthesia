@@ -1,7 +1,9 @@
 #include "resyne/encoding/audio/wav_encoder.h"
+#include "resyne/encoding/formats/exporter.h"
 #include "resyne/encoding/reconstruction/spectral_resampling.h"
 #include "audio/analysis/fft/real_fft.h"
 #include <fstream>
+#include "utilities/cancellation.h"
 #include <iostream>
 #include <algorithm>
 #include <cstring>
@@ -41,8 +43,9 @@ void applyPeakGuard(std::vector<float>& samples, const std::function<void(float)
 
 }
 
-WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
-	const std::vector<SpectralSample>& samples,
+template <typename Sample>
+WAVEncoder::EncodingResult reconstruct(
+	const std::span<const Sample> samples,
 	float sampleRate,
 	int fftSize,
 	int hopSize,
@@ -51,7 +54,7 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
     const bool limitPeak,
     const std::function<void(float)>& progress
 ) {
-	EncodingResult result;
+	WAVEncoder::EncodingResult result;
 	result.success = false;
 	result.sampleRate = sampleRate;
 	result.numChannels = 0;
@@ -73,63 +76,82 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	}
 	result.numChannels = numChannels;
 
-	std::vector<std::vector<float>> channelAudio(numChannels);
-
-	for (size_t ch = 0; ch < numChannels; ++ch) {
-		std::vector<std::vector<float>> timeFrames;
-		timeFrames.reserve(samples.size());
-		std::vector<bool> frequencyShifted(samples.size(), false);
-		SpectralResampling::PhaseState phaseState;
-
-		for (size_t frame = 0; frame < samples.size(); ++frame) {
-            if (progress) progress(0.8f * (static_cast<float>(ch) + 0.75f * static_cast<float>(frame) / static_cast<float>(samples.size())) / static_cast<float>(numChannels));
-			const auto& sample = samples[frame];
-			if (ch >= sample.magnitudes.size() || ch >= sample.phases.size()) {
-				timeFrames.push_back(std::vector<float>(static_cast<size_t>(fftSize), 0.0f));
-				phaseState = {};
-				continue;
-			}
-
-			const auto& mags = sample.magnitudes[ch];
-			const auto& phs = sample.phases[ch];
-
-			std::vector<float> frameMagnitudes = mags;
-			std::vector<float> framePhases = phs;
-			if (ch < sample.frequencies.size() && !sample.frequencies[ch].empty()) {
-				auto resampled = SpectralResampling::resampleSpectrum(
-					frameMagnitudes,
-					framePhases,
-					sample.frequencies[ch],
-					sampleRate,
-					static_cast<size_t>(fftSize),
-					hopSize,
-					phaseState);
-				frameMagnitudes = std::move(resampled.magnitudes);
-				framePhases = std::move(resampled.phases);
-				frequencyShifted[frame] = resampled.frequencyShifted;
-			} else {
-				phaseState = {};
-			}
-
-			std::vector<float> timeFrame = inverseFFT(frameMagnitudes, framePhases, fftSize);
-
-			timeFrames.push_back(std::move(timeFrame));
-		}
-
-		channelAudio[ch] = overlapAdd(timeFrames, hopSize, frequencyShifted, [&](float fraction) {
-            if (progress) progress(0.8f * (static_cast<float>(ch) + 0.75f + 0.25f * fraction) / static_cast<float>(numChannels));
-        });
+    if (samples.size() - 1 > (std::numeric_limits<std::size_t>::max() - static_cast<std::size_t>(fftSize)) / static_cast<std::size_t>(hopSize)) {
+        result.errorMessage = "Audio extent exceeds available address space";
+        return result;
+    }
+    const auto size = static_cast<std::size_t>(fftSize);
+    const auto hop = static_cast<std::size_t>(hopSize);
+    const auto total = (samples.size() - 1) * hop + size;
+    std::vector<float> window(size, 1);
+    for (std::size_t i = 0; i < size; ++i)
+        window[i] = .5f * (1 - std::cos(2 * std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(size - 1)));
+    AudioAnalysis::RealFFT transform(size, AudioAnalysis::FFTBackend::Automatic, true);
+    std::vector<kiss_fft_cpx> bins(size / 2 + 1);
+    std::vector<float> timeFrame(size), normalisation(total);
+    std::vector<std::vector<float>> channelAudio(numChannels);
+    for (std::size_t ch = 0; ch < numChannels; ++ch) {
+        auto& output = channelAudio[ch];
+        output.assign(total, 0);
+        std::fill(normalisation.begin(), normalisation.end(), 0);
+        std::vector<bool> frequencyShifted(samples.size(), false);
+        SpectralResampling::PhaseState phaseState;
+        for (std::size_t frame = 0; frame < samples.size(); ++frame) {
+            Utilities::checkCancellation();
+            if (progress) progress(.8f * (static_cast<float>(ch) + static_cast<float>(frame) / static_cast<float>(samples.size())) / static_cast<float>(numChannels));
+            const auto& sample = samples[frame];
+            std::fill(bins.begin(), bins.end(), kiss_fft_cpx{});
+            if (ch < sample.magnitudes.size() && ch < sample.phases.size()) {
+                const auto* magnitudes = &sample.magnitudes[ch];
+                const auto* phases = &sample.phases[ch];
+                SpectralResampling::ResampledSpectrum resampled;
+                if (ch < sample.frequencies.size() && !sample.frequencies[ch].empty()) {
+                    resampled = SpectralResampling::resampleSpectrum(*magnitudes, *phases, sample.frequencies[ch], sampleRate, size, hopSize, phaseState);
+                    magnitudes = &resampled.magnitudes;
+                    phases = &resampled.phases;
+                    frequencyShifted[frame] = resampled.frequencyShifted;
+                } else phaseState = {};
+                for (std::size_t bin = 0; bin < std::min({bins.size(), magnitudes->size(), phases->size()}); ++bin) {
+                    const float scale = static_cast<float>(fftSize) * (bin == 0 || bin + 1 == bins.size() ? 1.0f : .5f);
+                    bins[bin].r = (*magnitudes)[bin] * scale * std::cos((*phases)[bin]);
+                    bins[bin].i = (*magnitudes)[bin] * scale * std::sin((*phases)[bin]);
+                }
+            } else phaseState = {};
+            transform.inverse(bins, timeFrame);
+            const float scale = 1.0f / static_cast<float>(fftSize);
+            for (auto& value : timeFrame) value *= scale;
+            const auto offset = frame * hop;
+            for (std::size_t i = 0; i < size; ++i) {
+                output[offset + i] += timeFrame[i] * window[i];
+                normalisation[offset + i] += window[i] * window[i];
+            }
+        }
+        if (std::any_of(frequencyShifted.begin(), frequencyShifted.end(), [](bool value) { return value; })) {
+            std::vector<float> complete(std::min(hop, size), 0);
+            for (std::size_t i = 0; i < size; ++i) complete[i % hop] += window[i] * window[i];
+            for (std::size_t frame = 0; frame < samples.size(); ++frame) {
+            Utilities::checkCancellation();
+                const auto offset = frame * hop;
+                if (!frequencyShifted[frame] || (offset >= size && offset + size <= total - size)) continue;
+                for (std::size_t i = 0; i < size; ++i)
+                    normalisation[offset + i] = std::max(normalisation[offset + i], complete[i % hop]);
+            }
+        }
+        for (std::size_t i = 0; i < total; ++i) {
+            if (i % 4096 == 0) Utilities::checkCancellation();
+            if (progress && i % 4096 == 0) progress(.8f * (static_cast<float>(ch) + 1) / static_cast<float>(numChannels));
+            if (normalisation[i] > 1e-6f) output[i] /= normalisation[i];
+        }
         if (leadingSamples > 0 || originalSampleCount > 0) {
-            auto& audio = channelAudio[ch];
-            if (leadingSamples > audio.size() || originalSampleCount > audio.size() - leadingSamples) {
+            if (leadingSamples > output.size() || originalSampleCount > output.size() - leadingSamples) {
                 result.errorMessage = "Spectral frames do not cover the declared audio extent";
                 return result;
             }
-            const size_t length = originalSampleCount > 0 ? static_cast<size_t>(originalSampleCount) : audio.size() - leadingSamples;
-            std::move(audio.begin() + leadingSamples, audio.begin() + leadingSamples + length, audio.begin());
-            audio.resize(length);
+            const auto length = originalSampleCount > 0 ? static_cast<std::size_t>(originalSampleCount) : output.size() - leadingSamples;
+            std::move(output.begin() + leadingSamples, output.begin() + leadingSamples + length, output.begin());
+            output.resize(length);
         }
-	}
+    }
 
 	if (numChannels == 1) {
 		result.audioSamples = std::move(channelAudio[0]);
@@ -157,6 +179,18 @@ WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(
 	result.success = true;
 
 	return result;
+}
+
+WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(const std::vector<SpectralSample>& samples,
+    float rate, int fftSize, int hop, std::uint32_t leading, std::uint64_t count, bool limit,
+    const std::function<void(float)>& progress) {
+    return reconstruct(std::span<const SpectralSample>(samples), rate, fftSize, hop, leading, count, limit, progress);
+}
+
+WAVEncoder::EncodingResult WAVEncoder::reconstructFromSpectralData(std::span<const AudioColourSample> samples,
+    float rate, int fftSize, int hop, std::uint32_t leading, std::uint64_t count, bool limit,
+    const std::function<void(float)>& progress) {
+    return reconstruct(samples, rate, fftSize, hop, leading, count, limit, progress);
 }
 
 std::vector<float> WAVEncoder::inverseFFT(
@@ -193,81 +227,6 @@ std::vector<float> WAVEncoder::inverseFFT(
 	}
 
 	return timeDomain;
-}
-
-std::vector<float> WAVEncoder::overlapAdd(
-	const std::vector<std::vector<float>>& frames,
-	int hopSize,
-	const std::vector<bool>& frequencyShifted,
-    const std::function<void(float)>& progress
-) {
-	if (frames.empty()) {
-		return {};
-	}
-
-	const size_t frameSize = frames[0].size();
-	const size_t totalSamples = (frames.size() - 1) * static_cast<size_t>(hopSize) + frameSize;
-
-	if (frameSize == 0) {
-		return {};
-	}
-
-	std::vector<float> hannWindow(frameSize, 1.0f);
-	if (frameSize > 1) {
-		const float denom = static_cast<float>(frameSize - 1);
-		for (size_t n = 0; n < frameSize; ++n) {
-			hannWindow[n] = 0.5f * (1.0f - std::cos(2.0f * std::numbers::pi_v<float> * static_cast<float>(n) / denom));
-		}
-	}
-
-	std::vector<float> output(totalSamples, 0.0f);
-	std::vector<float> normalisation(totalSamples, 0.0f);
-
-	for (size_t i = 0; i < frames.size(); ++i) {
-        if (progress) progress(0.5f * static_cast<float>(i) / static_cast<float>(frames.size()));
-		size_t writePos = i * static_cast<size_t>(hopSize);
-
-		const auto& frame = frames[i];
-		const size_t copyCount = std::min(frameSize, frame.size());
-
-		for (size_t j = 0; j < copyCount && (writePos + j) < totalSamples; ++j) {
-			const float windowed = frame[j] * hannWindow[j];
-			const size_t index = writePos + j;
-			output[index] += windowed;
-			normalisation[index] += hannWindow[j] * hannWindow[j];
-		}
-	}
-
-	if (std::any_of(frequencyShifted.begin(), frequencyShifted.end(),
-		[](bool shifted) { return shifted; })) {
-		const size_t hop = static_cast<size_t>(hopSize);
-		std::vector<float> completeNormalisation(std::min(hop, frameSize), 0.0f);
-		for (size_t j = 0; j < frameSize; ++j) {
-			completeNormalisation[j % hop] += hannWindow[j] * hannWindow[j];
-		}
-		for (size_t frame = 0; frame < frames.size(); ++frame) {
-            if (progress) progress(0.5f + 0.25f * static_cast<float>(frame) / static_cast<float>(frames.size()));
-			const size_t writePos = frame * hop;
-			if (!frequencyShifted[frame] ||
-				(writePos >= frameSize && writePos + frameSize <= totalSamples - frameSize)) {
-				continue;
-			}
-			for (size_t j = 0; j < frames[frame].size() && j < frameSize; ++j) {
-				const size_t index = writePos + j;
-				normalisation[index] = std::max(normalisation[index], completeNormalisation[j % hop]);
-			}
-		}
-	}
-
-	constexpr float normalisationEpsilon = 1e-6f;
-	for (size_t i = 0; i < output.size(); ++i) {
-        if (progress && (i % 4096) == 0) progress(0.75f + 0.25f * static_cast<float>(i) / static_cast<float>(output.size()));
-		if (normalisation[i] > normalisationEpsilon) {
-			output[i] /= normalisation[i];
-		}
-	}
-
-	return output;
 }
 
 bool WAVEncoder::exportToWAV(

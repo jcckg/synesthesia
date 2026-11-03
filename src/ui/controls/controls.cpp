@@ -101,7 +101,7 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, ReSyne::RecorderState& rec
         const auto presentation = ReSyne::recorderPresentation(recorderState);
         if (presentation && presentation->analysis && !presentation->analysis->empty()) {
             const double time = recorderState.metadata.sampleRate > 0.0f ?
-                static_cast<double>(recorderState.audioOutput->getPresentationPosition()) / static_cast<double>(recorderState.metadata.sampleRate) :
+                static_cast<double>(ReSyne::recorderPlaybackPosition(recorderState)) / static_cast<double>(recorderState.metadata.sampleRate) :
                 static_cast<double>(recorderState.timeline.scrubberNormalisedPosition) * presentation->duration;
             result = (*presentation->analysis)[presentation->analysis->indexAt(time)].analysis;
         }
@@ -113,6 +113,30 @@ void renderFrequencyInfoPanel(AudioInput& audioInput, ReSyne::RecorderState& rec
             static_cast<double>(result.loudnessDb));
         else ImGui::TextDisabled("Loudness: unavailable");
     } else ImGui::TextDisabled("No significant frequencies");
+    if (!playback && audioInput.isStreamActive() && ImGui::TreeNodeEx("Input timing", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+        const auto timing = audioInput.getAudioProcessor().getTimingStatistics();
+        ImGui::TextDisabled("Device latency: %.1f ms", audioInput.getInputLatency() * 1000);
+        ImGui::TextDisabled("Callback: %zu frames / %.1f ms", timing.callbackFrames, timing.callbackInterval * 1000);
+        ImGui::TextDisabled("Queue: %.2f ms / Analysis: %.2f ms", timing.queueAge * 1000, timing.processingTime * 1000);
+        ImGui::TextDisabled("Queue p95/p99: %.2f / %.2f ms", timing.queueDistribution.p95 * 1000, timing.queueDistribution.p99 * 1000);
+        ImGui::TextDisabled("Analysis p95/p99: %.2f / %.2f ms", timing.processingDistribution.p95 * 1000, timing.processingDistribution.p99 * 1000);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Percentiles are histogram upper bounds over the latest 512 observations. Maximum values cover this capture session.");
+        ImGui::TextDisabled("Queue / analysis max: %.2f / %.2f ms", timing.queueDistribution.maximum * 1000, timing.processingDistribution.maximum * 1000);
+        if (timing.captureTimingAvailable) {
+            ImGui::TextDisabled("Delivery age: %.1f ms", timing.captureDeliveryAge * 1000);
+            if (!recorderState.isRecording) {
+                ImGui::TextDisabled("Frame age: %.1f ms", timing.displayedFrameAge * 1000);
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("Age of the FFT window centre when prepared for display, including half the analysis window. Excludes display scan-out.");
+            }
+        }
+        if (!recorderState.isRecording) ImGui::TextDisabled("Analysis to display: %.1f ms", timing.analysisToDisplayAge * 1000);
+        ImGui::TextDisabled("Overflows: %llu / Underflows: %llu", static_cast<unsigned long long>(timing.overflows), static_cast<unsigned long long>(timing.underflows));
+        ImGui::TextDisabled("Dropped frames: %llu", static_cast<unsigned long long>(timing.droppedFrames));
+    }
+    if (playback && recorderState.audioOutput && ImGui::TreeNodeEx("Output timing", ImGuiTreeNodeFlags_NoTreePushOnOpen)) {
+        ImGui::TextDisabled("Underflows: %llu", static_cast<unsigned long long>(recorderState.audioOutput->getUnderflowCount()));
+        ImGui::TextDisabled("Overflows: %llu", static_cast<unsigned long long>(recorderState.audioOutput->getOverflowCount()));
+    }
     ImGui::Spacing();
 }
 
@@ -141,7 +165,7 @@ void renderColourSmoothingPanel(float& smoothingAmount, bool& manualSmoothing,
         (recorder->isRecording || (recorder->audioOutput && recorder->audioOutput->getTotalFrames() > 0))) {
         const double time = recorder->isRecording ? presentation->colours->endTime()
             : recorder->audioOutput && recorder->metadata.sampleRate > 0.0f
-                ? recorder->audioOutput->getPresentationPosition() / static_cast<double>(recorder->metadata.sampleRate)
+                ? ReSyne::recorderPlaybackPosition(*recorder) / static_cast<double>(recorder->metadata.sampleRate)
                 : static_cast<double>(recorder->timeline.scrubberNormalisedPosition) * presentation->duration;
         const auto point = presentation->colours->pointAt(time);
         effectiveMs = point.responseSeconds * 1000.0f;

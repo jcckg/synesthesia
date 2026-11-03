@@ -1,4 +1,6 @@
 #include "audio_output.h"
+#include "audio/device_control.h"
+#include "audio/input/audio_input.h"
 #include "audio/analysis/meter_response.h"
 #include <algorithm>
 #include <cmath>
@@ -23,6 +25,7 @@ AudioOutput::AudioOutput()
 }
 
 AudioOutput::~AudioOutput() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (stream_) {
 		if (Pa_IsStreamActive(stream_) == 1) {
 			Pa_StopStream(stream_);
@@ -32,6 +35,7 @@ AudioOutput::~AudioOutput() {
 }
 
 std::vector<AudioOutput::DeviceInfo> AudioOutput::getOutputDevices() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	std::vector<DeviceInfo> devices;
 
 	const int deviceCount = Pa_GetDeviceCount();
@@ -43,7 +47,7 @@ std::vector<AudioOutput::DeviceInfo> AudioOutput::getOutputDevices() {
 	for (int i = 0; i < deviceCount; ++i) {
 		if (const PaDeviceInfo* deviceInfo = Pa_GetDeviceInfo(i)) {
 			if (deviceInfo->maxOutputChannels > 0) {
-				devices.emplace_back(DeviceInfo{deviceInfo->name, i, deviceInfo->maxOutputChannels});
+				devices.emplace_back(DeviceInfo{deviceInfo->name, i, deviceInfo->maxOutputChannels, AudioInput::deviceIdentifier(i)});
 			}
 		}
 	}
@@ -51,20 +55,7 @@ std::vector<AudioOutput::DeviceInfo> AudioOutput::getOutputDevices() {
 }
 
 bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int deviceIndex, int framesPerBuffer) {
-	if (stream_) {
-		if (Pa_IsStreamActive(stream_) == 1) {
-			Pa_StopStream(stream_);
-		}
-		Pa_CloseStream(stream_);
-		stream_ = nullptr;
-	}
-	isPlaying_.store(false);
-	playbackGain_ = 0.0;
-	clockSession_.fetch_add(1);
-    clockAvailable_.store(false);
-	outputChannelCount_.store(0);
-	actualSampleRate_.store(sampleRate);
-	playbackStep_.store(1.0f);
+    std::lock_guard control(AudioDevices::controlMutex());
 
 	PaStreamParameters outputParameters{};
 	if (deviceIndex >= 0) {
@@ -86,6 +77,22 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 	if (requestedChannels > deviceInfo->maxOutputChannels || !std::isfinite(sampleRate) || sampleRate <= 0.0f) {
 		return false;
 	}
+	if (stream_) {
+		if (Pa_IsStreamActive(stream_) == 1) {
+			Pa_StopStream(stream_);
+		}
+		Pa_CloseStream(stream_);
+		stream_ = nullptr;
+	}
+	isPlaying_.store(false);
+	playbackGain_ = 0.0;
+	clockSession_.fetch_add(1);
+    clockAvailable_.store(false);
+	outputChannelCount_.store(0);
+	actualSampleRate_.store(sampleRate);
+	playbackStep_.store(1.0f);
+
+
 	const int clampedChannels = requestedChannels;
 	outputChannelCount_.store(static_cast<size_t>(clampedChannels));
 	outputParameters.channelCount = clampedChannels;
@@ -124,17 +131,22 @@ bool AudioOutput::initOutputStream(float sampleRate, int channelCount, int devic
 
 // https://eel.is/c++draft/atomics.order
 void AudioOutput::setAudioData(const std::vector<float>& audioSamples, size_t channels) {
-    if (audioSamples.empty()) { clearAudioData(); return; }
+    auto samples = std::make_shared<std::vector<float>>(audioSamples);
+    for (auto& value : *samples) if (!std::isfinite(value)) value = 0;
+    setAudioData(std::move(samples), channels);
+}
+
+void AudioOutput::setAudioData(std::shared_ptr<const std::vector<float>> audioSamples, size_t channels) {
+    if (!audioSamples || audioSamples->empty()) { clearAudioData(); return; }
     auto storage = std::make_unique<AudioStorage>();
-    storage->samples = audioSamples;
-    for (auto& sample : storage->samples) if (!std::isfinite(sample)) sample = 0.0f;
+    storage->samples = std::move(audioSamples);
     storage->channels = std::max<size_t>(1, channels);
     std::lock_guard lock(bufferMutex_);
     storage->generation = ++nextGeneration_;
     retiredBuffers_.push_back(std::move(audioBuffer_));
     audioBuffer_ = std::move(storage);
     channelCount_.store(audioBuffer_->channels);
-    totalSamples_.store(audioBuffer_->samples.size());
+    totalSamples_.store(audioBuffer_->samples->size());
     presentationGeneration_.store(audioBuffer_->generation);
     publishedBuffer_.store(audioBuffer_.get());
     if (callbackReaders_.load() == 0) retiredBuffers_.clear();
@@ -161,6 +173,7 @@ void AudioOutput::setPlaybackEQGains(const float low, const float mid, const flo
 }
 
 void AudioOutput::play() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (!stream_ || isPlaying_.load()) {
 		return;
 	}
@@ -185,6 +198,7 @@ void AudioOutput::pause() {
 }
 
 void AudioOutput::stop() {
+    std::lock_guard control(AudioDevices::controlMutex());
 	if (!stream_) {
 		return;
 	}
@@ -206,8 +220,8 @@ void AudioOutput::stop() {
 
 void AudioOutput::seek(size_t framePosition) {
     std::lock_guard lock(bufferMutex_);
-    const auto count = audioBuffer_ && audioBuffer_->channels > 0 ?
-        audioBuffer_->samples.size() / audioBuffer_->channels : 0;
+    const auto count = audioBuffer_ && audioBuffer_->samples && audioBuffer_->channels > 0 ?
+        audioBuffer_->samples->size() / audioBuffer_->channels : 0;
     const auto position = std::min(framePosition, count);
     if (position == getPlaybackPosition()) return;
     const bool fade = isPlaying_.load();
@@ -291,6 +305,8 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	(void)input;
 
 	auto* audioOutput = static_cast<AudioOutput*>(userData);
+    if (statusFlags & paOutputUnderflow) audioOutput->underflows_.fetch_add(1, std::memory_order_relaxed);
+    if (statusFlags & paOutputOverflow) audioOutput->overflows_.fetch_add(1, std::memory_order_relaxed);
 	auto* out = static_cast<float*>(output);
 	const size_t outputChannels = audioOutput->outputChannelCount_.load();
 
@@ -310,7 +326,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
         ~ReadGuard() { readers.fetch_sub(1); }
     } guard(audioOutput->callbackReaders_);
     const auto* snapshot = audioOutput->publishedBuffer_.load();
-    if (!snapshot || snapshot->channels != outputChannels || snapshot->samples.empty()) {
+    if (!snapshot || snapshot->channels != outputChannels || snapshot->samples->empty()) {
         std::fill_n(out, frameCount * outputChannels, 0.0f);
         audioOutput->resetStereoLevels();
         return paContinue;
@@ -338,7 +354,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
     const double cursorSnapshot = audioOutput->playbackCursor_;
     const double oldSeekCursorSnapshot = audioOutput->oldSeekCursor_;
     const auto session = audioOutput->clockSession_.load();
-    const size_t totalSamples = snapshot->samples.size();
+    const size_t totalSamples = snapshot->samples->size();
     const bool loopEnabled = audioOutput->loopEnabled_.load();
     const size_t totalFrames = totalSamples / outputChannels;
     const double totalFramesDouble = static_cast<double>(totalFrames);
@@ -351,7 +367,7 @@ int AudioOutput::audioCallback(const void* input, void* output,
 	}
 
 	bool stopPlayback = false;
-	const auto& buffer = snapshot->samples;
+	const auto& buffer = *snapshot->samples;
 	double oldSeekCursor = oldSeekCursorSnapshot;
 	size_t seekFadeRemaining = audioOutput->seekFadeRemaining_;
     const double rate = std::max(1.0, static_cast<double>(audioOutput->actualSampleRate_.load()));

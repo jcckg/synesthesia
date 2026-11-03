@@ -66,8 +66,5 @@ private:
 	void handleChannelPressure(const MIDIEvent& event);
 
 	void updateChord();
-	void logEvent(const MIDIEvent& event);
 
-	std::string getNoteName(unsigned char note) const;
-	std::string getControlChangeName(unsigned char cc) const;
 };

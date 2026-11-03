@@ -1,3 +1,5 @@
+#include "utilities/process.h"
+#include "utilities/cancellation.h"
 #include "utilities/video/ffmpeg_locator.h"
 
 #include <algorithm>
@@ -104,72 +106,32 @@ std::optional<fs::path> findInPath(const std::string& executableName) {
     return std::nullopt;
 }
 
-#ifdef _WIN32
-using PipeHandle = std::unique_ptr<FILE, decltype(&_pclose)>;
-PipeHandle makePipe(const std::string& command) {
-    return PipeHandle(_popen(command.c_str(), "r"), _pclose);
-}
-#else
-using PipeHandle = std::unique_ptr<FILE, decltype(&pclose)>;
-PipeHandle makePipe(const std::string& command) {
-    return PipeHandle(popen(command.c_str(), "r"), pclose);
-}
-#endif
-
 bool queryVersion(const fs::path& executable, std::string& outVersion) {
-    std::string command = "\"" + executable.string() + "\" -version";
-#ifndef _WIN32
-    command += " 2>&1";
-#else
-    command += " 2>&1";
-#endif
-
-    auto pipe = makePipe(command);
-    if (!pipe) {
-        return false;
-    }
-
-    std::array<char, 256> buffer{};
-    if (!fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get())) {
-        return false;
-    }
-
-    outVersion = trim(buffer.data());
-    return !outVersion.empty();
+    try {
+        Utilities::Process process("\"" + executable.string() + "\" -version 2>&1", Utilities::Process::Mode::Read);
+        const auto output = process.readAll();
+        if (process.finish() != 0) return false;
+        outVersion = trim(output.substr(0, output.find('\n')));
+        return !outVersion.empty();
+    } catch (const Utilities::OperationCancelled&) { throw; }
+    catch (const std::exception&) { return false; }
 }
 
 bool queryEncoders(const fs::path& executable, std::vector<std::string>& encoders) {
-    std::string command = "\"" + executable.string() + "\" -hide_banner -encoders";
-#ifndef _WIN32
-    command += " 2>&1";
-#else
-    command += " 2>&1";
-#endif
-
-    auto pipe = makePipe(command);
-    if (!pipe) {
-        return false;
-    }
-
-    std::array<char, 512> buffer{};
-    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe.get())) {
-        std::string line = trim(buffer.data());
-        if (line.empty()) {
-            continue;
+    try {
+        Utilities::Process process("\"" + executable.string() + "\" -hide_banner -encoders 2>&1", Utilities::Process::Mode::Read);
+        std::istringstream output(process.readAll());
+        if (process.finish() != 0) return false;
+        std::string line;
+        while (std::getline(output, line)) {
+            std::istringstream fields(trim(line));
+            std::string descriptor, name;
+            fields >> descriptor >> name;
+            if (descriptor.size() == 6 && descriptor[0] != '=' && !name.empty()) encoders.push_back(std::move(name));
         }
-        if (line.rfind("Encoders:", 0) == 0 || line[0] == '=') {
-            continue;
-        }
-        std::istringstream stream(line);
-        std::string descriptor;
-        std::string name;
-        stream >> descriptor >> name;
-        if (!name.empty()) {
-            encoders.emplace_back(name);
-        }
-    }
-
-    return !encoders.empty();
+        return !encoders.empty();
+    } catch (const Utilities::OperationCancelled&) { throw; }
+    catch (const std::exception&) { return false; }
 }
 
 std::vector<std::string> defaultExecutableNames() {
@@ -258,7 +220,7 @@ FFmpegLocator& FFmpegLocator::instance() {
     return locator;
 }
 
-void FFmpegLocator::refresh() {
+void FFmpegLocator::detect() {
 #if defined(_WIN32)
     attempted_ = true;
     available_ = false;
@@ -318,8 +280,39 @@ void FFmpegLocator::refresh() {
 #endif
 }
 
+FFmpegLocator::~FFmpegLocator() {
+    worker_.request_stop();
+    if (worker_.joinable()) worker_.join();
+}
+
+void FFmpegLocator::refresh() {
+    FFmpegLocator candidate;
+    candidate.detect();
+    auto status = std::make_shared<Status>();
+    status->attempted = candidate.attempted_;
+    status->available = candidate.available_;
+    status->executable = std::move(candidate.executablePath_);
+    status->version = std::move(candidate.versionString_);
+    status->encoders = std::move(candidate.encoderNames_);
+    std::atomic_store(&status_, std::shared_ptr<const Status>(std::move(status)));
+}
+
+void FFmpegLocator::refreshAsync() {
+    if (worker_.joinable()) { worker_.request_stop(); worker_.join(); }
+    worker_ = std::jthread([this](std::stop_token stop) {
+        Utilities::CancellationScope scope(stop);
+        try { refresh(); } catch (const Utilities::OperationCancelled&) {}
+        catch (const std::exception&) {
+            auto status = std::make_shared<Status>();
+            status->attempted = true;
+            std::atomic_store(&status_, std::shared_ptr<const Status>(std::move(status)));
+        }
+    });
+}
+
 bool FFmpegLocator::supportsEncoder(std::string_view name) const {
-    return std::any_of(encoderNames_.begin(), encoderNames_.end(), [&](const std::string& candidate) {
+    const auto status = std::atomic_load(&status_);
+    return std::any_of(status->encoders.begin(), status->encoders.end(), [&](const std::string& candidate) {
         return candidate == name;
     });
 }

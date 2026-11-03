@@ -49,7 +49,7 @@ struct ReplayState::Impl {
     SpectralPresentation::Settings presentationSettings;
     SpectralPresentation::ContributionHistory contributions;
     SpectralPresentation::SpectralEnvelope envelope;
-    SpectralPresentation::Frame previous;
+    std::shared_ptr<const SpectralPresentation::Frame> previous;
     double previousTimestamp = 0;
     bool hasPrevious = false;
     explicit Impl(const RSYNPresentationSettings& config)
@@ -65,7 +65,7 @@ RSYNPresentationFrame ReplayState::analyse(const AudioColourSample& sample, Spec
     auto source = SpectralPresentation::SampleSequence::buildFrame(sample);
     auto prepared = SpectralPresentation::prepareFrame(source, s.presentationSettings,
         std::isfinite(sample.loudnessLUFS) ? sample.loudnessLUFS : ColourCore::LOUDNESS_DB_UNSPECIFIED,
-        s.hasPrevious ? &s.previous : nullptr,
+        s.previous.get(),
         s.hasPrevious ? static_cast<float>(sample.timestamp - s.previousTimestamp) :
             SpectralPresentation::SampleSequence::kFallbackDeltaTimeSeconds);
     RSYNPresentationFrame frame{};
@@ -105,10 +105,14 @@ RSYNPresentationFrame ReplayState::analyse(const AudioColourSample& sample, Spec
     auto features = UI::Smoothing::buildSignalFeatures(prepared.colourResult);
     frame.smoothingSignals = copySignals(features);
     if (preparedOutput) *preparedOutput = std::move(prepared);
-    s.previous = std::move(source);
+    s.previous = std::make_shared<const SpectralPresentation::Frame>(std::move(source));
     s.previousTimestamp = sample.timestamp;
     s.hasPrevious = true;
     return frame;
+}
+
+std::shared_ptr<const SpectralPresentation::Frame> ReplayState::sourceFrame() const {
+    return state->previous;
 }
 
 RSYNPresentationFrame ReplayState::process(const AudioColourSample& sample, SpectralPresentation::PreparedFrame* preparedOutput) {

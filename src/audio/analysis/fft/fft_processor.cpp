@@ -8,7 +8,7 @@
 #include <numeric>
 #include <stdexcept>
 
-FFTProcessor::FFTProcessor()
+FFTProcessor::FFTProcessor(const FrameDelivery delivery)
 	: fft_in(FFT_SIZE),
 	  fft_out(FFT_SIZE / 2 + 1),
 	  hannWindow(FFT_SIZE),
@@ -25,10 +25,10 @@ FFTProcessor::FFTProcessor()
 	  momentaryLoudnessLUFS(-200.0f),
 	  totalEnergy(0.0f),
 	  maxMagnitude(0.0f),
-	  frameCounter(0) {
+	  frameCounter(0), frameDelivery(delivery) {
     magnitudeScratch.resize(FFT_SIZE / 2 + 1);
 
-	frameRingBuffer.resize(FRAME_BUFFER_SIZE);
+	if (frameDelivery == FrameDelivery::Buffered) frameRingBuffer.resize(FRAME_BUFFER_SIZE);
 	for (auto& frame : frameRingBuffer) {
 		frame.magnitudes.resize(FFT_SIZE / 2 + 1);
 		frame.phases.resize(FFT_SIZE / 2 + 1);
@@ -160,22 +160,24 @@ void FFTProcessor::processBuffer(const std::span<const float> buffer, const floa
 
 		if (accumulatedSamples == analysisHopSize) {
 			processOverlappingWindow(sampleRate);
-            if (completedFrames) {
-                std::lock_guard lock(dataMutex);
-                FFTFrame frame;
-                frame.magnitudes = rawMagnitudesBuffer;
-                frame.phases = phaseBuffer;
-                frame.frameCounter = frameCounter;
-                frame.sampleRate = sampleRate;
-                frame.loudnessLUFS = momentaryLoudnessLUFS;
-                frame.bass = bassSpectrum;
-                frame.kWeightedMagnitudes = weightedMagnitudes;
-                frame.hopSize = static_cast<int>(analysisHopSize);
-                completedFrames->push_back(std::move(frame));
-            }
+            if (completedFrames) appendCurrentFrame(*completedFrames, sampleRate);
 			accumulatedSamples = 0;
 		}
 	}
+}
+
+void FFTProcessor::appendCurrentFrame(std::vector<FFTFrame>& frames, const float sampleRate) const {
+    std::lock_guard lock(dataMutex);
+    FFTFrame frame;
+    frame.magnitudes = rawMagnitudesBuffer;
+    frame.phases = phaseBuffer;
+    frame.frameCounter = frameCounter;
+    frame.sampleRate = sampleRate;
+    frame.loudnessLUFS = momentaryLoudnessLUFS;
+    frame.bass = bassSpectrum;
+    frame.kWeightedMagnitudes = weightedMagnitudes;
+    frame.hopSize = static_cast<int>(analysisHopSize);
+    frames.push_back(std::move(frame));
 }
 
 // https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.istft.html
@@ -197,8 +199,11 @@ std::vector<FFTProcessor::FFTFrame> FFTProcessor::finish() {
         if (accumulatedSamples == analysisHopSize) {
             processOverlappingWindow(analysisSampleRate);
             accumulatedSamples = 0;
-            auto produced = getBufferedFrames();
-            frames.insert(frames.end(), std::make_move_iterator(produced.begin()), std::make_move_iterator(produced.end()));
+            if (frameDelivery == FrameDelivery::Direct) appendCurrentFrame(frames, analysisSampleRate);
+            else {
+                auto produced = getBufferedFrames();
+                frames.insert(frames.end(), std::make_move_iterator(produced.begin()), std::make_move_iterator(produced.end()));
+            }
         }
     }
     return frames;
@@ -231,7 +236,7 @@ void FFTProcessor::updateSpectralData(const std::vector<float>& rawMagnitudes,
 	this->maxMagnitude = frameMaxMagnitude;
 	++frameCounter;
 
-	pushFrameToBuffer(rawMagnitudesBuffer, phaseBuffer, sampleRate);
+	if (frameDelivery == FrameDelivery::Buffered) pushFrameToBuffer(rawMagnitudesBuffer, phaseBuffer, sampleRate);
 }
 
 void FFTProcessor::processOverlappingWindow(const float sampleRate) {

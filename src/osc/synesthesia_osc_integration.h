@@ -17,6 +17,7 @@ public:
     bool start(const OSCConfig& config = {});
     void stop();
     bool isRunning() const;
+    bool needsFrameData() const;
 
     bool updateConfig(const OSCConfig& config);
     OSCConfig getConfig() const;

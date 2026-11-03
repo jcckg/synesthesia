@@ -1,4 +1,6 @@
 #include "headless.h"
+#include "audio/input/device_identity.h"
+#include "audio/device_control.h"
 
 #include <iostream>
 #include <iomanip>
@@ -102,7 +104,9 @@ void HeadlessInterface::run(bool enableOSC, const std::string& preferredDevice,
         selectedDeviceIndex = 0;
     }
     
+    deviceFingerprint_ = AudioDevices::topologyFingerprint();
     while (running) {
+        refreshDevices();
         if (!deviceSelected) {
             displayDeviceSelection();
         } else {
@@ -122,6 +126,32 @@ void HeadlessInterface::run(bool enableOSC, const std::string& preferredDevice,
 #endif
     
     restoreTerminal();
+}
+
+void HeadlessInterface::refreshDevices() {
+    const auto now = std::chrono::steady_clock::now();
+    if (now < nextDeviceCheck_) return;
+    nextDeviceCheck_ = now + std::chrono::seconds(2);
+    const int selected = selectedDeviceIndex.load();
+    if (deviceSelected && selected >= 0 && static_cast<std::size_t>(selected) < devices.size())
+        preferredDeviceId_ = devices[static_cast<std::size_t>(selected)].identifier;
+    const auto current = AudioDevices::topologyFingerprint();
+    if (current.empty() || current == deviceFingerprint_) return;
+    deviceFingerprint_ = current;
+    std::lock_guard control(AudioDevices::controlMutex());
+    audioInput.closeStream();
+    Pa_Terminate();
+    if (Pa_Initialize() != paNoError) { deviceSelected = false; return; }
+    devices = AudioInput::getInputDevices();
+    deviceSelected = false;
+    selectedDeviceIndex = devices.empty() ? -1 : 0;
+    for (std::size_t i = 0; i < devices.size(); ++i) {
+        if (!preferredDeviceId_.empty() && devices[i].identifier == preferredDeviceId_) {
+            selectedDeviceIndex = static_cast<int>(i);
+            deviceSelected = audioInput.initStream(devices[i].paIndex);
+            break;
+        }
+    }
 }
 
 void HeadlessInterface::displayDeviceSelection() {
@@ -179,9 +209,7 @@ void HeadlessInterface::displayFrequencyInfo() {
     settings.manualSmoothing = manualSmoothing;
     settings.smoothingAmount = colourSmoothingSpeed;
     audioInput.getAudioProcessor().setPresentationSettings(settings);
-    AudioProcessor::SpectralData spectralData;
-    audioInput.copySpectralData(spectralData);
-    const auto& live = spectralData.presentation;
+    const auto live = audioInput.getAudioProcessor().getPresentation();
     if (!live) return;
     const auto& colourResult = live->frame.analysis;
     const bool colourResultLufs = colourResult.loudnessIsLufs;
@@ -193,14 +221,13 @@ void HeadlessInterface::displayFrequencyInfo() {
     currentR = rgb.r; currentG = rgb.g; currentB = rgb.b;
     ColourPresentation::applyOutputPrecision(currentR, currentG, currentB);
 #ifdef ENABLE_OSC
-    if (oscEnabled) {
-        const auto frame = SpectralPresentation::mixChannels(spectralData.magnitudes, spectralData.phases, {},
-            static_cast<std::uint32_t>(spectralData.magnitudes.size()), spectralData.sampleRate);
+    if (oscEnabled && live->source) {
+        const auto& frame = *live->source;
         Synesthesia::OSC::OSCFrameUpdate update{};
         update.magnitudes = live->prepared.analysisMagnitudes;
         update.phases = frame.phases;
         update.frequencies = frame.frequencies;
-        update.sampleRate = spectralData.sampleRate;
+        update.sampleRate = frame.sampleRate;
         update.colourResult = colourResult;
         update.displayColour = {currentR, currentG, currentB};
         update.presentedXYZ = {xyz[0], xyz[1], xyz[2]};

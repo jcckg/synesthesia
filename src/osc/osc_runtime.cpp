@@ -5,6 +5,8 @@ namespace Synesthesia::OSC {
 OSCRuntime::OSCRuntime(const OSCConfig& config)
     : config_(config), receiver_(commandQueue_) {}
 
+OSCRuntime::~OSCRuntime() { stop(); }
+
 bool OSCRuntime::start() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (running_) {
@@ -24,6 +26,17 @@ bool OSCRuntime::start() {
     }
 
     running_ = true;
+    skippedFrames_ = 0;
+    failedFrames_ = 0;
+    pendingFrames_.clear();
+    try { transmitThread_ = std::thread([this] { transmit(); }); }
+    catch (const std::system_error& error) {
+        running_ = false;
+        receiver_.stop();
+        sender_.reset();
+        lastError_ = error.what();
+        return false;
+    }
     fpsWindowStart_ = std::chrono::steady_clock::now();
     framesInWindow_ = 0;
     bytesInWindow_ = 0;
@@ -34,19 +47,17 @@ bool OSCRuntime::start() {
 }
 
 void OSCRuntime::stop() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    if (!running_) {
-        sender_.reset();
-        receiver_.stop();
-        return;
+    {
+        std::lock_guard lock(mutex_);
+        running_ = false;
+        pendingFrames_.clear();
+        currentFps_ = 0;
+        framesInWindow_ = 0;
     }
-
+    wake_.notify_all();
+    if (transmitThread_.joinable()) transmitThread_.join();
     receiver_.stop();
     sender_.reset();
-    running_ = false;
-    currentFps_ = 0;
-    framesInWindow_ = 0;
-    lastError_.clear();
 }
 
 bool OSCRuntime::isRunning() const {
@@ -82,6 +93,7 @@ bool OSCRuntime::updateConfig(const OSCConfig& config) {
 
 void OSCRuntime::setRouting(const OSCRouting& routing) {
     std::lock_guard lock(mutex_);
+    pendingFrames_.clear();
     sender_.setRouting(routing);
     config_.routing = routing;
 }
@@ -96,23 +108,38 @@ std::string OSCRuntime::getLastError() const {
     return lastError_;
 }
 
-void OSCRuntime::sendFrame(const OSCFrameData& frame) {
-    auto startTime = std::chrono::steady_clock::now();
-
+void OSCRuntime::sendFrame(std::shared_ptr<const OSCFrameData> frame) {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (!running_) {
-            return;
+        std::lock_guard lock(mutex_);
+        if (!running_) return;
+        if (pendingFrames_.size() >= 8) {
+            pendingFrames_.pop_front();
+            ++skippedFrames_;
+        }
+        pendingFrames_.push_back(std::move(frame));
+    }
+    wake_.notify_one();
+}
+
+void OSCRuntime::transmit() {
+    for (;;) {
+        std::shared_ptr<const OSCFrameData> frame;
+        {
+            std::unique_lock lock(mutex_);
+            wake_.wait(lock, [&] { return !running_ || !pendingFrames_.empty(); });
+            if (!running_) return;
+            frame = std::move(pendingFrames_.front());
+            pendingFrames_.pop_front();
+        }
+        const auto start = std::chrono::steady_clock::now();
+        if (sender_.sendFrame(*frame))
+            recordSendSample(std::chrono::duration<float, std::milli>(std::chrono::steady_clock::now() - start).count());
+        else {
+            std::lock_guard lock(mutex_);
+            ++failedFrames_;
+            lastError_ = "Unable to send OSC frame";
         }
     }
-
-    if (!sender_.sendFrame(frame)) {
-        return;
-    }
-
-    const auto endTime = std::chrono::steady_clock::now();
-    const float durationMs = std::chrono::duration<float, std::milli>(endTime - startTime).count();
-    recordSendSample(durationMs);
 }
 
 std::vector<OSCCommand> OSCRuntime::popPendingCommands() {
@@ -130,7 +157,8 @@ OSCStats OSCRuntime::getStats() const {
         lastSize_.bytes,
         lastSize_.packets,
         lastSize_.largestPacket,
-        recent ? bytesPerSecond_ : 0.0
+        recent ? bytesPerSecond_ : 0.0,
+        skippedFrames_, failedFrames_
     };
 }
 

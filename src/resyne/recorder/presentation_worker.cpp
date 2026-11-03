@@ -7,6 +7,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <thread>
+#include <span>
 
 #include "resyne/recorder/recorder.h"
 #include "resyne/encoding/formats/rsyn_presentation.h"
@@ -107,6 +108,7 @@ struct PresentationWorker::Impl {
         std::size_t availableFrames = 0;
         AudioMetadata metadata;
         RSYNPresentationSettings settings;
+        std::shared_ptr<const std::vector<AudioColourSample>> source;
     };
     RecorderState& owner;
     std::mutex mutex;
@@ -299,8 +301,12 @@ struct PresentationWorker::Impl {
         while (rendered < request.count) {
             if (cancelled(request)) return;
             if (rendered >= analysed.size()) {
-                std::vector<AudioColourSample> chunk;
-                {
+                std::vector<AudioColourSample> copied;
+                std::span<const AudioColourSample> chunk;
+                if (request.source && analysed.size() < request.source->size()) {
+                    const auto count = std::min({request.source->size(), request.count, analysed.size() + 16}) - analysed.size();
+                    chunk = std::span<const AudioColourSample>(*request.source).subspan(analysed.size(), count);
+                } else {
                     std::lock_guard lock(owner.samplesMutex);
                     const auto generation = request.preview ? owner.presentationPreviewGeneration : owner.presentationSourceGeneration;
                     const auto sourceRevision = request.preview ? owner.presentationPreviewRevision : owner.presentationSourceRevision;
@@ -308,7 +314,8 @@ struct PresentationWorker::Impl {
                     const auto& source = request.preview ? owner.previewSamples : owner.samples;
                     if (analysed.size() < source.size()) {
                         const auto end = std::min({source.size(), request.count, analysed.size() + 16});
-                        chunk.assign(source.begin() + analysed.size(), source.begin() + end);
+                        copied.assign(source.begin() + analysed.size(), source.begin() + end);
+                        chunk = copied;
                     }
                 }
                 if (chunk.empty() && !request.preview && request.metadata.lazyAsset) {
@@ -321,7 +328,7 @@ struct PresentationWorker::Impl {
                     if (cancelled(request)) return;
                     if (analysed.size() < hydrated.size()) {
                         const auto end = std::min({hydrated.size(), request.count, analysed.size() + 16});
-                        chunk.assign(hydrated.begin() + analysed.size(), hydrated.begin() + end);
+                        chunk = std::span<const AudioColourSample>(hydrated).subspan(analysed.size(), end - analysed.size());
                     }
                 }
                 if (chunk.empty()) {
@@ -396,6 +403,7 @@ std::shared_ptr<const PresentationSnapshot> PresentationWorker::request() {
         request.metadata = state.metadata;
         if (request.preview) request.metadata = state.previewMetadata;
         request.settings = settingsFor(state);
+        if (!request.preview && !state.isRecording && !state.recordingFinishing) request.source = state.samples.snapshot();
         if (request.preview && request.metadata.presentationData) {
             const auto& stored = request.metadata.presentationData->settings;
             request.settings.colourSpace = stored.colourSpace;
@@ -445,8 +453,21 @@ std::shared_ptr<const PresentationSnapshot> PresentationWorker::request() {
 }
 
 std::shared_ptr<const PresentationSnapshot> recorderPresentation(RecorderState& state) {
+    if (state.presentationFrameActive) return state.framePresentation;
     if (!state.presentationWorker) state.presentationWorker = std::make_shared<PresentationWorker>(state);
     return state.presentationWorker->request();
+}
+
+void beginPresentationFrame(RecorderState& state) {
+    state.presentationFrameActive = false;
+    state.framePresentation = recorderPresentation(state);
+    state.framePlaybackPosition = state.audioOutput ? state.audioOutput->getPresentationPosition() : 0;
+    state.presentationFrameActive = true;
+}
+
+double recorderPlaybackPosition(const RecorderState& state) {
+    return state.presentationFrameActive ? state.framePlaybackPosition :
+        state.audioOutput ? state.audioOutput->getPresentationPosition() : 0;
 }
 
 }

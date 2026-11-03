@@ -1,3 +1,4 @@
+#include "utilities/io.h"
 #include "resyne/recorder/import_helpers.h"
 #include "resyne/recorder/recorder.h"
 #include "resyne/decoding/audio_decoder.h"
@@ -6,6 +7,7 @@
 #include "audio/analysis/fft/fft_processor.h"
 #include "colour/colour_core.h"
 #include "constants.h"
+#include "utilities/parallel_channels.h"
 #include "miniz.h"
 #undef crc32
 
@@ -48,6 +50,7 @@ std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& deco
         const auto& channelSamples = decoded.channelSamples[channelIndex];
         const size_t safeFrameCount = std::min(frameCount, channelSamples.size());
         for (size_t frameIndex = 0; frameIndex < safeFrameCount; ++frameIndex) {
+            if (frameIndex % 4096 == 0) Utilities::checkCancellation();
             interleaved[frameIndex * channelCount + channelIndex] = channelSamples[frameIndex];
         }
     }
@@ -71,8 +74,8 @@ bool readFileBytes(const std::string& filepath, std::vector<std::uint8_t>& bytes
     file.seekg(0, std::ios::beg);
     bytes.resize(static_cast<std::size_t>(size));
     if (!bytes.empty()) {
-        file.read(reinterpret_cast<char*>(bytes.data()), size);
-        if (!file.good()) {
+        const bool read = Utilities::readBytes(file, bytes.data(), bytes.size());
+        if (!read) {
             bytes.clear();
             return false;
         }
@@ -91,9 +94,14 @@ std::shared_ptr<RSYNSourceData> buildSourceDataFromFile(const std::string& filep
     const std::filesystem::path fsPath(filepath);
     sourceData->filename = fsPath.filename().string();
     sourceData->extension = fsPath.extension().string();
-    sourceData->crc32 = bytes.empty()
-        ? 0U
-        : static_cast<std::uint32_t>(mz_crc32(MZ_CRC32_INIT, bytes.data(), bytes.size()));
+    mz_ulong checksum = MZ_CRC32_INIT;
+    for (std::size_t offset = 0; offset < bytes.size();) {
+        Utilities::checkCancellation();
+        const auto count = std::min<std::size_t>(bytes.size() - offset, 1024 * 1024);
+        checksum = mz_crc32(checksum, bytes.data() + offset, count);
+        offset += count;
+    }
+    sourceData->crc32 = static_cast<std::uint32_t>(checksum);
     sourceData->bytes = std::move(bytes);
     return sourceData;
 }
@@ -151,11 +159,13 @@ bool importAudioFile(
     std::vector<std::unique_ptr<FFTProcessor>> processors;
     processors.reserve(numChannels);
     for (uint32_t ch = 0; ch < numChannels; ++ch) {
-        processors.push_back(std::make_unique<FFTProcessor>());
+        processors.push_back(std::make_unique<FFTProcessor>(FFTProcessor::FrameDelivery::Direct));
     }
     for (auto& processor : processors) {
         processor->setHopSize(resolvedHopSize);
     }
+
+    Utilities::ParallelChannels channelWorkers(numChannels);
 
     samples.clear();
     const size_t estimatedFrames = decoded.channelSamples[0].size() / static_cast<size_t>(resolvedHopSize) + 1;
@@ -185,6 +195,7 @@ bool importAudioFile(
 
     if (onPreview) onPreview(samples);
 
+    std::vector<float> channelLoudness(numChannels);
     auto consumeFrames = [&](std::vector<std::vector<FFTProcessor::FFTFrame>>&& channelFrames) {
         if (channelFrames.empty() || channelFrames[0].empty()) {
             return;
@@ -232,7 +243,6 @@ bool importAudioFile(
                 continue;
             }
 
-            std::vector<float> channelLoudness(numChannels);
             for (uint32_t ch = 0; ch < numChannels; ++ch) {
                 channelLoudness[ch] = channelFrames[ch][f].loudnessLUFS;
             }
@@ -251,12 +261,11 @@ bool importAudioFile(
         size_t chunk = std::min(chunkSize, decoded.channelSamples[0].size() - offset);
 
         std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
-        for (uint32_t ch = 0; ch < numChannels; ++ch) {
+        channelWorkers.run(numChannels, [&](std::size_t ch) {
             processors[ch]->processBuffer(
                 std::span<const float>(decoded.channelSamples[ch].data() + offset, chunk),
-                sampleRate);
-            channelFrames[ch] = processors[ch]->getBufferedFrames();
-        }
+                sampleRate, &channelFrames[ch]);
+        });
 
         offset += chunk;
         consumeFrames(std::move(channelFrames));
@@ -271,9 +280,9 @@ bool importAudioFile(
     }
 
     std::vector<std::vector<FFTProcessor::FFTFrame>> channelFrames(numChannels);
-    for (uint32_t ch = 0; ch < numChannels; ++ch) {
+    channelWorkers.run(numChannels, [&](std::size_t ch) {
         channelFrames[ch] = processors[ch]->finish();
-    }
+    });
     consumeFrames(std::move(channelFrames));
     if (hitFrameLimit) {
         samples.clear();

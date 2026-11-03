@@ -20,9 +20,7 @@ bool OSCSender::configure(const OSCConfig& config, std::string& errorMessage) {
     try {
         config_ = config;
         config_.destinationHost = destination.canonicalHost;
-        socket_ = std::make_unique<UdpTransmitSocket>(
-            IpEndpointName(static_cast<unsigned long>(destination.address), static_cast<int>(config_.transmitPort))
-        );
+        socket_ = std::make_unique<Utilities::DatagramSocket>(destination.address, config_.transmitPort);
     } catch (const std::exception& exception) {
         socket_.reset();
         errorMessage = exception.what();
@@ -53,7 +51,7 @@ bool OSCSender::sendFrame(const OSCFrameData& frame) {
         const auto packets = encodePackets(frame, outputs, config_.routing, config_.outputBufferSize);
         lastSize_ = {};
         for (const auto& packet : packets) {
-            socket_->Send(packet.bytes.data(), packet.bytes.size());
+            if (!socket_->send(packet.bytes.data(), packet.bytes.size())) return false;
             lastSize_.bytes += packet.bytes.size();
             ++lastSize_.packets;
             lastSize_.largestPacket = std::max(lastSize_.largestPacket, packet.bytes.size());

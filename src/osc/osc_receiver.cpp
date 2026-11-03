@@ -33,16 +33,22 @@ bool OSCReceiver::start(const uint16_t receivePort) {
     }
 
     running_.store(true);
-    thread_ = std::thread([this]() {
-        if (socket_) {
-            socket_->Run();
-        }
-        {
-            std::lock_guard lock(stopMutex_);
-            running_.store(false);
-        }
-        stopped_.notify_all();
-    });
+    try {
+        thread_ = std::thread([this]() {
+            try { if (socket_) socket_->Run(); }
+            catch (...) {}
+            {
+                std::lock_guard lock(stopMutex_);
+                running_.store(false);
+            }
+            stopped_.notify_all();
+        });
+    } catch (const std::system_error&) {
+        running_.store(false);
+        listener_.reset();
+        socket_.reset();
+        return false;
+    }
 
     return true;
 }

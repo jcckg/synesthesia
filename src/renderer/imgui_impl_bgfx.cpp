@@ -1,6 +1,7 @@
 #include "renderer/imgui_impl_bgfx.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -269,12 +270,18 @@ float srgbToLinear(const float value) {
 }
 
 ImU32 linearisePackedColour(const ImU32 packedColour) {
-    const ImVec4 colour = ImGui::ColorConvertU32ToFloat4(packedColour);
-    return ImGui::ColorConvertFloat4ToU32(ImVec4(
-        srgbToLinear(colour.x),
-        srgbToLinear(colour.y),
-        srgbToLinear(colour.z),
-        colour.w));
+    static const auto values = [] {
+        std::array<ImU32, 256> result{};
+        for (std::size_t i = 0; i < result.size(); ++i) {
+            const float value = srgbToLinear(static_cast<float>(i) * (1.0f / 255.0f));
+            result[i] = (ImGui::ColorConvertFloat4ToU32({value, 0, 0, 0}) >> IM_COL32_R_SHIFT) & 255u;
+        }
+        return result;
+    }();
+    return (packedColour & IM_COL32_A_MASK) |
+        (values[(packedColour >> IM_COL32_R_SHIFT) & 255u] << IM_COL32_R_SHIFT) |
+        (values[(packedColour >> IM_COL32_G_SHIFT) & 255u] << IM_COL32_G_SHIFT) |
+        (values[(packedColour >> IM_COL32_B_SHIFT) & 255u] << IM_COL32_B_SHIFT);
 }
 
 void invalidateDeviceObjects() {
@@ -487,7 +494,7 @@ void ImGui_Implbgfx_RenderDrawData(ImDrawData* drawData) {
                 continue;
             }
 
-            if (command->IdxOffset + command->ElemCount > indexCount) {
+            if (command->VtxOffset >= vertexCount || command->IdxOffset > indexCount || command->ElemCount > indexCount - command->IdxOffset) {
                 continue;
             }
 
@@ -505,7 +512,7 @@ void ImGui_Implbgfx_RenderDrawData(ImDrawData* drawData) {
             );
             encoder->setState(state);
             encoder->setTexture(0, backend->sampler, texture);
-            encoder->setVertexBuffer(0, &vertexBuffer, 0, vertexCount);
+            encoder->setVertexBuffer(0, &vertexBuffer, command->VtxOffset, vertexCount - command->VtxOffset);
             encoder->setIndexBuffer(&indexBuffer, command->IdxOffset, command->ElemCount);
             encoder->submit(backend->viewId, backend->program);
         }

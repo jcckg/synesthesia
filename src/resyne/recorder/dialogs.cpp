@@ -101,7 +101,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
                                        std::string filepath,
                                        RecorderExportFormat format) {
     if (state.exportRunning.load(std::memory_order_acquire) || state.isRecording ||
-        state.recordingCountdownActive || state.importPhase != 0) {
+        state.recordingCountdownActive || state.importPhase != 0 || state.recordingFinishing || state.playbackPreparing) {
         return;
     }
 
@@ -144,6 +144,7 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
     state.exportThread = std::thread([&state, filepath = std::move(filepath), format,
         rsynOptions = std::move(rsynOptions), videoOptions = std::move(videoOptions)]() {
         const auto cancellation = state.exportCancellation.get_token();
+        Utilities::CancellationScope scope(cancellation);
         bool success = false;
         bool cancelled = false;
         std::string errorMessage;
@@ -160,16 +161,23 @@ void Recorder::exportRecordingThreaded(RecorderState& state,
         };
 
 		try {
-            std::vector<AudioColourSample> samplesCopy;
+            std::shared_ptr<const std::vector<AudioColourSample>> sampleStorage;
             AudioMetadata metadataCopy;
             Utilities::checkCancellation(cancellation);
             ExportDestination destination(filepath, format == RecorderExportFormat::MP4 && videoOptions.exportGradient);
-            ensureRsynSamplesLoaded(state, [&](float fraction) { updateProgress(0.05f * fraction); });
             {
                 std::lock_guard<std::mutex> lock(state.samplesMutex);
-                samplesCopy = state.samples;
+                sampleStorage = state.samples.snapshot();
                 metadataCopy = state.metadata;
             }
+            if ((!sampleStorage || sampleStorage->empty()) && metadataCopy.lazyAsset) {
+                std::vector<AudioColourSample> loaded;
+                if (!SequenceExporter::hydrateRsynSamples(metadataCopy, loaded, [&](float value) { updateProgress(.05f * value); }))
+                    throw std::runtime_error("Archived spectra could not be loaded");
+                sampleStorage = std::make_shared<const std::vector<AudioColourSample>>(std::move(loaded));
+            }
+            const std::vector<AudioColourSample> emptySamples;
+            const auto& samplesCopy = sampleStorage ? *sampleStorage : emptySamples;
             updateProgress(0.05f);
 			switch (format) {
 				case RecorderExportFormat::WAV:
@@ -321,7 +329,7 @@ void Recorder::handleFileDialog(RecorderState& state) {
 
     state.shouldOpenSaveDialog = false;
     if (state.exportRunning.load(std::memory_order_acquire) || state.isRecording ||
-        state.recordingCountdownActive || state.importPhase != 0) return;
+        state.recordingCountdownActive || state.importPhase != 0 || state.recordingFinishing || state.playbackPreparing) return;
 
     auto now = std::chrono::system_clock::now();
     auto timestamp = std::chrono::system_clock::to_time_t(now);

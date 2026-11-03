@@ -1,3 +1,4 @@
+#include "audio/device_control.h"
 #include "device_manager.h"
 #include "device_selector.h"
 #include <imgui.h>
@@ -79,6 +80,7 @@ void DeviceManager::populateOutputDeviceNames(DeviceState& deviceState,
         }
         deviceState.outputDeviceNamesPopulated = true;
         if (deviceState.selectedOutputDeviceIndex < 0) {
+            std::lock_guard control(AudioDevices::controlMutex());
             PaDeviceIndex defaultDevice = Pa_GetDefaultOutputDevice();
             if (defaultDevice != paNoDevice) {
                 for (size_t i = 0; i < outputDevices.size(); ++i) {
@@ -117,7 +119,7 @@ void DeviceManager::selectChannel(DeviceState& deviceState,
                                  AudioInput& audioInput,
                                  int newChannelIndex) {
     deviceState.selectedChannelIndex = newChannelIndex;
-    audioInput.setActiveChannel(newChannelIndex);
+    audioInput.setActiveChannel(newChannelIndex - 1);
 }
 
 void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
@@ -126,6 +128,7 @@ void DeviceManager::renderDeviceSelection(DeviceState& deviceState,
                                          const AudioInputLevelMonitor& inputLevelMonitor,
                                          const bool deferProtectedInputCapture) {
     ImGui::TextDisabled("INPUT DEVICE");
+    if (deviceState.refreshing) { ImGui::TextDisabled("Updating audio devices"); return; }
     
     if (!deviceState.deviceNames.empty()) {
         const bool selectedActive =
@@ -163,6 +166,7 @@ void DeviceManager::renderOutputDeviceSelection(DeviceState& deviceState,
                                                const bool outputDeviceActive,
                                                const std::array<float, 2>& outputLevels) {
     ImGui::TextDisabled("OUTPUT DEVICE");
+    if (deviceState.refreshing) { ImGui::TextDisabled("Updating audio devices"); return; }
 
     if (!deviceState.outputDeviceNames.empty()) {
         const std::vector<DeviceSelector::Item> items = buildSelectorItems(
@@ -185,7 +189,7 @@ void DeviceManager::renderChannelSelection(DeviceState& deviceState,
                                           AudioInput& audioInput,
                                           const std::vector<AudioInput::DeviceInfo>& devices) {
     if (deviceState.selectedDeviceIndex >= 0 &&
-        !deviceState.streamError &&
+        !deviceState.streamError && !deviceState.refreshing &&
         !deviceState.channelNames.empty() &&
         devices[static_cast<size_t>(deviceState.selectedDeviceIndex)].maxChannels > 2) {
 
@@ -202,14 +206,15 @@ void DeviceManager::renderChannelSelection(DeviceState& deviceState,
 
 void DeviceManager::createChannelNames(DeviceState& deviceState, int channelsToUse) {
     deviceState.channelNameStrings.clear();
-    deviceState.channelNameStrings.reserve(static_cast<size_t>(channelsToUse));
+    deviceState.channelNameStrings.reserve(static_cast<size_t>(channelsToUse + 1));
     deviceState.channelNames.clear();
-    deviceState.channelNames.reserve(static_cast<size_t>(channelsToUse));
+    deviceState.channelNames.reserve(static_cast<size_t>(channelsToUse + 1));
     
+    deviceState.channelNameStrings.push_back("All channels");
     for (int i = 0; i < channelsToUse; i++) {
         deviceState.channelNameStrings.push_back("Channel " + std::to_string(i + 1));
-        deviceState.channelNames.push_back(deviceState.channelNameStrings.back().c_str());
     }
+    for (const auto& name : deviceState.channelNameStrings) deviceState.channelNames.push_back(name.c_str());
 }
 
 void DeviceManager::resetDeviceState(DeviceState& deviceState) {

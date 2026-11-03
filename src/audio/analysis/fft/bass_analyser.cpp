@@ -3,7 +3,7 @@
 #include <cmath>
 #include <numbers>
 
-#if defined(__APPLE__) && defined(__aarch64__) && !defined(SYNESTHESIA_FORCE_KISS_FFT)
+#if defined(__APPLE__) && defined(__aarch64__)
 #include <arm_neon.h>
 #endif
 
@@ -43,7 +43,7 @@ void BassAnalyser::reset(float sourceRate) {
         coefficients_[i] = static_cast<float>(value);
         total += value;
     }
-    for (auto& value : coefficients_) value = static_cast<float>(value/total);
+    for (auto& value : coefficients_) value = static_cast<float>(static_cast<double>(value)/total);
     workspace_.assign(taps-1+1024,0);
     decimated_.resize(1024/decimation_+1);
     for (std::size_t i = 0; i < window_.size(); ++i)
@@ -61,7 +61,7 @@ void BassAnalyser::process(std::span<const float> samples, float sourceRate) {
         const auto first = decimation_-1-phase_;
         const auto produced = (phase_+count)/decimation_;
         if (produced > 0) {
-#if defined(__APPLE__) && defined(__aarch64__) && !defined(SYNESTHESIA_FORCE_KISS_FFT)
+#if defined(__APPLE__) && defined(__aarch64__)
             // Keep the reduction order independent of chunk length so batching cannot change filter results.
             for (std::size_t i = 0; i < produced; ++i) {
                 const float* input = workspace_.data()+first+i*decimation_;

@@ -156,11 +156,23 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
 
     size_t contributingMagnitudeChannels = 0;
 
-    std::vector<float> phaseCosines(numBins, 0.0f);
-    std::vector<float> phaseSines(numBins, 0.0f);
-    std::vector<float> phaseWeights(numBins, 0.0f);
-    std::vector<float> strongestWeights(numBins, 0.0f);
-    std::vector<float> strongestPhases(numBins, 0.0f);
+    struct CrossSpectrum {
+        std::vector<std::complex<double>> cross;
+        std::vector<double> firstPower, secondPower;
+    };
+    struct Workspace {
+        std::vector<float> phaseCosines, phaseSines, phaseWeights, strongestWeights, strongestPhases;
+        std::vector<std::vector<double>> localPowers;
+        std::vector<double> cumulative;
+        std::vector<std::vector<CrossSpectrum>> crossSpectra;
+    };
+    thread_local Workspace workspace;
+    auto& phaseCosines = workspace.phaseCosines;
+    auto& phaseSines = workspace.phaseSines;
+    auto& phaseWeights = workspace.phaseWeights;
+    auto& strongestWeights = workspace.strongestWeights;
+    auto& strongestPhases = workspace.strongestPhases;
+    for (auto* values : {&phaseCosines, &phaseSines, &phaseWeights, &strongestWeights, &strongestPhases}) values->assign(numBins, 0);
 
     for (size_t channelIndex = 0; channelIndex < channelLimit; ++channelIndex) {
         const auto& channelMagnitudes = magnitudes[channelIndex];
@@ -202,10 +214,13 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
         }
     }
 
-    std::vector<std::vector<double>> localPowers(channelLimit, std::vector<double>(numBins));
+    auto& localPowers = workspace.localPowers;
+    localPowers.resize(channelLimit);
+    for (auto& values : localPowers) values.assign(numBins, 0);
     for (std::size_t channel = 0; channel < channelLimit; ++channel) {
         if (magnitudes[channel].size() != numBins) continue;
-        std::vector<double> cumulative(numBins + 1);
+        auto& cumulative = workspace.cumulative;
+        cumulative.assign(numBins + 1, 0);
         for (std::size_t bin = 0; bin < numBins; ++bin) {
             const double value = static_cast<double>(magnitudes[channel][bin]);
             cumulative[bin + 1] = cumulative[bin] + (std::isfinite(value) && value > 0 ? value * value : 0);
@@ -215,24 +230,28 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
             localPowers[channel][bin] = (cumulative[last] - cumulative[first]) / static_cast<double>(last - first);
         }
     }
-    struct CrossSpectrum {
-        std::vector<std::complex<double>> cross;
-        std::vector<double> firstPower, secondPower;
-    };
-    std::vector<std::vector<CrossSpectrum>> crossSpectra(channelLimit);
+    auto& crossSpectra = workspace.crossSpectra;
+    crossSpectra.resize(channelLimit);
     for (std::size_t a = 0; a < channelLimit; ++a) {
         crossSpectra[a].resize(a);
+        for (auto& pair : crossSpectra[a]) pair.cross.clear();
         if (magnitudes[a].size() != numBins || phases.size() <= a || phases[a].size() != numBins) continue;
         for (std::size_t b = 0; b < a; ++b) {
             if (magnitudes[b].size() != numBins || phases[b].size() != numBins) continue;
             auto& pair = crossSpectra[a][b];
-            pair.cross.resize(numBins); pair.firstPower.resize(numBins); pair.secondPower.resize(numBins);
+            pair.cross.assign(numBins + 1, {});
+            pair.firstPower.assign(numBins + 1, 0);
+            pair.secondPower.assign(numBins + 1, 0);
             for (std::size_t j = 0; j < numBins; ++j) {
+                pair.cross[j + 1] = pair.cross[j];
+                pair.firstPower[j + 1] = pair.firstPower[j];
+                pair.secondPower[j + 1] = pair.secondPower[j];
                 const double ma = static_cast<double>(magnitudes[a][j]), mb = static_cast<double>(magnitudes[b][j]);
                 if (!std::isfinite(ma) || !std::isfinite(mb) || ma < 0 || mb < 0 ||
                     !std::isfinite(phases[a][j]) || !std::isfinite(phases[b][j])) continue;
-                pair.firstPower[j] = ma * ma; pair.secondPower[j] = mb * mb;
-                pair.cross[j] = std::polar(ma * mb, static_cast<double>(phases[a][j] - phases[b][j]));
+                pair.firstPower[j + 1] += ma * ma;
+                pair.secondPower[j + 1] += mb * mb;
+                pair.cross[j + 1] += std::polar(ma * mb, static_cast<double>(phases[a][j] - phases[b][j]));
             }
         }
     }
@@ -252,12 +271,22 @@ Frame mixChannels(const std::vector<std::vector<float>>& magnitudes,
                 double coherence = 1;
                 const auto& pair = crossSpectra[a][b];
                 if (!pair.cross.empty()) {
-                    std::complex<double> cross{};
-                    double aa = 0, bb = 0;
                     const auto first = bin > 8 ? bin - 8 : 0;
                     const auto last = std::min(numBins, bin + 9);
-                    for (auto j = first; j < last; ++j) {
-                        aa += pair.firstPower[j]; bb += pair.secondPower[j]; cross += pair.cross[j];
+                    auto cross = pair.cross[last] - pair.cross[first];
+                    double aa = pair.firstPower[last] - pair.firstPower[first];
+                    double bb = pair.secondPower[last] - pair.secondPower[first];
+                    if (aa <= pair.firstPower[last] * 1e-10 || bb <= pair.secondPower[last] * 1e-10) {
+                        cross = {};
+                        aa = bb = 0;
+                        for (auto j = first; j < last; ++j) {
+                            const double ma = static_cast<double>(magnitudes[a][j]), mb = static_cast<double>(magnitudes[b][j]);
+                            if (!std::isfinite(ma) || !std::isfinite(mb) || ma < 0 || mb < 0 ||
+                                !std::isfinite(phases[a][j]) || !std::isfinite(phases[b][j])) continue;
+                            aa += ma * ma;
+                            bb += mb * mb;
+                            cross += std::polar(ma * mb, static_cast<double>(phases[a][j] - phases[b][j]));
+                        }
                     }
                     const double samples = static_cast<double>(last - first) / (1 + 8.0 / 9 + 1.0 / 18);
                     const double chance = 1 / samples;

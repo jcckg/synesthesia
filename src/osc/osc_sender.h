@@ -3,7 +3,7 @@
 #include "osc_config.h"
 #include "osc_messages.h"
 
-#include "ip/UdpSocket.h"
+#include "utilities/datagram_socket.h"
 
 #include <memory>
 #include <mutex>
@@ -26,7 +26,7 @@ private:
     mutable std::mutex mutex_;
     OSCOutputSize lastSize_;
     OSCConfig config_;
-    std::unique_ptr<UdpTransmitSocket> socket_;
+    std::unique_ptr<Utilities::DatagramSocket> socket_;
 };
 
 }

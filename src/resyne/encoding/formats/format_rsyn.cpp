@@ -68,45 +68,25 @@ bool exportToRsyn(const std::string& filepath,
 
     emitProgress(progress, 0.02f);
 
-    const auto presentationData = RSYNPresentation::buildPresentationData(
-        samples,
-        options.presentationSettings,
-        [&](const float value) {
-            emitProgress(progress, 0.02f + value * 0.28f);
-        });
+    auto presentationData = metadata.presentationData;
+    if (!presentationData || presentationData->settings != options.presentationSettings || presentationData->frames.size() != samples.size())
+        presentationData = RSYNPresentation::buildPresentationData(samples, options.presentationSettings,
+            [&](float value) { emitProgress(progress, .02f + value * .28f); });
     const AudioMetadata exportedMetadata = prepareMetadata(samples, metadata, presentationData);
 
-    std::vector<std::uint8_t> metaPayload;
-    std::vector<std::uint8_t> sourcePayload;
-    std::vector<std::uint8_t> spectralPayload;
-    std::vector<std::uint8_t> presentationPayload;
-    if (!RSYNSerialisation::encodeMetadata(exportedMetadata, metaPayload) ||
-        !RSYNSerialisation::encodeSourceBytes(exportedMetadata.sourceData, sourcePayload) ||
-        !RSYNSerialisation::encodeSamples(samples, spectralPayload,
-            [&](float value) { emitProgress(progress, 0.3f + value * 0.2f); }) ||
-        !RSYNSerialisation::encodePresentationFrames(exportedMetadata.presentationData, presentationPayload,
-            [&](float value) { emitProgress(progress, 0.5f + value * 0.2f); })) {
-        emitProgress(progress, 1.0f);
-        return false;
-    }
-
-    emitProgress(progress, 0.72f);
-
-    std::vector<RSYNContainer::Chunk> chunks;
-    chunks.push_back({kMetaTag, std::move(metaPayload)});
-    chunks.push_back({kSpectralTag, std::move(spectralPayload)});
-    chunks.push_back({kPresentationTag, std::move(presentationPayload)});
-    if (!sourcePayload.empty()) {
-        chunks.push_back({kSourceTag, std::move(sourcePayload)});
-    }
-
-    const bool ok = RSYNContainer::writeFile(
-        filepath,
-        chunks,
-        std::clamp(options.compressionLevel, 0, 9),
-        [&](const float value) {
-            emitProgress(progress, 0.72f + value * 0.28f);
-        });
+    const float steps = exportedMetadata.sourceData && !exportedMetadata.sourceData->bytes.empty() ? 4.0f : 3.0f;
+    std::vector<RSYNContainer::ChunkSource> chunks;
+    chunks.push_back({kMetaTag, [&](auto& bytes) { return RSYNSerialisation::encodeMetadata(exportedMetadata, bytes); }});
+    chunks.push_back({kSpectralTag, [&](auto& bytes) {
+        return RSYNSerialisation::encodeSamples(samples, bytes, [&](float value) { emitProgress(progress, .3f + .56f * (1 + .5f * value) / steps); });
+    }});
+    chunks.push_back({kPresentationTag, [&](auto& bytes) {
+        return RSYNSerialisation::encodePresentationFrames(exportedMetadata.presentationData, bytes, [&](float value) { emitProgress(progress, .3f + .56f * (2 + .5f * value) / steps); });
+    }});
+    if (exportedMetadata.sourceData && !exportedMetadata.sourceData->bytes.empty())
+        chunks.push_back({kSourceTag, [&](auto& bytes) { return RSYNSerialisation::encodeSourceBytes(exportedMetadata.sourceData, bytes); }});
+    const bool ok = RSYNContainer::writeFile(filepath, chunks, std::clamp(options.compressionLevel, 0, 9),
+        [&](float value) { emitProgress(progress, .3f + value * .7f); });
     emitProgress(progress, 1.0f);
     return ok;
 }

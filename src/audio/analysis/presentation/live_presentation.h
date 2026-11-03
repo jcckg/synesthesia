@@ -7,8 +7,11 @@ namespace SpectralPresentation {
 struct LiveResult {
     RSYNPresentationFrame frame;
     PreparedFrame prepared;
+    std::shared_ptr<const Frame> source;
     RSYNPresentationSettings settings;
+    int selectedChannel = -1;
     std::uint64_t processedFrames = 0;
+    double captureCentreTime = 0, analysisCompletedTime = 0;
 };
 
 class LivePresentation {

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <imgui.h>
+#include "utilities/shared_buffer.h"
 
 #include <atomic>
 #include <memory>
@@ -27,6 +28,8 @@ class PresentationResources;
 namespace ReSyne {
 
 class PresentationWorker;
+class PlaybackPreparation;
+struct PresentationSnapshot;
 
 struct SampleColourEntry {
 	ImVec4 rgb = ImVec4(0.0f, 0.0f, 0.0f, 1.0f);
@@ -54,7 +57,7 @@ struct RecorderState {
     bool isRecording = false;
     AudioProcessor* recordingProcessor = nullptr;
     bool windowOpen = false;
-    std::vector<AudioColourSample> samples;
+    Utilities::SharedBuffer<AudioColourSample> samples;
     uint64_t firstFrameCounter = 0;
     std::mutex samplesMutex;
     bool shouldOpenSaveDialog = false;
@@ -95,11 +98,11 @@ struct RecorderState {
     std::atomic<bool> importComplete{false};
     std::atomic<float> loadingProgressAtomic{0.0f};
     std::string importErrorMessage;  // Protected by samplesMutex
-    std::vector<AudioColourSample> importedSamples;  // Protected by samplesMutex
+    Utilities::SharedBuffer<AudioColourSample> importedSamples;
     AudioMetadata importedMetadata;  // Protected by samplesMutex
-    std::vector<float> importedPlaybackAudio;
+    Utilities::SharedBuffer<float> importedPlaybackAudio;
 
-    std::vector<AudioColourSample> previewSamples;  // Protected by samplesMutex
+    Utilities::SharedBuffer<AudioColourSample> previewSamples;
     AudioMetadata previewMetadata;
     std::atomic<bool> previewReady{false};
     std::mutex operationStatusMutex;
@@ -118,8 +121,14 @@ struct RecorderState {
     std::string pendingExportPath;
 
     std::unique_ptr<AudioOutput> audioOutput;
-    std::vector<float> playbackAudio;
+    Utilities::SharedBuffer<float> playbackAudio;
     bool isPlaybackInitialised = false;
+    bool playbackPreparing = false;
+    bool audioDevicesRefreshing = false;
+    bool recordingFinishing = false;
+    bool playbackRouteFailed = false;
+    int activeOutputDeviceIndex = -1;
+    std::shared_ptr<PlaybackPreparation> playbackPreparation;
     bool playbackOutputRefreshPending = false;
     bool playbackStartPending = false;
     double playbackRouteReadyTime = 0.0;
@@ -143,6 +152,9 @@ struct RecorderState {
     float presentationSmoothingAmount = 0.6f;
     Renderer::PresentationResources* presentationResources = nullptr;
     std::shared_ptr<PresentationWorker> presentationWorker;
+    bool presentationFrameActive = false;
+    std::shared_ptr<const PresentationSnapshot> framePresentation;
+    double framePlaybackPosition = 0;
     std::uint64_t presentationSourceGeneration = 1;
     std::uint64_t presentationPreviewGeneration = 1;
     std::uint64_t presentationSourceRevision = 0;
@@ -211,6 +223,11 @@ public:
                                         RecorderExportFormat format);
 
     static void startPlayback(RecorderState& state);
+    static void advancePlaybackPreparation(RecorderState& state);
+    static bool playbackPreparationIdle(RecorderState& state);
+    static void cancelPlaybackPreparation(RecorderState& state);
+    static void retirePlaybackOutput(RecorderState& state);
+    static void finishRecordingLater(RecorderState& state, AudioProcessor& processor);
     static void pausePlayback(RecorderState& state);
     static void stopPlayback(RecorderState& state);
     static void togglePlayback(RecorderState& state);
@@ -225,7 +242,6 @@ public:
 
 private:
     static bool ensureRsynSamplesLoaded(RecorderState& state, const std::function<void(float)>& progress = {});
-    static bool ensurePlaybackAudioLoaded(RecorderState& state);
     static void drawExportDialog(RecorderState& state);
 };
 

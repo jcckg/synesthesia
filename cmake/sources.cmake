@@ -1,5 +1,8 @@
 set(SOURCES
     ${SRC_DIR}/main.cpp
+    ${SRC_DIR}/utilities/process.cpp
+    ${SRC_DIR}/utilities/datagram_socket.cpp
+    ${SRC_DIR}/ui/device_manager/device_topology.cpp
     ${SRC_DIR}/audio/analysis/fft/fft_processor.cpp
     ${SRC_DIR}/audio/analysis/phase/phase_features.cpp
     ${SRC_DIR}/audio/analysis/presentation/spectral_presentation.cpp
@@ -14,6 +17,7 @@ set(SOURCES
     ${SRC_DIR}/audio/analysis/eq/shared_eq_model.cpp
     ${SRC_DIR}/audio/analysis/loudness/loudness_meter.cpp
     ${SRC_DIR}/audio/input/audio_input.cpp
+    ${SRC_DIR}/audio/input/device_identity.cpp
     ${SRC_DIR}/audio/output/audio_output.cpp
     ${SRC_DIR}/audio/output/playback_equaliser.cpp
     ${SRC_DIR}/audio/processing/audio_processor.cpp

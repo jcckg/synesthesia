@@ -141,6 +141,7 @@ struct OSCStats {
     std::size_t packetsPerFrame = 0;
     std::size_t largestPacket = 0;
     double bytesPerSecond = 0.0;
+    std::uint64_t skippedFrames = 0, failedFrames = 0;
 };
 
 struct SetSmoothingEnabledCommand {

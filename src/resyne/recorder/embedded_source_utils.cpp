@@ -6,6 +6,7 @@
 #include <fstream>
 
 #include "resyne/decoding/audio_decoder.h"
+#include "utilities/io.h"
 
 namespace ReSyne::EmbeddedSourceUtils {
 
@@ -24,6 +25,7 @@ std::vector<float> buildInterleavedAudio(const AudioDecoding::DecodedAudio& deco
         const auto& channelSamples = decoded.channelSamples[channelIndex];
         const size_t safeFrameCount = std::min(frameCount, channelSamples.size());
         for (size_t frameIndex = 0; frameIndex < safeFrameCount; ++frameIndex) {
+            if (frameIndex % 4096 == 0) Utilities::checkCancellation();
             interleaved[frameIndex * channelCount + channelIndex] = channelSamples[frameIndex];
         }
     }
@@ -50,16 +52,18 @@ bool decodeEmbeddedSourceAudio(const AudioMetadata& metadata,
         std::filesystem::temp_directory_path() /
         std::filesystem::path("synesthesia_rsyn_source_" + std::to_string(uniqueId) + extension);
 
+    struct TemporarySource {
+        std::filesystem::path path;
+        ~TemporarySource() { std::error_code error; std::filesystem::remove(path, error); }
+    } temporary{tempPath};
+
     {
         std::ofstream file(tempPath, std::ios::binary);
         if (!file.is_open()) {
             errorMessage = "unable to materialise embedded source";
             return false;
         }
-        file.write(
-            reinterpret_cast<const char*>(metadata.sourceData->bytes.data()),
-            static_cast<std::streamsize>(metadata.sourceData->bytes.size()));
-        if (!file.good()) {
+        if (!Utilities::writeBytes(file, metadata.sourceData->bytes.data(), metadata.sourceData->bytes.size())) {
             errorMessage = "unable to materialise embedded source";
             return false;
         }
@@ -67,8 +71,6 @@ bool decodeEmbeddedSourceAudio(const AudioMetadata& metadata,
 
     AudioDecoding::DecodedAudio decoded;
     const bool decodedOk = AudioDecoding::decodeFile(tempPath.string(), decoded, errorMessage);
-    std::error_code removeError;
-    std::filesystem::remove(tempPath, removeError);
     if (!decodedOk) {
         return false;
     }

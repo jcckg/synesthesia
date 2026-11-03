@@ -19,12 +19,14 @@ public:
 		int maxChannels;
 		bool allowLevelMonitoring = true;
 		bool passiveMonitoringProtected = false;
+        std::string identifier;
 	};
 
 	AudioInput();
 	~AudioInput();
 
 	static std::vector<DeviceInfo> getInputDevices();
+    static std::string deviceIdentifier(int deviceIndex);
 	bool initStream(int deviceIndex, int numChannels = 1);
 	bool pauseStream();
 	bool resumeStream();
@@ -44,19 +46,25 @@ public:
 
 	int getChannelCount() const { return channelCount; }
 	void setActiveChannel(int channel) {
-		activeChannel.store(channel >= 0 && channel < channelCount ? channel : 0);
+		const int selected = channel >= 0 && channel < channelCount ? channel : -1;
+        activeChannel.store(selected);
+        processor.setPresentationChannel(selected);
 	}
 	float getSampleRate() const { return sampleRate; }
+    double getInputLatency() const { return inputLatency.load(); }
 
 private:
 	PaStream* stream;
 	AudioProcessor processor;
-	float sampleRate;
-	int channelCount;
+	std::atomic<float> sampleRate;
+    std::atomic<double> inputLatency{0};
+	std::atomic<int> channelCount;
+    std::atomic<bool> streamActive{false};
 	std::atomic<int> activeChannel;
 	std::atomic<float> leftLevel;
 	std::atomic<float> rightLevel;
 
+    static void streamFinished(void* context);
 	void stopStream();
 	void updateStereoLevels(float left, float right, double elapsed);
 	void resetStereoLevels();
@@ -70,11 +78,14 @@ public:
 	AudioInputLevelMonitor();
 	~AudioInputLevelMonitor();
 
+    void setSuspended(bool value) { suspended_.store(value); }
+    void closeAll() { stopAll(); }
 	void syncDevices(const std::vector<AudioInput::DeviceInfo>& devices, int selectedPaIndex = -1);
 	std::array<float, 2> getStereoLevels(size_t deviceListIndex) const;
 
 private:
 	struct MonitoredDevice;
+    std::atomic<bool> suspended_{false};
 
 	std::vector<std::unique_ptr<MonitoredDevice>> monitoredDevices_;
 

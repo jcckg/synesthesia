@@ -1,3 +1,5 @@
+#include "utilities/cancellation.h"
+#include <memory>
 #include "resyne/decoding/decoder_mp3.h"
 #include <algorithm>
 #include <cmath>
@@ -7,70 +9,28 @@
 #include <dr_mp3.h>
 
 namespace AudioDecoding {
-namespace {
-
-using SampleCount = std::size_t;
-
-std::vector<std::vector<float>> deinterleave(const float* interleaved,
-                                              SampleCount frameCount,
-                                              std::uint32_t channels) {
-    std::vector<std::vector<float>> channelSamples;
-    if (!interleaved || frameCount == 0 || channels == 0) {
-        return channelSamples;
-    }
-
-    channelSamples.resize(channels);
-    for (std::uint32_t ch = 0; ch < channels; ++ch) {
-        channelSamples[ch].reserve(frameCount);
-    }
-
-    for (SampleCount frame = 0; frame < frameCount; ++frame) {
-        const SampleCount baseIndex = frame * static_cast<SampleCount>(channels);
-        for (std::uint32_t ch = 0; ch < channels; ++ch) {
-            const float raw = interleaved[baseIndex + ch];
-            channelSamples[ch].push_back(std::isfinite(raw) ? raw : 0.0f);
-        }
-    }
-    return channelSamples;
-}
-
-}
-
 bool decodeMp3(const std::string& filepath, DecodedAudio& out, std::string& error) {
-    drmp3_config config{};
-    drmp3_uint64 frameCount = 0;
-    float* data = drmp3_open_file_and_read_pcm_frames_f32(
-        filepath.c_str(), &config, &frameCount, nullptr);
-    if (!data) {
-        error = "unable to decode mp3";
-        return false;
+    drmp3 decoder{};
+    if (!drmp3_init_file(&decoder, filepath.c_str(), nullptr)) { error = "unable to decode mp3"; return false; }
+    const auto release = [](drmp3* value) { drmp3_uninit(value); };
+    std::unique_ptr<drmp3, decltype(release)> handle(&decoder, release);
+    const auto channels = decoder.channels;
+    out.channels = channels;
+    out.sampleRate = decoder.sampleRate;
+    if (channels == 0 || out.sampleRate == 0) { error = "invalid mp3 stream"; return false; }
+    out.channelSamples.assign(channels, {});
+    std::vector<float> chunk(static_cast<std::size_t>(channels) * 4096);
+    for (;;) {
+        Utilities::checkCancellation();
+        const auto count = drmp3_read_pcm_frames_f32(&decoder, 4096, chunk.data());
+        if (count == 0) break;
+        for (std::size_t frame = 0; frame < count; ++frame)
+            for (std::size_t channel = 0; channel < channels; ++channel) {
+                const auto value = chunk[frame * channels + channel];
+                out.channelSamples[channel].push_back(std::isfinite(value) ? value : 0);
+            }
     }
-
-    if (frameCount == 0 || config.channels == 0 || config.sampleRate == 0) {
-        drmp3_free(data, nullptr);
-        error = "empty mp3";
-        return false;
-    }
-
-    const std::uint64_t totalSamples64 = frameCount * static_cast<drmp3_uint64>(config.channels);
-    if (totalSamples64 > static_cast<std::uint64_t>(std::numeric_limits<SampleCount>::max())) {
-        drmp3_free(data, nullptr);
-        error = "mp3 too large";
-        return false;
-    }
-
-    const SampleCount totalSamples = static_cast<SampleCount>(totalSamples64);
-    std::vector<float> interleaved(totalSamples);
-    std::copy(data, data + totalSamples, interleaved.begin());
-    drmp3_free(data, nullptr);
-
-    out.channels = config.channels;
-    out.sampleRate = config.sampleRate;
-    out.channelSamples = deinterleave(interleaved.data(), frameCount, config.channels);
-    if (out.channelSamples.empty()) {
-        error = "mp3 deinterleave failed";
-        return false;
-    }
+    if (out.channelSamples.front().empty()) { error = "Audio contains no samples"; return false; }
     return true;
 }
 

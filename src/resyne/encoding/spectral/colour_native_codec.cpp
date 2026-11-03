@@ -1,3 +1,4 @@
+#include "utilities/parallel_channels.h"
 #include "resyne/encoding/spectral/colour_native_codec.h"
 
 #include "colour/colour_core.h"
@@ -338,50 +339,23 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
 		onProgress(0.0f);
 	}
 
-	const size_t numThreads = std::max<size_t>(
-		1,
-		std::min<size_t>(static_cast<size_t>(std::thread::hardware_concurrency()), 8));
-	const size_t framesPerThread = (totalFrames + numThreads - 1) / numThreads;
-	std::vector<std::thread> pixelThreads;
-	std::atomic<size_t> framesProcessed{0};
-
-	for (size_t t = 0; t < numThreads; ++t) {
-		pixelThreads.emplace_back([&, t]() {
-			const size_t frameStart = t * framesPerThread;
-			const size_t frameEnd = std::min(frameStart + framesPerThread, totalFrames);
-
-			for (size_t frame = frameStart; frame < frameEnd; ++frame) {
-				for (uint32_t ch = 0; ch < numChannels; ++ch) {
-					const size_t yOffset = ch * binCount;
-					std::vector<RGBAColour> column(binCount);
-					for (size_t bin = 0; bin < binCount; ++bin) {
-						column[bin] = image.at(frame, yOffset + bin);
-					}
-
-					std::vector<float> magnitudesFrame, rawPhasesFrame, frequenciesFrame;
-					decodeTimeFrame(column, sampleRate, magnitudesFrame, rawPhasesFrame, frequenciesFrame);
-
-					allChannelsMagnitudes[ch][frame] = std::move(magnitudesFrame);
-					allChannelsRawPhases[ch][frame] = std::move(rawPhasesFrame);
-					allChannelsFrequencies[ch][frame] = std::move(frequenciesFrame);
-				}
-
-				const size_t completed = framesProcessed.fetch_add(1, std::memory_order_relaxed) + 1;
-				if (onProgress && (completed % 100 == 0)) {
-					onProgress(0.15f * static_cast<float>(completed) / static_cast<float>(totalFrames));
-				}
-			}
-		});
-	}
-
-	for (auto& thread : pixelThreads) {
-		thread.join();
-	}
+    Utilities::ParallelChannels workers(std::max<std::size_t>(numChannels, std::min<std::size_t>(8, totalFrames)));
+    for (std::size_t start = 0; start < totalFrames; start += 64) {
+        const auto count = std::min<std::size_t>(64, totalFrames - start);
+        workers.run(count, [&](std::size_t index) {
+            const auto frame = start + index;
+            for (uint32_t ch = 0; ch < numChannels; ++ch) {
+                std::vector<RGBAColour> column(binCount);
+                for (size_t bin = 0; bin < binCount; ++bin) column[bin] = image.at(frame, ch * binCount + bin);
+                decodeTimeFrame(column, sampleRate, allChannelsMagnitudes[ch][frame],
+                    allChannelsRawPhases[ch][frame], allChannelsFrequencies[ch][frame]);
+            }
+        });
+        if (onProgress) onProgress(.15f * static_cast<float>(start + count) / static_cast<float>(totalFrames));
+    }
 
     const size_t callbackStride = std::max<size_t>(1, totalFrames / 200);
     std::vector<std::vector<std::vector<float>>> allChannelsReconstructedPhases(numChannels);
-    std::vector<std::thread> channelThreads;
-    std::atomic<uint32_t> channelsCompleted{0};
 
     auto processChannel = [&](uint32_t ch) {
         std::vector<std::vector<bool>> knownPhase(totalFrames, std::vector<bool>(binCount, false));
@@ -398,21 +372,11 @@ std::vector<AudioColourSample> ColourNativeCodec::decode(const ColourNativeImage
         }
         allChannelsReconstructedPhases[ch] = PhaseReconstruction::reconstructPhasePGHI(
             allChannelsMagnitudes[ch], allChannelsRawPhases[ch], knownPhase, fftSize, hopSize);
-        const uint32_t completed = channelsCompleted.fetch_add(1, std::memory_order_relaxed) + 1;
-        if (onProgress) onProgress(0.15f + 0.7f * static_cast<float>(completed) / static_cast<float>(numChannels));
+
     };
 
-	if (numChannels > 1) {
-		channelThreads.reserve(numChannels);
-		for (uint32_t ch = 0; ch < numChannels; ++ch) {
-			channelThreads.emplace_back(processChannel, ch);
-		}
-		for (auto& thread : channelThreads) {
-			thread.join();
-		}
-	} else {
-		processChannel(0);
-	}
+    workers.run(numChannels, processChannel);
+    if (onProgress) onProgress(.85f);
 
 	for (size_t frame = 0; frame < totalFrames; ++frame) {
 		AudioColourSample sample;

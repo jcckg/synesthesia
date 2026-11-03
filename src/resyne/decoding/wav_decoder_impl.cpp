@@ -1,3 +1,4 @@
+#include "utilities/cancellation.h"
 #include "resyne/decoding/wav_decoder_impl.h"
 
 #include <algorithm>
@@ -44,8 +45,8 @@ bool readFormatChunk(std::ifstream& stream, uint32_t chunkSize,
             errorMessage = "malformed extensible fmt";
             return false;
         }
-        const uint16_t extensionSize = extension[0] | (static_cast<uint16_t>(extension[1]) << 8);
-        const uint16_t validBits = extension[2] | (static_cast<uint16_t>(extension[3]) << 8);
+        const uint16_t extensionSize = static_cast<uint16_t>(extension[0] | (static_cast<uint16_t>(extension[1]) << 8));
+        const uint16_t validBits = static_cast<uint16_t>(extension[2] | (static_cast<uint16_t>(extension[3]) << 8));
         if (extensionSize < 22 || extensionSize > chunkSize - 18) {
             errorMessage = "invalid extensible fmt size";
             return false;
@@ -57,7 +58,7 @@ bool readFormatChunk(std::ifstream& stream, uint32_t chunkSize,
             errorMessage = "unsupported extensible format";
             return false;
         }
-        audioFormat = extension[8] | (static_cast<uint16_t>(extension[9]) << 8);
+        audioFormat = static_cast<uint16_t>(extension[8] | (static_cast<uint16_t>(extension[9]) << 8));
         if (validBits == 0 || validBits > bitsPerSample || (audioFormat == 3 && validBits != bitsPerSample)) {
             errorMessage = "invalid extensible bit depth";
             return false;
@@ -162,9 +163,11 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
     uint16_t channels = 0;
     uint32_t sampleRate = 0;
     uint16_t bitsPerSample = 0;
-    std::vector<uint8_t> dataChunk;
+    std::streampos dataOffset{};
+    std::uint32_t dataSize = 0;
 
     while (file && !(fmtFound && dataFound)) {
+        Utilities::checkCancellation();
         char chunkId[4];
         uint32_t chunkSize = 0;
         if (!readChunkHeader(file, chunkId, chunkSize)) {
@@ -179,11 +182,9 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
             }
         } else if (std::strncmp(chunkId, "data", 4) == 0) {
             dataFound = true;
-            dataChunk.resize(chunkSize);
-            if (!file.read(reinterpret_cast<char*>(dataChunk.data()), chunkSize)) {
-                errorMessage = "malformed data";
-                return false;
-            }
+            dataOffset = file.tellg();
+            dataSize = chunkSize;
+            file.seekg(chunkSize, std::ios::cur);
         } else {
             file.seekg(chunkSize, std::ios::cur);
         }
@@ -206,7 +207,16 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
         return false;
     }
 
-    const size_t totalSamples = dataChunk.size() / bytesPerSample;
+    const auto frameBytes = static_cast<std::size_t>(channels) * bytesPerSample;
+    file.clear();
+    file.seekg(0, std::ios::end);
+    const auto end = file.tellg();
+    if (dataOffset < 0 || end < dataOffset || static_cast<std::uint64_t>(end - dataOffset) < dataSize || dataSize % frameBytes != 0) {
+        errorMessage = "malformed data";
+        return false;
+    }
+
+    const size_t totalSamples = dataSize / bytesPerSample;
     if (totalSamples < channels) {
         errorMessage = "no audio";
         return false;
@@ -219,18 +229,23 @@ bool decodeFile(const std::string& filepath, DecodedWAV& out, std::string& error
         out.channelSamples[channel].reserve(frameCount);
     }
 
-    const uint8_t* raw = dataChunk.data();
-    for (size_t frame = 0; frame < frameCount; ++frame) {
-        for (uint16_t channel = 0; channel < channels; ++channel) {
-            const uint8_t* samplePtr = raw + (frame * channels + channel) * bytesPerSample;
-            float value = 0.0f;
-            if (audioFormat == 3) {
-                value = readFloatValue(samplePtr);
-            } else {
-                value = readPCMValue(samplePtr, bitsPerSample);
-            }
-            out.channelSamples[channel].push_back(value);
+    file.clear();
+    file.seekg(dataOffset);
+    const auto bytesPerFrame = static_cast<std::size_t>(channels) * bytesPerSample;
+    const auto blockFrames = std::max<std::size_t>(1, std::min<std::size_t>(4096, 1024 * 1024 / bytesPerFrame));
+    std::vector<std::uint8_t> data(blockFrames * bytesPerFrame);
+    for (std::size_t offset = 0; offset < frameCount; offset += blockFrames) {
+        Utilities::checkCancellation();
+        const auto count = std::min(blockFrames, frameCount - offset);
+        if (!file.read(reinterpret_cast<char*>(data.data()), static_cast<std::streamsize>(count * bytesPerFrame))) {
+            errorMessage = "malformed data";
+            return false;
         }
+        for (std::size_t frame = 0; frame < count; ++frame)
+            for (std::size_t channel = 0; channel < channels; ++channel) {
+                const auto* sample = data.data() + frame * bytesPerFrame + channel * bytesPerSample;
+                out.channelSamples[channel].push_back(audioFormat == 3 ? readFloatValue(sample) : readPCMValue(sample, bitsPerSample));
+            }
     }
 
     out.sampleRate = sampleRate;

@@ -1,3 +1,4 @@
+#include "utilities/parallel_channels.h"
 #include "batch_exporter.h"
 
 #include <algorithm>
@@ -644,7 +645,7 @@ int BatchExporter::runGradients(const std::string& inputDir,
     size_t exported = 0;
     size_t skipped = 0;
     const size_t total = audioFiles.size();
-    const size_t workerCount = std::min<size_t>(static_cast<size_t>(std::max(1, numWorkers)), total);
+    const size_t workerCount = std::min({static_cast<size_t>(std::max(1, numWorkers)), total, static_cast<size_t>(std::max(1u, std::thread::hardware_concurrency()))});
 
     if (workerCount == 1) {
         for (size_t i = 0; i < total; ++i) {
@@ -680,6 +681,7 @@ int BatchExporter::runGradients(const std::string& inputDir,
 
         for (size_t w = 0; w < workerCount; ++w) {
             workers.emplace_back([&]() {
+                Utilities::ParallelChannels::BatchScope batch;
                 while (true) {
                     const size_t idx = nextIndex.fetch_add(1, std::memory_order_relaxed);
                     if (idx >= total) {
@@ -819,7 +821,7 @@ int BatchExporter::runRsyn(const std::string& inputDir,
     }
 
     const size_t total = audioFiles.size();
-    const size_t workerCount = std::min<size_t>(static_cast<size_t>(std::max(1, numWorkers)), total);
+    const size_t workerCount = std::min({static_cast<size_t>(std::max(1, numWorkers)), total, static_cast<size_t>(std::max(1u, std::thread::hardware_concurrency()))});
     const fs::path rsynDir = fs::path(outputDir);
     std::cout << "Using " << workerCount << " worker thread" << (workerCount == 1 ? "" : "s") << ".\n\n";
 
@@ -849,6 +851,7 @@ int BatchExporter::runRsyn(const std::string& inputDir,
 
     for (size_t workerIndex = 0; workerIndex < workerCount; ++workerIndex) {
         workers.emplace_back([&, workerIndex]() {
+            Utilities::ParallelChannels::BatchScope batch;
             while (true) {
                 if (stopScheduling.load(std::memory_order_relaxed)) {
                     break;

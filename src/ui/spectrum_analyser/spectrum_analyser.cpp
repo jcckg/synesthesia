@@ -41,7 +41,7 @@ void SpectrumAnalyser::drawSpectrumWindow(
                 ColourPresentation::contributionMaximumFrequency / ColourPresentation::contributionMinimumFrequency,
                 static_cast<double>(i) / static_cast<double>(count-1)));
     }
-    const auto heights = UI::Spectrum::curveHeights(contributions, count);
+    const auto& heights = curve_.update(contributions, count);
 
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotMinSize, ImVec2(0, 0));
     ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));

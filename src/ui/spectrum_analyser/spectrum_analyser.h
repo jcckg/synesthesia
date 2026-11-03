@@ -3,6 +3,7 @@
 #include <vector>
 #include "imgui.h"
 #include "implot.h"
+#include "spectrum_curve.h"
 
 class SpectrumAnalyser {
 public:
@@ -11,4 +12,5 @@ public:
         float bottomPanelHeight = 0.0f, float oppositeSidebarWidth = 0.0f);
 private:
     std::vector<float> frequencies_;
+    UI::Spectrum::CurveCache curve_;
 };

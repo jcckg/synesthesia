@@ -1,6 +1,9 @@
 #pragma once
 
 #include <vector>
+#include <span>
+
+struct AudioColourSample;
 #include <functional>
 #include <cstdint>
 #include <string>
@@ -34,6 +37,11 @@ public:
         const std::function<void(float)>& progress = {}
 	);
 
+    static EncodingResult reconstructFromSpectralData(
+        std::span<const AudioColourSample> samples, float sampleRate, int fftSize = 2048, int hopSize = 1024,
+        std::uint32_t leadingSamples = 0, std::uint64_t originalSampleCount = 0, bool limitPeak = true,
+        const std::function<void(float)>& progress = {});
+
 	static bool exportToWAV(
 		const std::string& wavPath,
 		const std::vector<float>& audioSamples,
@@ -48,11 +56,4 @@ public:
 		int fftSize
 	);
 
-private:
-	static std::vector<float> overlapAdd(
-		const std::vector<std::vector<float>>& frames,
-		int hopSize,
-		const std::vector<bool>& frequencyShifted,
-        const std::function<void(float)>& progress
-	);
 };

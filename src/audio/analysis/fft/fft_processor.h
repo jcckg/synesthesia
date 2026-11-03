@@ -59,7 +59,9 @@ public:
 		int fftSize = FFT_SIZE;
 	};
 
-	FFTProcessor();
+    enum class FrameDelivery { Buffered, Direct };
+
+	explicit FFTProcessor(FrameDelivery delivery = FrameDelivery::Buffered);
 	~FFTProcessor();
 
 	FFTProcessor(const FFTProcessor&) = delete;
@@ -121,12 +123,14 @@ private:
 	uint64_t frameCounter;
 
 	static constexpr size_t FRAME_BUFFER_SIZE = 128;
+    const FrameDelivery frameDelivery;
 	std::vector<FFTFrame> frameRingBuffer;
 	size_t frameBufferHead{0};
 	size_t frameBufferTail{0};
 	std::atomic<uint64_t> droppedFrameCount{0};
 	mutable std::mutex frameBufferMutex;
 
+    void appendCurrentFrame(std::vector<FFTFrame>& frames, float sampleRate) const;
 	void applyWindow(std::span<const float> buffer);
 	void resetState();
 	void configureAnalysis(float sampleRate);

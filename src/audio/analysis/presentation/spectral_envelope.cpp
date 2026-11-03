@@ -1,8 +1,13 @@
 #include "spectral_envelope.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <exception>
 #include <numbers>
+#include <semaphore>
+#include <system_error>
+#include <thread>
 #include "audio/analysis/loudness/k_weighting.h"
 #include "audio/analysis/eq/shared_eq_model.h"
 
@@ -11,6 +16,58 @@ namespace {
 constexpr double minimumPower = 1e-24;
 constexpr double volatilityMemory = 4.0;
 constexpr std::array<double, 9> accelerationScales{1e-6, 1e-5, 1e-4, 1e-3, .01, .1, 1, 10, 100};
+
+struct EnvelopeJob {
+    void (*run)(void*);
+    void* context;
+    std::binary_semaphore completed{0};
+    std::exception_ptr error{};
+};
+
+class EnvelopeWorker {
+public:
+    EnvelopeWorker() {
+        if (std::thread::hardware_concurrency() <= 1) return;
+        try {
+            thread_ = std::thread([this] {
+                for (;;) {
+                    ready_.acquire();
+                    auto* job = pending_.load(std::memory_order_acquire);
+                    if (job == nullptr) return;
+                    try { job->run(job->context); }
+                    catch (...) { job->error = std::current_exception(); }
+                    busy_.clear(std::memory_order_release);
+                    job->completed.release();
+                }
+            });
+        } catch (const std::system_error&) {}
+    }
+
+    ~EnvelopeWorker() {
+        if (!thread_.joinable()) return;
+        pending_.store(nullptr, std::memory_order_release);
+        ready_.release();
+        thread_.join();
+    }
+
+    bool submit(EnvelopeJob& job) {
+        if (!thread_.joinable() || busy_.test_and_set(std::memory_order_acquire)) return false;
+        pending_.store(&job, std::memory_order_release);
+        ready_.release();
+        return true;
+    }
+
+private:
+    std::binary_semaphore ready_{0};
+    std::atomic_flag busy_ = ATOMIC_FLAG_INIT;
+    std::atomic<EnvelopeJob*> pending_{nullptr};
+    std::thread thread_;
+};
+
+EnvelopeWorker& envelopeWorker() {
+    static EnvelopeWorker worker;
+    return worker;
+}
 
 // Hann overlap: complex coefficient correlation is the window inner product; power correlation is its square.
 // https://www.fceia.unr.edu.ar/prodivoz/Harris_1978.pdf
@@ -178,7 +235,6 @@ void SpectralEnvelope::filter(std::vector<float>& magnitudes, const std::vector<
     const double endpointPhaseMultiplier = std::max(1e-12,
         3 - 4 * endpointPhaseCorrelation(dt / support) + endpointPhaseCorrelation(2 * dt / support));
     if (responses) responses->assign(magnitudes.size(), 0);
-    std::vector<double> coherentFractions(magnitudes.size());
     for (std::size_t index = 0; index < magnitudes.size(); ++index) {
         auto& bin = bins[index];
         const double magnitude = static_cast<double>(std::isfinite(magnitudes[index]) ? std::max(0.f, magnitudes[index]) : 0);
@@ -202,12 +258,12 @@ void SpectralEnvelope::filter(std::vector<float>& magnitudes, const std::vector<
             bin.phase = phase;
             bin.hasPhase = true;
         } else { bin.coherence = 0; bin.hasPhase = bin.hasVelocity = false; }
-        coherentFractions[index] = coherent;
+        bin.coherentFraction = coherent;
     }
     for (std::size_t index = 0; index < magnitudes.size(); ++index) {
         auto& bin = bins[index];
         const double magnitude = static_cast<double>(std::isfinite(magnitudes[index]) ? std::max(0.f, magnitudes[index]) : 0);
-        double coherent = coherentFractions[index];
+        double coherent = bin.coherentFraction;
         // Real endpoint phase is only a sign. Its neighbour supplies phase-noise evidence with a different kernel.
         if (index == 0 || (nyquist && index + 1 == magnitudes.size())) {
             const auto neighbour = index == 0 ? 1 : index - 1;
@@ -247,8 +303,18 @@ Frame SpectralEnvelope::process(const Frame& source, double timestamp, const Set
     if (gains != equaliser_) { brightness_ = {}; equaliser_ = gains; brightnessWeights_.clear(); }
     const auto equaliser = AudioEQ::makeCascade(source.sampleRate, gains[0], gains[1], gains[2]);
     Frame output = source;
-    filter(output.magnitudes, source.phases, bins_, dt, support, false, &responses_, source.observationShapes);
-    filter(output.kWeightedMagnitudes, source.phases, weightedBins_, dt, support, true, nullptr, source.observationShapes);
+    auto weighted = [&] {
+        filter(output.kWeightedMagnitudes, source.phases, weightedBins_, dt, support, true, nullptr, source.observationShapes);
+    };
+    EnvelopeJob job{[](void* context) { (*static_cast<decltype(weighted)*>(context))(); }, &weighted};
+    const bool parallel = output.magnitudes.size() >= 512 && output.kWeightedMagnitudes.size() >= 512 && envelopeWorker().submit(job);
+    std::exception_ptr error;
+    try { filter(output.magnitudes, source.phases, bins_, dt, support, false, &responses_, source.observationShapes); }
+    catch (...) { error = std::current_exception(); }
+    if (parallel) job.completed.acquire();
+    else if (!error) weighted();
+    if (error) std::rethrow_exception(error);
+    if (job.error) std::rethrow_exception(job.error);
     const bool lines = !output.measurementMagnitudes.empty();
     if (lines) filter(output.measurementMagnitudes, {}, lineBins_, dt, support, false, nullptr, {}, false);
     const bool measured = source.kWeightedMagnitudes.size() == source.magnitudes.size();
@@ -277,7 +343,8 @@ Frame SpectralEnvelope::process(const Frame& source, double timestamp, const Set
             brightnessWeights_[i] = weight;
         }
     }
-    std::vector<double> deviations(original.size());
+    auto& deviations = brightnessDeviations_;
+    deviations.resize(original.size());
     double power = 0, variance = 0, estimatedPower = 0;
     for (std::size_t i = 0; i < original.size(); ++i) {
         const double weight = brightnessWeights_[i];

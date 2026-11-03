@@ -26,6 +26,11 @@ bool SynesthesiaOSCIntegration::isRunning() const {
     return runtime_.isRunning();
 }
 
+bool SynesthesiaOSCIntegration::needsFrameData() const {
+    std::lock_guard lock(frameMutex_);
+    return monitoring_ || runtime_.isRunning();
+}
+
 bool SynesthesiaOSCIntegration::updateConfig(const OSCConfig& config) {
     std::lock_guard lock(frameMutex_);
     const bool updated = runtime_.updateConfig(config);
@@ -47,7 +52,7 @@ void SynesthesiaOSCIntegration::updateFrameData(const OSCFrameUpdate& update) {
     auto frame = std::make_shared<OSCFrameData>(frameBuilder_.build(update));
     frame->frameId = ++nextFrameId_;
     latestFrame_ = frame;
-    runtime_.sendFrame(*frame);
+    runtime_.sendFrame(std::move(frame));
 }
 
 PendingOSCSettings SynesthesiaOSCIntegration::consumePendingSettings() {

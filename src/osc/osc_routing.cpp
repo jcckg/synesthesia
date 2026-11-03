@@ -196,7 +196,7 @@ OSCRouting defaultRouting() {
     return result;
 }
 
-std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting& routing, bool includeDisabled) {
+std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting& routing, bool includeDisabled, bool includeSamples) {
     auto result = builtInOutputs(frame);
     for (auto& output : result) {
         const auto setting = routing.find(output.address);
@@ -231,46 +231,62 @@ std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting&
         const auto setting = routing.find(route.address);
         return !route.builtIn && setting != routing.end() && setting->second.enabled;
     })) return result;
-    const auto addVector = [&](const std::string& address, std::vector<float> values, bool available) {
+    const auto enabled = [&](const std::string& address) {
         const auto setting = routing.find(address);
-        if (!includeDisabled && (setting == routing.end() || !setting->second.enabled)) return;
+        return includeDisabled || (setting != routing.end() && setting->second.enabled);
+    };
+    const auto addVector = [&](const std::string& address, auto&& makeValues, bool available, std::size_t length = ColourPresentation::contributionBandCount) {
+        if (!enabled(address)) return;
         OSCOutput output;
         output.address = address;
-        output.samples = std::move(values);
+        output.sampleCount = length;
+        if (includeSamples) output.samples = makeValues();
         output.vector = true;
         output.available = available;
         result.push_back(std::move(output));
     };
-    auto frequencies = frame.frequencies;
-    if (frequencies.empty() && frame.meta.fftSize > 0) {
-        frequencies.resize(frame.magnitudes.size());
-        for (std::size_t i = 0; i < frequencies.size(); ++i)
-            frequencies[i] = static_cast<float>(i) * static_cast<float>(frame.meta.sampleRate) / static_cast<float>(frame.meta.fftSize);
-    }
     const std::string spectrum = "/synesthesia/frame/spectrum/";
-    const bool spectrumAvailable = frame.sourceAvailable && !frame.magnitudes.empty() && frequencies.size() == frame.magnitudes.size();
-    addVector(spectrum + "frequencies_hz", frequencies, spectrumAvailable);
-    addVector(spectrum + "magnitudes", frame.magnitudes, spectrumAvailable);
-    addVector(spectrum + "phases_radians", frame.phases, spectrumAvailable && frame.phases.size() == frame.magnitudes.size());
+    const bool frequenciesAvailable = frame.frequencies.empty() ? frame.meta.fftSize > 0 : frame.frequencies.size() == frame.magnitudes.size();
+    const bool spectrumAvailable = frame.sourceAvailable && !frame.magnitudes.empty() && frequenciesAvailable;
+    addVector(spectrum + "frequencies_hz", [&] {
+        if (!frame.frequencies.empty()) return frame.frequencies;
+        std::vector<float> frequencies;
+        if (frame.meta.fftSize > 0) {
+            frequencies.resize(frame.magnitudes.size());
+            for (std::size_t i = 0; i < frequencies.size(); ++i)
+                frequencies[i] = static_cast<float>(i) * static_cast<float>(frame.meta.sampleRate) / static_cast<float>(frame.meta.fftSize);
+        }
+        return frequencies;
+    }, spectrumAvailable, frame.frequencies.empty() ? (frame.meta.fftSize > 0 ? frame.magnitudes.size() : 0) : frame.frequencies.size());
+    addVector(spectrum + "magnitudes", [&] { return frame.magnitudes; }, spectrumAvailable, frame.magnitudes.size());
+    addVector(spectrum + "phases_radians", [&] { return frame.phases; }, spectrumAvailable && frame.phases.size() == frame.magnitudes.size(), frame.phases.size());
     const std::string bands = "/synesthesia/frame/contribution_bands/";
-    std::vector<float> bandFrequencies(ColourPresentation::contributionBandCount);
-    for (std::size_t i = 0; i < bandFrequencies.size(); ++i) bandFrequencies[i] = ColourPresentation::contributionBandFrequency(i);
-    addVector(bands + "frequencies_hz", std::move(bandFrequencies), frame.sourceContributions != nullptr);
+    addVector(bands + "frequencies_hz", [] {
+        static const auto frequencies = [] {
+            std::vector<float> values(ColourPresentation::contributionBandCount);
+            for (std::size_t i = 0; i < values.size(); ++i) values[i] = ColourPresentation::contributionBandFrequency(i);
+            return values;
+        }();
+        return frequencies;
+    }, frame.sourceContributions != nullptr);
     for (int component = -1; component < 4; ++component) {
         const auto address = bands + (component == -1 ? "magnitudes" : component == 3 ? "response_seconds" : component == 0 ? "cie_x" : component == 1 ? "cie_y" : "cie_z");
+        if (!enabled(address)) continue;
         const auto setting = routing.find(address);
         const bool smoothing = component >= 0 && component < 3 && setting != routing.end() && setting->second.smoothing;
         const auto& contributions = smoothing || component == 3 ? frame.presentedContributions : frame.sourceContributions;
-        std::vector<float> values(ColourPresentation::contributionBandCount, 0.0f);
-        if (contributions) {
-            for (const auto& band : *contributions) {
-                if (band.band >= values.size()) continue;
-                if (component == -1) values[band.band] += band.magnitude;
-                else if (component == 3) values[band.band] = band.responseSeconds;
-                else values[band.band] += band.xyz[static_cast<std::size_t>(component)];
+        addVector(address, [&] {
+            std::vector<float> values(ColourPresentation::contributionBandCount, 0.0f);
+            if (contributions) {
+                for (const auto& band : *contributions) {
+                    if (band.band >= values.size()) continue;
+                    if (component == -1) values[band.band] += band.magnitude;
+                    else if (component == 3) values[band.band] = band.responseSeconds;
+                    else values[band.band] += band.xyz[static_cast<std::size_t>(component)];
+                }
             }
-        }
-        addVector(address, std::move(values), contributions != nullptr);
+            return values;
+        }, contributions != nullptr);
     }
     return result;
 }
@@ -320,7 +336,7 @@ OSCOutputSize outputSize(const OSCOutput& output) {
         return {packet.Size() + 4, 0, 0};
     }
     OSCOutputSize result;
-    auto size = output.available ? output.samples.size() : 0;
+    auto size = output.available ? output.length() : 0;
     std::size_t offset = 0;
     do {
         const auto count = chunkLength(output.address, size - offset);

@@ -3,7 +3,7 @@
 #include <stdexcept>
 #include <vector>
 
-#if defined(__APPLE__) && defined(__aarch64__) && !defined(SYNESTHESIA_FORCE_KISS_FFT)
+#if defined(__APPLE__) && defined(__aarch64__)
 #include <Accelerate/Accelerate.h>
 #define SYNESTHESIA_ACCELERATE_FFT 1
 #else
@@ -24,7 +24,7 @@ struct RealFFT::Impl {
         if (size < 2 || size % 2 != 0 || size > (1u << 24)) throw std::invalid_argument("Unsupported real FFT length");
 #if SYNESTHESIA_ACCELERATE_FFT
         if (backend == FFTBackend::Automatic && std::has_single_bit(size)) {
-            exponent = std::countr_zero(size);
+            exponent = static_cast<vDSP_Length>(std::countr_zero(size));
             real.resize(size/2); imaginary.resize(size/2);
             setup = vDSP_create_fftsetup(exponent,kFFTRadix2);
             if (!setup) throw std::bad_alloc();

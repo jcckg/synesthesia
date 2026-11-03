@@ -1,4 +1,6 @@
 #include "resyne/encoding/formats/format_mp4.h"
+#include "utilities/process.h"
+#include "utilities/cancellation.h"
 
 #include <algorithm>
 #include <array>
@@ -62,33 +64,7 @@ struct TempFile {
     }
 };
 
-#ifdef _WIN32
-FILE* openPipe(const std::string& command) {
-    FILE* pipe = _popen(command.c_str(), "wb");
-    if (pipe) {
-        _setmode(_fileno(pipe), _O_BINARY);
-    }
-    return pipe;
-}
-int closePipe(FILE* handle) {
-    return _pclose(handle);
-}
-#else
-void ignoreSigpipeForFFmpegPipes() {
-    static std::once_flag once;
-    std::call_once(once, [] {
-        std::signal(SIGPIPE, SIG_IGN);
-    });
-}
 
-FILE* openPipe(const std::string& command) {
-    ignoreSigpipeForFFmpegPipes();
-    return popen(command.c_str(), "w");
-}
-int closePipe(FILE* handle) {
-    return pclose(handle);
-}
-#endif
 
 inline uint16_t toWord(float value) {
     return static_cast<uint16_t>(std::clamp(value, 0.0f, 1.0f) * 65535.0f + 0.5f);
@@ -335,20 +311,18 @@ bool renderVideo(const std::string& ffmpegCommand,
         gradientHistory->reserve(static_cast<size_t>(totalFrames));
     }
 
-    constexpr size_t kPipeBufferSize = 8 * 1024 * 1024;
-    std::vector<char> pipeBuffer(kPipeBufferSize);
-    std::unique_ptr<FILE, decltype(&closePipe)> pipe(openPipe(ffmpegCommand), closePipe);
+    auto pipe = std::make_unique<Utilities::Process>(ffmpegCommand, Utilities::Process::Mode::Write);
     if (!pipe) {
         errorMessage = "Unable to start FFmpeg";
         return false;
     }
 
-    setvbuf(pipe.get(), pipeBuffer.data(), _IOFBF, kPipeBufferSize);
 
     const float renderStart = 0.15f;
     const float renderSpan = gradientHistory ? 0.35f : 0.75f;
 
     for (int frameIndex = 0; frameIndex < totalFrames; ++frameIndex) {
+        Utilities::checkCancellation();
         const double time = std::min(duration, static_cast<double>(frameIndex) / static_cast<double>(fps));
         const RGB colour = sampler.colourAt(time);
 
@@ -359,19 +333,14 @@ bool renderVideo(const std::string& ffmpegCommand,
         paintColourFrame(frame, width, height, colour);
 
         const size_t frameBytes = frame.size() * sizeof(uint16_t);
-        const size_t bytesWritten = fwrite(frame.data(), 1, frameBytes, pipe.get());
+        const size_t bytesWritten = pipe->write(frame.data(), frameBytes);
         if (bytesWritten != frameBytes) {
             errorMessage = "Failed to stream video frame to FFmpeg";
-            closePipe(pipe.release());
+            pipe.reset();
             return false;
         }
 
-#ifdef _WIN32
-        // Release buffered frames to the Windows pipe periodically during long exports.
-        if (frameIndex % 5 == 0) {
-            fflush(pipe.get());
-        }
-#endif
+
 
         if (progress) {
             const float fraction = static_cast<float>(frameIndex + 1) / static_cast<float>(totalFrames);
@@ -379,9 +348,8 @@ bool renderVideo(const std::string& ffmpegCommand,
         }
     }
 
-    fflush(pipe.get());
 
-    const int exitCode = closePipe(pipe.release());
+    const int exitCode = pipe->finish();
     if (exitCode != 0) {
         errorMessage = "FFmpeg exited with an error (code " + std::to_string(exitCode) + ")";
 
@@ -525,24 +493,22 @@ bool exportToMP4(const std::string& outputPath,
         const int lineStride = width * 3;
         std::vector<uint16_t> frame(static_cast<size_t>(lineStride) * static_cast<size_t>(height), 0);
 
-        constexpr size_t kPipeBufferSize = 8 * 1024 * 1024;
-        std::vector<char> pipeBuffer(kPipeBufferSize);
-        std::unique_ptr<FILE, decltype(&closePipe)> pipe(openPipe(gradientCommand), closePipe);
+        auto pipe = std::make_unique<Utilities::Process>(gradientCommand, Utilities::Process::Mode::Write);
         if (!pipe) {
             errorMessage = "Unable to start FFmpeg for gradient export";
             return false;
         }
 
-        setvbuf(pipe.get(), pipeBuffer.data(), _IOFBF, kPipeBufferSize);
 
         for (int frameIndex = 0; frameIndex < totalFrames; ++frameIndex) {
+        Utilities::checkCancellation();
             paintGradientFrame(frame, width, height, *track,
                 std::min(duration, static_cast<double>(frameIndex) / fps), options.colourSpace, options.applyGamutMapping);
 
             const size_t frameBytes = frame.size() * sizeof(uint16_t);
-            if (fwrite(frame.data(), 1, frameBytes, pipe.get()) != frameBytes) {
+            if (pipe->write(frame.data(), frameBytes) != frameBytes) {
                 errorMessage = "Failed to stream gradient frame to FFmpeg";
-                closePipe(pipe.release());
+                pipe.reset();
                 return false;
             }
 
@@ -552,7 +518,7 @@ bool exportToMP4(const std::string& outputPath,
             }
         }
 
-        const int exitCode = closePipe(pipe.release());
+        const int exitCode = pipe->finish();
         if (exitCode != 0) {
             errorMessage = "FFmpeg exited with an error during gradient export (code " + std::to_string(exitCode) + ")";
             return false;
