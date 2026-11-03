@@ -1,11 +1,23 @@
 #include "synesthesia_osc_integration.h"
 
 #include <type_traits>
+#include <algorithm>
+#include <chrono>
+#include <limits>
 
 namespace Synesthesia::OSC {
 
 std::unique_ptr<SynesthesiaOSCIntegration> SynesthesiaOSCIntegration::instance_;
 std::mutex SynesthesiaOSCIntegration::instanceMutex_;
+
+SynesthesiaOSCIntegration::SynesthesiaOSCIntegration() { beginSession(); }
+
+void SynesthesiaOSCIntegration::beginSession() {
+    const auto now = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    sessionSeed_ = std::max(sessionSeed_ + 1 + nextFrameId_ / kFrameIndexModulus,
+        static_cast<uint64_t>(std::max<int64_t>(0, now)));
+}
 
 bool SynesthesiaOSCIntegration::start(const OSCConfig& config) {
     std::lock_guard lock(frameMutex_);
@@ -13,6 +25,7 @@ bool SynesthesiaOSCIntegration::start(const OSCConfig& config) {
         return false;
     }
     frameBuilder_.reset();
+    beginSession();
     return runtime_.start();
 }
 
@@ -34,7 +47,10 @@ bool SynesthesiaOSCIntegration::needsFrameData() const {
 bool SynesthesiaOSCIntegration::updateConfig(const OSCConfig& config) {
     std::lock_guard lock(frameMutex_);
     const bool updated = runtime_.updateConfig(config);
-    if (updated) frameBuilder_.reset();
+    if (updated) {
+        frameBuilder_.reset();
+        beginSession();
+    }
     return updated;
 }
 
@@ -51,6 +67,8 @@ void SynesthesiaOSCIntegration::updateFrameData(const OSCFrameUpdate& update) {
     if (!monitoring_ && !runtime_.isRunning()) return;
     auto frame = std::make_shared<OSCFrameData>(frameBuilder_.build(update));
     frame->frameId = ++nextFrameId_;
+    frame->sessionId = (sessionSeed_ + frame->frameId / kFrameIndexModulus) &
+        static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
     latestFrame_ = frame;
     runtime_.sendFrame(std::move(frame));
 }
@@ -84,9 +102,9 @@ void SynesthesiaOSCIntegration::setMonitoring(bool enabled) {
     monitoring_ = enabled;
 }
 
-void SynesthesiaOSCIntegration::setRouting(const OSCRouting& routing) {
+void SynesthesiaOSCIntegration::setRouting(const OSCRouting& routing, bool smoothBandMagnitudes) {
     std::lock_guard lock(frameMutex_);
-    runtime_.setRouting(routing);
+    runtime_.setRouting(routing, smoothBandMagnitudes);
 }
 
 std::shared_ptr<const OSCFrameData> SynesthesiaOSCIntegration::latestFrame() const {

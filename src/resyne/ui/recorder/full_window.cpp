@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <vector>
 #include <mutex>
 #include <limits>
@@ -119,6 +120,9 @@ void Recorder::drawFullWindow(RecorderState& state,
     constexpr float WINDOW_PADDING = ReSyne::UI::kToolbarHorizontalPadding;
     constexpr float HEADER_PADDING = 9.0f;
     constexpr float TOOLBAR_PADDING = ReSyne::UI::kToolbarVerticalPadding;
+    ImGui::SetNextWindowContentSize(ImVec2(std::max(1.0f, std::floor(windowWidth) - WINDOW_PADDING * 2.0f),
+        std::max(1.0f, std::floor(windowHeight) - TOOLBAR_PADDING * 2.0f)));
+    ImGui::SetNextWindowScroll(ImVec2(0.0f, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(WINDOW_PADDING, TOOLBAR_PADDING));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 4.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
@@ -127,7 +131,8 @@ void Recorder::drawFullWindow(RecorderState& state,
                  nullptr,
                  ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
                      ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoBringToFrontOnFocus);
+                     ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse |
+                     ImGuiWindowFlags_NoBringToFrontOnFocus);
 
     ImGui::SetCursorPosY(HEADER_PADDING);
     const bool exportRunning = state.exportRunning.load(std::memory_order_acquire);

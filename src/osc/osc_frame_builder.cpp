@@ -7,6 +7,7 @@
 #include <optional>
 
 #include "ui/smoothing/smoothing_features.h"
+#include "ui/smoothing/smoothing.h"
 
 namespace Synesthesia::OSC {
 
@@ -118,6 +119,7 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     OSCFrameData frame{};
     frame.sourceId = update.sourceId;
     frame.sourceAvailable = update.sourceAvailable;
+    frame.colourSpace = update.colourSpace;
     frame.magnitudes.assign(update.magnitudes.begin(), update.magnitudes.end());
     frame.phases.assign(update.phases.begin(), update.phases.end());
     frame.frequencies.assign(update.frequencies.begin(), update.frequencies.end());
@@ -157,6 +159,10 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.sourceColour.cieX = update.colourResult.X;
     frame.sourceColour.cieY = update.colourResult.Y;
     frame.sourceColour.cieZ = update.colourResult.Z;
+    if (frame.sourceAnalysis.available)
+        ColourCore::XYZtoRGB(frame.sourceColour.cieX, frame.sourceColour.cieY, frame.sourceColour.cieZ,
+            frame.sourceColour.linear.r, frame.sourceColour.linear.g, frame.sourceColour.linear.b,
+            update.colourSpace, false, update.applyGamutMapping);
     ColourCore::XYZtoOklab(frame.sourceColour.cieX, frame.sourceColour.cieY, frame.sourceColour.cieZ,
         frame.sourceColour.oklabL, frame.sourceColour.oklabA, frame.sourceColour.oklabB);
     frame.colour.displayR = update.displayColour.r;
@@ -165,6 +171,10 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     frame.colour.cieX = std::isfinite(update.presentedXYZ.X) ? update.presentedXYZ.X : update.colourResult.X;
     frame.colour.cieY = std::isfinite(update.presentedXYZ.Y) ? update.presentedXYZ.Y : update.colourResult.Y;
     frame.colour.cieZ = std::isfinite(update.presentedXYZ.Z) ? update.presentedXYZ.Z : update.colourResult.Z;
+    if (frame.presentedAnalysis.available)
+        ColourCore::XYZtoRGB(frame.colour.cieX, frame.colour.cieY, frame.colour.cieZ,
+            frame.colour.linear.r, frame.colour.linear.g, frame.colour.linear.b,
+            update.colourSpace, false, update.applyGamutMapping);
     ColourCore::XYZtoOklab(frame.colour.cieX, frame.colour.cieY, frame.colour.cieZ,
         frame.colour.oklabL, frame.colour.oklabA, frame.colour.oklabB);
     frame.colour.measurementXYZ = update.colourResult.spectral.xyz;
@@ -196,12 +206,66 @@ OSCFrameData buildFrameData(const OSCFrameUpdate& update) {
     return frame;
 }
 
+void OSCFrameBuilder::updateBands(OSCFrameData& frame, const OSCFrameUpdate& update, bool sameSource) {
+    const double dt = sameSource ? update.sourceTimestamp - previousTimestamp_ : std::numeric_limits<double>::quiet_NaN();
+    const double duration = frame.meta.sampleRate > 0 && frame.meta.fftSize > 0 ?
+        static_cast<double>(frame.meta.fftSize) / frame.meta.sampleRate : 0.0;
+    if (!frame.sourceAvailable || !frame.sourceContributions || !std::isfinite(update.sourceTimestamp)) {
+        bandHistory_ = {};
+        bandData_ = {};
+        return;
+    }
+    const bool initial = !bandData_.available || !std::isfinite(dt) || dt < 0.0 || dt > std::max(0.5, duration * 4.0);
+    if (!initial && dt == 0.0) {
+        frame.bands = bandData_;
+        return;
+    }
+    if (initial) bandHistory_ = {};
+    std::array<double, ColourPresentation::contributionBandCount> magnitudes{}, responses{};
+    for (const auto& band : *frame.sourceContributions)
+        if (band.band < magnitudes.size() && std::isfinite(band.magnitude))
+            magnitudes[band.band] += static_cast<double>(std::max(0.0f, band.magnitude));
+    if (frame.presentedContributions && frame.smoothing.enabled) {
+        for (const auto& band : *frame.presentedContributions)
+            if (band.band < responses.size() && std::isfinite(band.responseSeconds))
+                responses[band.band] = static_cast<double>(std::max(0.0f, band.responseSeconds));
+    }
+    const double weight = initial ? 0.0 : -std::expm1(-dt / 1.5);
+    static const double onsetMagnitudeFloor = std::pow(10.0, static_cast<double>(kBandLevelMinimumDb) / 20.0);
+    for (std::size_t i = 0; i < magnitudes.size(); ++i) {
+        auto& history = bandHistory_[i];
+        const double magnitude = magnitudes[i];
+        const double total = std::max(magnitude, history.magnitude);
+        const double flux = !initial && total > 0.0 ?
+            std::clamp(std::max(0.0, magnitude - history.magnitude) / total * (duration > 0.0 ? duration / dt : 1.0), 0.0, 1.0) : 0.0;
+        bandData_.onsetDetected[i] = !initial && history.magnitude > onsetMagnitudeFloor &&
+            history.previousFlux > history.precedingFlux && history.previousFlux >= flux &&
+            history.previousFlux > history.previousThreshold ? 1.0f : 0.0f;
+        const double difference = flux - history.meanFlux;
+        history.meanFlux += weight * difference;
+        history.varianceFlux = (1.0 - weight) * (history.varianceFlux + weight * difference * difference);
+        history.previousThreshold = history.meanFlux + std::sqrt(history.varianceFlux);
+        history.precedingFlux = history.previousFlux;
+        history.previousFlux = flux;
+        history.smoothedMagnitude = initial ? magnitude : std::lerp(magnitude, history.smoothedMagnitude,
+            smoothingRetention(responses[i], dt));
+        history.magnitude = magnitude;
+        bandData_.smoothedMagnitudes[i] = static_cast<float>(history.smoothedMagnitude);
+        bandData_.spectralFlux[i] = static_cast<float>(flux);
+    }
+    bandData_.available = true;
+    frame.bands = bandData_;
+}
+
 OSCFrameData OSCFrameBuilder::build(const OSCFrameUpdate& update) {
     auto frame = buildFrameData(update);
     const bool sameSource = sourceId_ == update.sourceId && status_ == update.status &&
         sampleRate_ == frame.meta.sampleRate && fftSize_ == frame.meta.fftSize &&
         smoothing_.enabled == frame.smoothing.enabled && smoothing_.manual == frame.smoothing.manual &&
         smoothing_.amount == frame.smoothing.amount;
+    const bool sameBandSource = sourceId_ == update.sourceId && sampleRate_ == frame.meta.sampleRate && fftSize_ == frame.meta.fftSize &&
+        smoothing_.enabled == frame.smoothing.enabled && smoothing_.manual == frame.smoothing.manual && smoothing_.amount == frame.smoothing.amount;
+    updateBands(frame, update, sameBandSource);
     const double dt = sameSource ? update.sourceTimestamp - previousTimestamp_ : std::numeric_limits<double>::quiet_NaN();
     const ColourCore::XYZ source{update.colourResult.X, update.colourResult.Y, update.colourResult.Z};
     if (frame.sourceAnalysis.available) frame.sourceAnalysis.colourChangePerSecond = colourChange(previousSource_, source, dt);

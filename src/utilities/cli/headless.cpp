@@ -224,6 +224,20 @@ void HeadlessInterface::displayFrequencyInfo() {
     if (oscEnabled && live->source) {
         const auto& frame = *live->source;
         Synesthesia::OSC::OSCFrameUpdate update{};
+        update.status = Synesthesia::OSC::OSCPlaybackStatus::Playing;
+        update.sourceId = static_cast<uint64_t>(selectedDeviceIndex + 1) * 2 |
+            (static_cast<uint64_t>(live->selectedChannel + 1) << 32);
+        update.smoothing = {live->settings.smoothingEnabled, live->settings.manualSmoothing, live->settings.smoothingAmount,
+            live->frame.responseSeconds};
+        if (live->frame.presentedContributions) {
+            const auto range = ColourPresentation::responseRange(*live->frame.presentedContributions);
+            update.smoothing.minimumResponseSeconds = range.minimum;
+            update.smoothing.maximumResponseSeconds = range.maximum;
+        }
+        update.colourSpace = oscColourSpace;
+        update.applyGamutMapping = oscGamutMappingEnabled;
+        update.sourceContributions = live->frame.contributionTargets;
+        update.presentedContributions = live->frame.presentedContributions;
         update.magnitudes = live->prepared.analysisMagnitudes;
         update.phases = frame.phases;
         update.frequencies = frame.frequencies;

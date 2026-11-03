@@ -11,3 +11,9 @@ float manualSmoothingAmount(float seconds) {
     seconds = std::isfinite(seconds) ? std::clamp(seconds, 0.04f, 1.5f) : manualResponseTime(.6f);
     return std::log(seconds / 0.04f) / std::log(1.5f / 0.04f);
 }
+
+double smoothingRetention(double responseSeconds, double elapsedSeconds) {
+    if (!std::isfinite(elapsedSeconds) || elapsedSeconds <= 0.0) return 1.0;
+    if (!std::isfinite(responseSeconds) || responseSeconds <= 0.0) return 0.0;
+    return std::exp(-std::log(20.0) * elapsedSeconds / responseSeconds);
+}

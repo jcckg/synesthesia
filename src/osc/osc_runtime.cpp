@@ -91,11 +91,12 @@ bool OSCRuntime::updateConfig(const OSCConfig& config) {
     return true;
 }
 
-void OSCRuntime::setRouting(const OSCRouting& routing) {
+void OSCRuntime::setRouting(const OSCRouting& routing, bool smoothBandMagnitudes) {
     std::lock_guard lock(mutex_);
     pendingFrames_.clear();
-    sender_.setRouting(routing);
+    sender_.setRouting(routing, smoothBandMagnitudes);
     config_.routing = routing;
+    config_.smoothBandMagnitudes = smoothBandMagnitudes;
 }
 
 OSCConfig OSCRuntime::getConfig() const {

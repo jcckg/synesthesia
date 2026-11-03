@@ -3,6 +3,7 @@
 #include "colour/colour_core.h"
 
 #include <cstdint>
+#include <array>
 #include <limits>
 #include <optional>
 #include <memory>
@@ -11,6 +12,8 @@
 #include <variant>
 
 namespace Synesthesia::OSC {
+
+inline constexpr float kBandLevelMinimumDb = -70.0f;
 
 enum class OSCPlaybackStatus { Idle, Playing, Loading, Recording };
 
@@ -71,6 +74,7 @@ struct OSCFrameColourData {
     float displayR = 0.0f;
     float displayG = 0.0f;
     float displayB = 0.0f;
+    ColourCore::RGB linear{};
     float cieX = 0.0f;
     float cieY = 0.0f;
     float cieZ = 0.0f;
@@ -109,9 +113,17 @@ struct OSCFramePhaseData {
     float transientNorm = 0.0f;
 };
 
+struct OSCFrameBandData {
+    bool available = false;
+    std::array<float, ColourPresentation::contributionBandCount> smoothedMagnitudes{};
+    std::array<float, ColourPresentation::contributionBandCount> spectralFlux{};
+    std::array<float, ColourPresentation::contributionBandCount> onsetDetected{};
+};
+
 struct OSCFrameData {
     bool sourceAvailable = false;
     uint64_t frameId = 0;
+    uint64_t sessionId = 0;
     uint64_t sourceId = 0;
     std::vector<float> magnitudes;
     std::vector<float> phases;
@@ -130,6 +142,8 @@ struct OSCFrameData {
     OSCFrameLoudnessData loudness;
     OSCFrameTransientData transient;
     OSCFramePhaseData phase;
+    OSCFrameBandData bands;
+    ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
 };
 
 struct OSCStats {

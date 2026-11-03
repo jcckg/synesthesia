@@ -219,7 +219,7 @@ void OSCRoutingWindow::renderContents(UIState& state) {
     const auto frame = osc.latestFrame();
     const OSCFrameData emptyFrame;
     const auto& currentFrame = frame ? *frame : emptyFrame;
-    const auto outputs = buildOutputs(currentFrame, config.routing, true, false);
+    const auto outputs = buildOutputs(currentFrame, config.routing, true, false, config.smoothBandMagnitudes);
     const auto& catalogue = outputCatalogue();
     const auto stats = osc.getStats();
     const bool newCatalogue = outputSizes_.size() != outputs.size();
@@ -228,35 +228,22 @@ void OSCRoutingWindow::renderContents(UIState& state) {
     for (std::size_t i = 0; i < outputs.size(); ++i) {
         const auto& output = outputs[i];
         const auto* text = std::get_if<std::string>(&output.value);
-        const OutputSizeKey key{output.value.index(), output.vector ? output.length() : text ? text->size() : 0,
+        const bool spectrum = output.vector && output.address.starts_with("/synesthesia/frame/spectrum/");
+        const auto length = spectrum && currentFrame.meta.fftSize > 0 && currentFrame.magnitudes.empty() ?
+            static_cast<std::size_t>(currentFrame.meta.fftSize) / 2 + 1 : spectrum ? currentFrame.magnitudes.size() : output.length();
+        const OutputSizeKey key{output.value.index(), output.vector ? length : text ? text->size() : 0,
             output.vector, output.available};
         if (newCatalogue || !(outputSizeKeys_[i] == key)) {
-            outputSizes_[i] = outputSize(output);
+            outputSizes_[i] = outputSize(output, currentFrame);
             outputSizeKeys_[i] = key;
         }
     }
     const bool running = osc.isRunning();
-    OSCOutputSize total;
-    std::size_t enabled = 0;
-    std::size_t builtInBytes = 0;
-    for (std::size_t i = 0; i < outputs.size(); ++i) {
-        const auto setting = config.routing.find(outputs[i].address);
-        if (setting == config.routing.end() || !setting->second.enabled) continue;
-        ++enabled;
-        const auto size = outputSizes_[i];
-        if (!outputs[i].vector) builtInBytes += size.bytes;
-        else {
-            total.bytes += size.bytes;
-            total.packets += size.packets;
-            total.largestPacket = std::max(total.largestPacket, size.largestPacket);
-        }
-    }
-    if (builtInBytes > 0) {
-        builtInBytes += 16;
-        total.bytes += builtInBytes;
-        ++total.packets;
-        total.largestPacket = std::max(total.largestPacket, builtInBytes);
-    }
+    const auto total = outputSize(currentFrame, outputs, config.routing, {config.outputBufferSize, true});
+    const auto enabled = static_cast<std::size_t>(std::count_if(outputs.begin(), outputs.end(), [&](const auto& output) {
+        const auto setting = config.routing.find(output.address);
+        return setting != config.routing.end() && setting->second.enabled;
+    }));
     const std::string heading = "OSC Routing   " + std::string(running ? "Sending to " : "Stopped  ") +
         config.destinationHost + ":" + std::to_string(config.transmitPort);
     ImGui::SetCursorPosY(9.0f);
@@ -275,7 +262,8 @@ void OSCRoutingWindow::renderContents(UIState& state) {
     ImGui::SameLine();
     if (ImGui::Button("Reset")) {
         config.routing = defaultRouting();
-        osc.setRouting(config.routing);
+        config.smoothBandMagnitudes = false;
+        osc.setRouting(config.routing, config.smoothBandMagnitudes);
         message_ = "Default routing restored";
         error_ = false;
         messageRemaining_ = 1.4f;
@@ -283,11 +271,29 @@ void OSCRoutingWindow::renderContents(UIState& state) {
     ImGui::EndDisabled();
     ImGui::SameLine();
     if (ImGui::Button("Format")) ImGui::OpenPopup("Data format");
+    const auto* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowSizeConstraints({0, 0}, {std::max(1.0f, viewport->WorkSize.x - 12.0f),
+        std::max(1.0f, viewport->WorkSize.y - 12.0f)});
     if (ImGui::BeginPopup("Data format")) {
-        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 520.0f);
-        ImGui::TextUnformatted("Vectors use float32 values. Each message starts with frame ID, source ID and source timestamp in microseconds (int64), followed by offset and total length (int32). Remaining arguments are values. Assemble chunks by source, frame and address; discard incomplete older frames. A zero total marks unavailable data.");
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + std::min(520.0f, std::max(1.0f, viewport->WorkSize.x - 36.0f)));
+        ImGui::TextUnformatted("Every packet is an immediate OSC bundle, limited to 1,400 B including all overhead. Arrays start with an int32 snapshot frame index, followed by float32 values. Band arrays contain all 241 values at one address: band N is argument N+1 with zero-based indexing. There is no offset or length header. Unavailable arrays contain zeros and have their availability bit cleared.");
         ImGui::Spacing();
-        ImGui::TextUnformatted("Spectrum phases are in radians. Contribution bands run from 20 Hz to 20 kHz in 241 logarithmic steps. Smoothing off selects source values; on selects Synesthesia's existing presented values at the same address. Fixed-stage outputs have no smoothing switch. Frequency outputs identify vector coordinates.");
+        ImGui::TextUnformatted("Larger spectrum arrays use fixed chunks of 240 values at /0, /1 and so on. The last chunk may be shorter. All spectrum outputs share the same length and chunk boundaries; short spectra use the unsuffixed address. Discard channels beyond the current spectrum length or chunk count when the layout changes. Phases are in radians. Contribution bands run from 20 Hz to 20 kHz in 241 logarithmic steps.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Each bundle starts with meta/context: frame index (int32), session ID, source ID and source timestamp in microseconds (int64), then array mask, availability mask, spectrum length, spectrum chunk count and band count (int32). Mask bits follow the array addresses below. Assemble only the arrays in that snapshot's mask, including every spectrum chunk. Publish complete snapshots; discard incomplete older ones. Separate bundles are not atomic together. Use OSC In DAT callbacks for exact int64 metadata.");
+        if (ImGui::TreeNode("Array mask bits")) {
+            for (std::size_t bit = 0; bit < kVectorAddresses.size(); ++bit)
+                ImGui::Text("%zu: %s", bit, kVectorAddresses[bit] + std::string_view("/synesthesia/frame/").size());
+            ImGui::TreePop();
+        }
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Frame indices identify OSC snapshots, including interpolated playback, rather than analysis frames. They wrap from 16,777,215 to zero, remaining exact in CHOP float channels. The session ID changes at wrap or transport restart; source changes have their own ID. Match session, source and frame. Source timestamps describe the audio timeline, not NTP time. Band frequencies are cached metadata: sent on start, routing or source changes and once per second for late receivers, and included in the array mask only when transmitted.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Smoothing off selects source values; on selects Synesthesia's existing presented values at the same address. Fixed-stage outputs have no individual smoothing switch.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Global band magnitude smoothing uses each band's response_seconds (time to 95% response). Normalised levels map -70 to 0 dB amplitude onto 0 to 1; silence is zero. Source flux measures positive magnitude changes over an FFT window, from 0 to 1. Onsets are 0/1 flux peaks above the band's recent mean plus standard deviation, confirmed one update later; levels below -70 dB are ignored. Repeated source timestamps hold results; source changes, backward seeks and long gaps reset history.");
+        ImGui::Spacing();
+        ImGui::TextUnformatted("Linear RGB uses the selected working colour space before transfer encoding. Overall RGB follows the app's gamut-mapping setting. Band RGB is always gamut-mapped with its largest channel at 1, or black for an empty band; magnitude remains separate. Colour smoothing switches select source or presented chromaticity. The optional band frame_number is the full int64 snapshot counter; meta/frame_index and array headers use its low 24 bits.");
         ImGui::PopTextWrapPos();
         ImGui::EndPopup();
     }
@@ -300,12 +306,15 @@ void OSCRoutingWindow::renderContents(UIState& state) {
         searchFocusRequested_ = false;
     }
     if (ImGui::InputTextWithHint("##Search", "Filter outputs or addresses", search_.data(), search_.size())) scroll_.reset();
-    ImGui::TextDisabled("%zu enabled  |  %s/update  |  %zu %s  |  max %s  |  %.1f kB/s",
+    ImGui::BeginDisabled(dialogOpen || state.nativeMenuTracking);
+    ImGui::TextUnformatted("Smooth band magnitudes");
+    ImGui::SameLine();
+    if (slidingToggle("Band magnitude smoothing", config.smoothBandMagnitudes))
+        osc.setRouting(config.routing, config.smoothBandMagnitudes);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("%zu enabled  |  %s/refresh  |  %zu %s  |  max %s  |  %.1f kB/s",
         enabled, formattedBytes(total.bytes).c_str(), total.packets, total.packets == 1 ? "packet" : "packets",
         formattedBytes(total.largestPacket).c_str(), stats.bytesPerSecond / 1000.0);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("Encoded OSC sizes include addresses, arguments, padding and bundle overhead.\nTransfer rate is measured while sending. Disabled rows show their potential size.\nOptional packets are limited to 1,200 B; the existing built-in bundle is preserved.");
-    if ((stats.skippedFrames > 0 || stats.failedFrames > 0) && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%llu queued frames replaced; %llu failed sends. Older queued frames are replaced to keep OSC current.", static_cast<unsigned long long>(stats.skippedFrames), static_cast<unsigned long long>(stats.failedFrames));
     const auto setupColumns = [] {
         ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, 68);
         ImGui::TableSetupColumn("Output", ImGuiTableColumnFlags_WidthStretch);
@@ -404,15 +413,13 @@ void OSCRoutingWindow::renderContents(UIState& state) {
                     ImGui::Selectable(address, selection_.Contains(static_cast<ImGuiID>(index)),
                         ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap, {0, ImGui::GetTextLineHeight()});
                     ImGui::PopStyleVar();
-                    if (ImGui::IsItemFocused()) {
+                    if (ImGui::IsItemFocused() && ImGui::GetCurrentContext()->NavJustMovedToId == ImGui::GetItemID()) {
                         const auto* list = ImGui::GetCurrentWindow();
                         const float top = ImGui::GetItemRectMin().y - list->InnerRect.Min.y;
                         const float bottom = ImGui::GetItemRectMax().y - list->InnerRect.Max.y;
                         if (top < 0.0f) scroll_.target = std::max(0.0f, scroll_.position + top);
                         else if (bottom > 0.0f) scroll_.target = scroll_.position + bottom;
                     }
-                    if (ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) ImGui::SetTooltip("%s / %s\n%s\n%s%s", route.group.c_str(), route.name.c_str(),
-                        route.address.c_str(), route.type.c_str(), route.builtIn ? " / built-in" : " / optional");
                     if (ImGui::BeginPopupContextItem("Address")) {
                         if (ImGui::MenuItem("Copy address")) ImGui::SetClipboardText(route.address.c_str());
                         ImGui::EndPopup();
@@ -421,10 +428,8 @@ void OSCRoutingWindow::renderContents(UIState& state) {
                     bool rowChanged = false;
                     if (route.supportsSmoothing) {
                         rowChanged |= slidingToggle("Smoothing", setting.smoothing);
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Use the existing presented result instead of its source value. Follows Synesthesia's smoothing settings; no additional filter is applied.");
                     } else {
                         ImGui::TextDisabled("-");
-                        if (ImGui::IsItemHovered()) ImGui::SetTooltip("This output has a fixed stage or no smoothed equivalent");
                     }
                     ImGui::TableSetColumnIndex(3);
                     if (!frame || !output.available) ImGui::TextDisabled("Unavailable");
@@ -462,7 +467,7 @@ void OSCRoutingWindow::renderContents(UIState& state) {
     }
     ImGui::EndChild();
     ImGui::PopStyleVar(3);
-    if (changed) osc.setRouting(config.routing);
+    if (changed) osc.setRouting(config.routing, config.smoothBandMagnitudes);
     if (!message_.empty() && messageRemaining_ > 0.0f) {
         const float alpha = std::clamp(messageRemaining_ / 0.4f, 0.0f, 1.0f);
         const float padding = ImGui::GetStyle().WindowPadding.x;

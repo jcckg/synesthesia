@@ -42,6 +42,11 @@ void validateSettings(const OSCRoute& route, const OSCRouteSettings& settings) {
     require(!settings.smoothing || route.supportsSmoothing, "Smoothing is unavailable for " + route.address);
 }
 
+Json arrayTransportFormat() {
+    return {{"layout", "frame-indexed"}, {"spectrum_chunk_size", kSpectrumChunkSize},
+        {"band_count", ColourPresentation::contributionBandCount}, {"frame_index_modulus", kFrameIndexModulus}};
+}
+
 }
 
 bool saveRoutingConfig(const std::string& path, const OSCConfig& config, std::string& error) {
@@ -59,8 +64,10 @@ bool saveRoutingConfig(const std::string& path, const OSCConfig& config, std::st
                 {"smoothing", setting->second.smoothing}});
         }
         for (const auto& [address, setting] : config.routing) validateSettings(findRoute(address), setting);
-        Json document{{"format", "synesthesia-osc-routing"}, {"format_version", 1},
+        Json document{{"format", "synesthesia-osc-routing"}, {"format_version", 3},
             {"app_version", SYNESTHESIA_VERSION_STRING},
+            {"array_transport", arrayTransportFormat()},
+            {"band_magnitude_smoothing", config.smoothBandMagnitudes},
             {"connection", {{"destination", config.destinationHost}, {"transmit_port", config.transmitPort}, {"receive_port", config.receivePort}}},
             {"routes", std::move(routes)}};
         require(!path.empty(), "No configuration file selected");
@@ -95,13 +102,25 @@ bool loadRoutingConfig(const std::string& path, OSCConfig& config, std::string& 
         std::ifstream file(path, std::ios::binary);
         require(file.is_open(), "Unable to open configuration file");
         const auto document = Json::parse(file);
-        fields(document, {"format", "format_version", "app_version", "connection", "routes"});
         require(document.at("format") == "synesthesia-osc-routing", "Unrecognised configuration format");
-        require(document.at("format_version").is_number_integer() && document.at("format_version") == 1, "Unsupported configuration format version");
+        require(document.at("format_version").is_number_integer() &&
+            (document.at("format_version") == 1 || document.at("format_version") == 2 || document.at("format_version") == 3), "Unsupported configuration format version");
+        const bool indexedArrays = document.at("format_version") == 3;
+        const bool magnitudeSmoothing = document.at("format_version") != 1;
+        if (indexedArrays) {
+            fields(document, {"format", "format_version", "app_version", "connection", "routes", "band_magnitude_smoothing", "array_transport"});
+            require(document.at("array_transport") == arrayTransportFormat(), "OSC array transport has changed");
+        } else if (magnitudeSmoothing) fields(document, {"format", "format_version", "app_version", "connection", "routes", "band_magnitude_smoothing"});
+        else fields(document, {"format", "format_version", "app_version", "connection", "routes"});
         require(document.at("app_version").is_string() && !document.at("app_version").get<std::string>().empty(), "Invalid app version");
         const auto& connection = document.at("connection");
         fields(connection, {"destination", "transmit_port", "receive_port"});
         OSCConfig candidate = config;
+        candidate.smoothBandMagnitudes = false;
+        if (magnitudeSmoothing) {
+            require(document.at("band_magnitude_smoothing").is_boolean(), "Invalid band magnitude smoothing switch");
+            candidate.smoothBandMagnitudes = document.at("band_magnitude_smoothing").get<bool>();
+        }
         candidate.destinationHost = connection.at("destination").get<std::string>();
         const auto destination = validateOSCDestination(candidate.destinationHost);
         require(destination.valid, destination.errorMessage);
@@ -124,6 +143,8 @@ bool loadRoutingConfig(const std::string& path, OSCConfig& config, std::string& 
             require(item.at("smoothing_available").is_boolean() && item.at("smoothing_available") == route.supportsSmoothing, "Output processing has changed: " + address);
             require(item.at("enabled").is_boolean() && item.at("smoothing").is_boolean(), "Invalid output switch: " + address);
             OSCRouteSettings setting{item.at("enabled").get<bool>(), item.at("smoothing").get<bool>()};
+            require(indexedArrays || !setting.enabled || route.type != "float32[]",
+                "This configuration enables the previous OSC array format. Recreate its array routes for the current frame-indexed format.");
             validateSettings(route, setting);
             require(candidate.routing.emplace(address, setting).second, "Duplicate OSC output: " + address);
         }

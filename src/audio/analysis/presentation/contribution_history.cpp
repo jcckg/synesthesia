@@ -87,7 +87,7 @@ const ColourPresentation::SpectralContributions& ContributionHistory::process(
         }
         const double rate = manual ? std::min(response95 / .04,
             response95 / base + 2.0 * std::numbers::pi * 4.0 * std::sqrt(squaredSpeed)) : std::numeric_limits<double>::infinity();
-        const double retained = dt > 0.0 ? std::exp(-rate * dt) : 1.0;
+        const double retained = smoothingRetention(response95 / rate, dt);
         const double response = retained > 0.0 && retained < 1.0 ? -response95 * dt / std::log(retained) : 0.0;
         double size = 0.0;
         for (std::size_t c = 0; c < 3; ++c) {

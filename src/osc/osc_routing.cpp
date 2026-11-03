@@ -11,7 +11,9 @@
 #include <cmath>
 #include <stdexcept>
 #include <limits>
+#include <optional>
 #include <type_traits>
+#include <string_view>
 
 namespace Synesthesia::OSC {
 
@@ -85,10 +87,11 @@ std::vector<OSCOutput> builtInOutputs(const OSCFrameData& frame) {
     appendFields(packet, frame.phase, phaseFields);
     appendFloatValue(packet, kFrameAnalysisSpectralFluxAddress, frame.spectral.spectralFlux);
     appendBoolValue(packet, kFrameAnalysisOnsetDetectedAddress, frame.transient.onsetDetected);
+    appendInt32Value(packet, kFrameMetaFrameIndexAddress, frameIndex(frame));
     return packet;
 }
 
-std::size_t padded(std::size_t length) {
+constexpr std::size_t padded(std::size_t length) {
     return (length + 3) & ~std::size_t(3);
 }
 
@@ -142,25 +145,141 @@ void appendScalar(osc::OutboundPacketStream& packet, const OSCOutput& output) {
     packet << osc::EndMessage;
 }
 
-std::size_t chunkLength(const std::string& address, std::size_t remaining) {
-    auto count = std::min<std::size_t>(remaining, kOptionalPacketLimit / 5);
-    while (count > 0 && padded(address.size() + 1) + padded(count + 7) + 32 + count * 4 > kOptionalPacketLimit) --count;
+constexpr std::size_t kBundleHeaderSize = 16;
+constexpr std::size_t kContextMessageSize = padded(std::string_view(kFrameContextAddress).size() + 1) +
+    padded(sizeof("ihhhiiiii") + 1) + sizeof(int32_t) * 6 + sizeof(int64_t) * 3;
+constexpr std::size_t kPacketHeaderSize = kBundleHeaderSize + 4 + kContextMessageSize;
+
+std::size_t scalarSize(const OSCOutput& output) {
+    const auto size = std::visit([](const auto& value) -> std::size_t {
+        using T = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<T, std::string>) return padded(value.size() + 1);
+        if constexpr (std::is_same_v<T, bool>) return 0;
+        return sizeof(T);
+    }, output.value);
+    return padded(output.address.size() + 1) + 4 + size;
+}
+
+std::size_t arraySize(std::string_view address, std::size_t count) {
+    return padded(address.size() + 1) + padded(count + 3) + 4 + count * 4;
+}
+
+bool selected(const OSCOutput& output, const OSCRouting& routing, const OSCEncodingOptions& options) {
+    const auto setting = routing.find(output.address);
+    return setting != routing.end() && setting->second.enabled &&
+        (options.includeBandFrequencies || output.address != kBandFrequenciesAddress);
+}
+
+bool spectrumOutput(const OSCOutput& output) {
+    return output.address.starts_with("/synesthesia/frame/spectrum/");
+}
+
+std::size_t spectrumLength(const OSCFrameData& frame, std::span<const OSCOutput> outputs) {
+    if (!frame.magnitudes.empty()) return frame.magnitudes.size();
+    if (frame.meta.fftSize > 0) return static_cast<std::size_t>(frame.meta.fftSize) / 2 + 1;
+    std::size_t count = 0;
+    for (const auto& output : outputs)
+        if (output.vector && spectrumOutput(output)) count = std::max(count, output.length());
     return count;
 }
 
-OSCPacket encodeChunk(const OSCFrameData& frame, const OSCOutput& output, std::size_t offset, std::size_t count) {
-    OSCPacket result;
-    result.bytes.resize(kOptionalPacketLimit);
-    osc::OutboundPacketStream packet(result.bytes.data(), result.bytes.size());
-    packet << osc::BeginMessage(output.address.c_str())
-           << static_cast<osc::int64>(frame.frameId)
+std::size_t spectrumChunks(std::size_t count, std::size_t limit) {
+    if (count == 0) return 1;
+    if (kPacketHeaderSize + 4 + arraySize(kVectorAddresses[0], count) <= limit) return 1;
+    return (count + kSpectrumChunkSize - 1) / kSpectrumChunkSize;
+}
+
+struct FrameContext {
+    int32_t arrayMask = 0;
+    int32_t availableMask = 0;
+    int32_t spectrumCount = 0;
+    int32_t spectrumChunks = 1;
+};
+
+FrameContext frameContext(const OSCFrameData& frame, std::span<const OSCOutput> outputs,
+                          const OSCRouting& routing, const OSCEncodingOptions& options) {
+    FrameContext context;
+    const auto count = spectrumLength(frame, outputs);
+    if (count > static_cast<std::size_t>(std::numeric_limits<int32_t>::max()))
+        throw std::length_error("OSC spectrum exceeds the supported length");
+    context.spectrumCount = static_cast<int32_t>(count);
+    context.spectrumChunks = static_cast<int32_t>(spectrumChunks(count, std::min(options.packetLimit, kPacketLimit)));
+    for (const auto& output : outputs) {
+        if (!output.vector || !selected(output, routing, options)) continue;
+        const auto found = std::find(kVectorAddresses.begin(), kVectorAddresses.end(), output.address);
+        if (found == kVectorAddresses.end()) throw std::invalid_argument("Unrecognised OSC array: " + output.address);
+        const auto bit = int32_t{1} << static_cast<unsigned>(found - kVectorAddresses.begin());
+        context.arrayMask |= bit;
+        const auto expected = spectrumOutput(output) ? count : ColourPresentation::contributionBandCount;
+        if (output.available && expected > 0 && output.length() == expected) context.availableMask |= bit;
+    }
+    return context;
+}
+
+void appendContext(osc::OutboundPacketStream& packet, const OSCFrameData& frame, const FrameContext& context) {
+    packet << osc::BeginMessage(kFrameContextAddress)
+           << static_cast<osc::int32>(frameIndex(frame))
+           << static_cast<osc::int64>(frame.sessionId)
            << static_cast<osc::int64>(frame.sourceId)
            << static_cast<osc::int64>(frame.meta.frameTimestamp)
-           << static_cast<osc::int32>(offset)
-           << static_cast<osc::int32>(output.samples.size());
-    for (std::size_t i = 0; i < count; ++i) packet << output.samples[offset + i];
-    packet << osc::EndMessage;
-    result.bytes.resize(packet.Size());
+           << static_cast<osc::int32>(context.arrayMask)
+           << static_cast<osc::int32>(context.availableMask)
+           << static_cast<osc::int32>(context.spectrumCount)
+           << static_cast<osc::int32>(context.spectrumChunks)
+           << static_cast<osc::int32>(ColourPresentation::contributionBandCount)
+           << osc::EndMessage;
+}
+
+template <typename Begin, typename Message, typename End>
+OSCOutputSize visitPackets(const OSCFrameData& frame, std::span<const OSCOutput> outputs,
+                          const OSCRouting& routing, const OSCEncodingOptions& options,
+                          Begin&& begin, Message&& message, End&& end) {
+    const auto limit = std::min(options.packetLimit, kPacketLimit);
+    const auto context = frameContext(frame, outputs, routing, options);
+    OSCOutputSize result;
+    std::size_t bytes = 0;
+    const auto finish = [&] {
+        if (bytes == 0) return;
+        end();
+        result.bytes += bytes;
+        ++result.packets;
+        result.largestPacket = std::max(result.largestPacket, bytes);
+        bytes = 0;
+    };
+    const auto append = [&](const OSCOutput& output, std::string_view address, std::size_t offset, std::size_t count) {
+        const auto size = 4 + (output.vector ? arraySize(address, count) : scalarSize(output));
+        if (kPacketHeaderSize + size > limit) throw std::length_error("OSC message exceeds the packet limit");
+        if (bytes != 0 && bytes + size > limit) finish();
+        if (bytes == 0) {
+            begin(context, limit);
+            bytes = kPacketHeaderSize;
+        }
+        bool available = true;
+        if (output.vector) {
+            const auto found = std::find(kVectorAddresses.begin(), kVectorAddresses.end(), output.address);
+            available = found != kVectorAddresses.end() &&
+                (context.availableMask & (int32_t{1} << static_cast<unsigned>(found - kVectorAddresses.begin()))) != 0;
+        }
+        message(output, address, offset, count, available);
+        bytes += size;
+    };
+    for (const auto& output : outputs) {
+        if (!selected(output, routing, options)) continue;
+        if (!output.vector) {
+            append(output, output.address, 0, 0);
+            continue;
+        }
+        const auto count = spectrumOutput(output) ? static_cast<std::size_t>(context.spectrumCount) : ColourPresentation::contributionBandCount;
+        if (!spectrumOutput(output) || context.spectrumChunks == 1) {
+            append(output, output.address, 0, count);
+            continue;
+        }
+        for (std::size_t offset = 0; offset < count; offset += kSpectrumChunkSize) {
+            const auto address = output.address + "/" + std::to_string(offset / kSpectrumChunkSize);
+            append(output, address, offset, std::min(kSpectrumChunkSize, count - offset));
+        }
+    }
+    finish();
     return result;
 }
 
@@ -184,6 +303,15 @@ const std::vector<OSCRoute>& outputCatalogue() {
         result.push_back({bands + "cie_y", "CIE Y", "Contribution bands", "float32[]", false, true});
         result.push_back({bands + "cie_z", "CIE Z", "Contribution bands", "float32[]", false, true});
         result.push_back({bands + "response_seconds", "Response time", "Contribution bands", "float32[]", false});
+        result.push_back({bands + "spectral_flux", "Spectral flux", "Contribution bands", "float32[]", false});
+        result.push_back({bands + "onset_detected", "Onset detected", "Contribution bands", "float32[]", false});
+        result.push_back({bands + "levels_normalised", "Normalised levels", "Contribution bands", "float32[]", false});
+        for (const auto* component : {"r", "g", "b"})
+            result.push_back({bands + "linear_" + component, std::string("Linear ") + component, "Contribution bands", "float32[]", false, true});
+        result.push_back({bands + "frame_number", "Frame number", "Contribution bands", "int64", false});
+        for (const auto* component : {"r", "g", "b"})
+            result.push_back({std::string("/synesthesia/frame/colour/linear_") + component, std::string("Linear ") + component, "Colour", "float32", false, true});
+        result.push_back({"/synesthesia/frame/colour/space", "Working colour space", "Colour", "string", false});
         return result;
     }();
     return catalogue;
@@ -192,11 +320,11 @@ const std::vector<OSCRoute>& outputCatalogue() {
 OSCRouting defaultRouting() {
     OSCRouting result;
     for (const auto& route : outputCatalogue())
-        result.emplace(route.address, OSCRouteSettings{route.builtIn, route.builtIn && route.address.find("/colour/") != std::string::npos});
+        result.emplace(route.address, OSCRouteSettings{route.builtIn, route.supportsSmoothing && route.address.find("/colour/") != std::string::npos});
     return result;
 }
 
-std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting& routing, bool includeDisabled, bool includeSamples) {
+std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting& routing, bool includeDisabled, bool includeSamples, bool smoothBandMagnitudes, bool includeBandFrequencies) {
     auto result = builtInOutputs(frame);
     for (auto& output : result) {
         const auto setting = routing.find(output.address);
@@ -233,7 +361,8 @@ std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting&
     })) return result;
     const auto enabled = [&](const std::string& address) {
         const auto setting = routing.find(address);
-        return includeDisabled || (setting != routing.end() && setting->second.enabled);
+        return includeDisabled || (setting != routing.end() && setting->second.enabled &&
+            (includeBandFrequencies || address != kBandFrequenciesAddress));
     };
     const auto addVector = [&](const std::string& address, auto&& makeValues, bool available, std::size_t length = ColourPresentation::contributionBandCount) {
         if (!enabled(address)) return;
@@ -268,7 +397,7 @@ std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting&
             return values;
         }();
         return frequencies;
-    }, frame.sourceContributions != nullptr);
+    }, true);
     for (int component = -1; component < 4; ++component) {
         const auto address = bands + (component == -1 ? "magnitudes" : component == 3 ? "response_seconds" : component == 0 ? "cie_x" : component == 1 ? "cie_y" : "cie_z");
         if (!enabled(address)) continue;
@@ -276,6 +405,8 @@ std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting&
         const bool smoothing = component >= 0 && component < 3 && setting != routing.end() && setting->second.smoothing;
         const auto& contributions = smoothing || component == 3 ? frame.presentedContributions : frame.sourceContributions;
         addVector(address, [&] {
+            if (component == -1 && smoothBandMagnitudes)
+                return std::vector<float>(frame.bands.smoothedMagnitudes.begin(), frame.bands.smoothedMagnitudes.end());
             std::vector<float> values(ColourPresentation::contributionBandCount, 0.0f);
             if (contributions) {
                 for (const auto& band : *contributions) {
@@ -286,68 +417,126 @@ std::vector<OSCOutput> buildOutputs(const OSCFrameData& frame, const OSCRouting&
                 }
             }
             return values;
-        }, contributions != nullptr);
+        }, contributions != nullptr && (component != -1 || !smoothBandMagnitudes || frame.bands.available));
+    }
+    addVector(bands + "spectral_flux", [&] {
+        return std::vector<float>(frame.bands.spectralFlux.begin(), frame.bands.spectralFlux.end());
+    }, frame.bands.available);
+    addVector(bands + "onset_detected", [&] {
+        return std::vector<float>(frame.bands.onsetDetected.begin(), frame.bands.onsetDetected.end());
+    }, frame.bands.available);
+    addVector(bands + "levels_normalised", [&] {
+        std::vector<float> values(ColourPresentation::contributionBandCount, 0.0f);
+        if (smoothBandMagnitudes) std::copy(frame.bands.smoothedMagnitudes.begin(), frame.bands.smoothedMagnitudes.end(), values.begin());
+        else if (frame.sourceContributions) {
+            for (const auto& band : *frame.sourceContributions)
+                if (band.band < values.size() && std::isfinite(band.magnitude)) values[band.band] += std::max(0.0f, band.magnitude);
+        }
+        for (auto& value : values)
+            value = value > 0.0f && std::isfinite(value) ?
+                std::clamp((20.0f * std::log10(value) - kBandLevelMinimumDb) / -kBandLevelMinimumDb, 0.0f, 1.0f) : 0.0f;
+        return values;
+    }, frame.sourceAvailable && frame.sourceContributions != nullptr && (!smoothBandMagnitudes || frame.bands.available));
+    using BandColours = std::array<ColourCore::RGB, ColourPresentation::contributionBandCount>;
+    std::array<std::optional<BandColours>, 2> bandColours;
+    const std::array<const char*, 3> components{"r", "g", "b"};
+    for (std::size_t component = 0; component < components.size(); ++component) {
+        const auto address = bands + "linear_" + components[component];
+        const auto setting = routing.find(address);
+        const bool smoothing = setting != routing.end() && setting->second.smoothing;
+        const auto& contributions = smoothing ? frame.presentedContributions : frame.sourceContributions;
+        addVector(address, [&] {
+            auto& colours = bandColours[smoothing ? 1 : 0];
+            if (!colours) {
+                colours.emplace();
+                std::array<std::array<double, 3>, ColourPresentation::contributionBandCount> xyz{};
+                if (contributions) {
+                    for (const auto& band : *contributions) {
+                        if (band.band >= xyz.size()) continue;
+                        for (std::size_t c = 0; c < 3; ++c)
+                            if (std::isfinite(band.xyz[c])) xyz[band.band][c] += static_cast<double>(band.xyz[c]);
+                    }
+                }
+                for (std::size_t i = 0; i < xyz.size(); ++i) {
+                    if (xyz[i][1] <= 0.0) continue;
+                    auto& rgb = (*colours)[i];
+                    ColourCore::XYZtoRGB(static_cast<float>(xyz[i][0] / xyz[i][1]), 1.0f,
+                        static_cast<float>(xyz[i][2] / xyz[i][1]), rgb.r, rgb.g, rgb.b, frame.colourSpace, false, true);
+                    const float peak = std::max({rgb.r, rgb.g, rgb.b});
+                    if (peak > 0.0f && std::isfinite(peak)) {
+                        rgb.r /= peak;
+                        rgb.g /= peak;
+                        rgb.b /= peak;
+                    } else rgb = {};
+                }
+            }
+            std::vector<float> values(colours->size());
+            for (std::size_t i = 0; i < values.size(); ++i)
+                values[i] = component == 0 ? (*colours)[i].r : component == 1 ? (*colours)[i].g : (*colours)[i].b;
+            return values;
+        }, contributions != nullptr && (smoothing ? frame.presentedAnalysis.available : frame.sourceAvailable));
+    }
+    if (enabled(bands + "frame_number"))
+        result.push_back({bands + "frame_number", static_cast<int64_t>(frame.frameId), {}, false, frame.sourceAvailable && frame.sourceContributions != nullptr});
+    for (std::size_t component = 0; component < components.size(); ++component) {
+        const auto address = std::string("/synesthesia/frame/colour/linear_") + components[component];
+        if (!enabled(address)) continue;
+        const auto setting = routing.find(address);
+        const bool smoothing = setting != routing.end() && setting->second.smoothing;
+        const auto& rgb = smoothing ? frame.colour.linear : frame.sourceColour.linear;
+        const bool available = smoothing ? frame.presentedAnalysis.available : frame.sourceAnalysis.available;
+        const float value = component == 0 ? rgb.r : component == 1 ? rgb.g : rgb.b;
+        result.push_back({address, available ? value : NAN, {}, false, available});
+    }
+    const std::string spaceAddress = "/synesthesia/frame/colour/space";
+    if (enabled(spaceAddress)) {
+        const char* space = frame.colourSpace == ColourCore::ColourSpace::SRGB ? "sRGB" :
+            frame.colourSpace == ColourCore::ColourSpace::DisplayP3 ? "Display P3" : "Rec.2020";
+        appendStringValue(result, spaceAddress.c_str(), space);
     }
     return result;
 }
 
-std::vector<OSCPacket> encodePackets(const OSCFrameData& frame, std::span<const OSCOutput> outputs, const OSCRouting& routing, std::size_t scalarBufferSize) {
+std::vector<OSCPacket> encodePackets(const OSCFrameData& frame, std::span<const OSCOutput> outputs,
+                                    const OSCRouting& routing, const OSCEncodingOptions& options) {
     std::vector<OSCPacket> result;
-    OSCPacket builtIn;
-    builtIn.bytes.resize(scalarBufferSize);
-    osc::OutboundPacketStream packet(builtIn.bytes.data(), builtIn.bytes.size());
-    packet << osc::BeginBundleImmediate;
-    std::size_t scalarCount = 0;
-    for (const auto& output : outputs) {
-        const auto setting = routing.find(output.address);
-        if (setting == routing.end() || !setting->second.enabled || output.vector) continue;
-        appendScalar(packet, output);
-        ++scalarCount;
-    }
-    packet << osc::EndBundle;
-    if (scalarCount > 0) {
-        builtIn.bytes.resize(packet.Size());
-        result.push_back(std::move(builtIn));
-    }
-    for (const auto& output : outputs) {
-        const auto setting = routing.find(output.address);
-        if (setting == routing.end() || !setting->second.enabled || !output.vector) continue;
-        if (!output.available || output.samples.empty()) {
-            auto unavailable = output;
-            unavailable.samples.clear();
-            result.push_back(encodeChunk(frame, unavailable, 0, 0));
-            continue;
-        }
-        for (std::size_t offset = 0; offset < output.samples.size();) {
-            const auto count = chunkLength(output.address, output.samples.size() - offset);
-            if (count == 0) throw std::length_error("OSC address exceeds the packet limit");
-            result.push_back(encodeChunk(frame, output, offset, count));
-            offset += count;
-        }
-    }
+    std::optional<osc::OutboundPacketStream> packet;
+    visitPackets(frame, outputs, routing, options,
+        [&](const FrameContext& context, std::size_t limit) {
+            result.emplace_back().bytes.resize(limit);
+            packet.emplace(result.back().bytes.data(), limit);
+            *packet << osc::BeginBundleImmediate;
+            appendContext(*packet, frame, context);
+        },
+        [&](const OSCOutput& output, std::string_view address, std::size_t offset, std::size_t count, bool available) {
+            if (!output.vector) {
+                appendScalar(*packet, output);
+                return;
+            }
+            *packet << osc::BeginMessage(address.data()) << static_cast<osc::int32>(frameIndex(frame));
+            for (std::size_t i = 0; i < count; ++i)
+                *packet << (available && offset + i < output.samples.size() ? output.samples[offset + i] : 0.0f);
+            *packet << osc::EndMessage;
+        },
+        [&] {
+            *packet << osc::EndBundle;
+            result.back().bytes.resize(packet->Size());
+            packet.reset();
+        });
     return result;
 }
 
-OSCOutputSize outputSize(const OSCOutput& output) {
-    if (!output.vector) {
-        std::array<char, 2048> buffer{};
-        osc::OutboundPacketStream packet(buffer.data(), buffer.size());
-        appendScalar(packet, output);
-        return {packet.Size() + 4, 0, 0};
-    }
-    OSCOutputSize result;
-    auto size = output.available ? output.length() : 0;
-    std::size_t offset = 0;
-    do {
-        const auto count = chunkLength(output.address, size - offset);
-        const auto bytes = padded(output.address.size() + 1) + padded(count + 7) + 32 + count * 4;
-        result.bytes += bytes;
-        ++result.packets;
-        result.largestPacket = std::max(result.largestPacket, bytes);
-        if (count == 0) break;
-        offset += count;
-    } while (offset < size);
-    return result;
+OSCOutputSize outputSize(const OSCFrameData& frame, std::span<const OSCOutput> outputs,
+                         const OSCRouting& routing, const OSCEncodingOptions& options) {
+    return visitPackets(frame, outputs, routing, options,
+        [](const FrameContext&, std::size_t) {},
+        [](const OSCOutput&, std::string_view, std::size_t, std::size_t, bool) {}, [] {});
+}
+
+OSCOutputSize outputSize(const OSCOutput& output, const OSCFrameData& frame) {
+    if (!output.vector) return {scalarSize(output) + 4, 0, 0};
+    const OSCRouting routing{{output.address, {true, false}}};
+    return outputSize(frame, std::span<const OSCOutput>(&output, 1), routing);
 }
 
 }

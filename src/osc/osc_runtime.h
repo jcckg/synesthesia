@@ -28,7 +28,7 @@ public:
 
     bool updateConfig(const OSCConfig& config);
     OSCConfig getConfig() const;
-    void setRouting(const OSCRouting& routing);
+    void setRouting(const OSCRouting& routing, bool smoothBandMagnitudes);
     std::string getLastError() const;
 
     void sendFrame(std::shared_ptr<const OSCFrameData> frame);

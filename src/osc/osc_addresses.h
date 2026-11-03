@@ -16,6 +16,7 @@ inline constexpr const char* kFramePresentedAnalysisAvailableAddress = "/synesth
 inline constexpr const char* kFrameMetaSampleRateAddress = "/synesthesia/frame/meta/sample_rate";
 inline constexpr const char* kFrameMetaFftSizeAddress = "/synesthesia/frame/meta/fft_size";
 inline constexpr const char* kFrameMetaTimestampAddress = "/synesthesia/frame/meta/frame_timestamp_micros";
+inline constexpr const char* kFrameMetaFrameIndexAddress = "/synesthesia/frame/meta/frame_index";
 
 inline constexpr const char* kFrameSignalDominantFrequencyAddress = "/synesthesia/frame/signal/dominant_frequency_hz";
 inline constexpr const char* kFrameSignalDominantWavelengthAddress = "/synesthesia/frame/signal/dominant_wavelength_nm";

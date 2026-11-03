@@ -26,6 +26,8 @@ struct OSCFrameUpdate {
     float sampleRate = 0.0f;
     ColourCore::FrameResult colourResult{};
     ColourCore::RGB displayColour{};
+    ColourCore::ColourSpace colourSpace = ColourCore::ColourSpace::Rec2020;
+    bool applyGamutMapping = true;
     ColourCore::XYZ presentedXYZ{NAN, NAN, NAN};
     double sourceTimestamp = std::numeric_limits<double>::quiet_NaN();
     OSCAnalysisSignals analysisSignals{};
@@ -41,6 +43,18 @@ public:
     void reset();
 
 private:
+    struct BandHistory {
+        double magnitude = 0.0;
+        double smoothedMagnitude = 0.0;
+        double meanFlux = 0.0;
+        double varianceFlux = 0.0;
+        double previousFlux = 0.0;
+        double precedingFlux = 0.0;
+        double previousThreshold = 0.0;
+    };
+    void updateBands(OSCFrameData& frame, const OSCFrameUpdate& update, bool sameSource);
+    std::array<BandHistory, ColourPresentation::contributionBandCount> bandHistory_{};
+    OSCFrameBandData bandData_;
     ColourCore::XYZ previousSource_{NAN, NAN, NAN};
     ColourCore::XYZ previousPresented_{NAN, NAN, NAN};
     double previousTimestamp_ = NAN;

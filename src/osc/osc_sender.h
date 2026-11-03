@@ -6,6 +6,7 @@
 #include "utilities/datagram_socket.h"
 
 #include <memory>
+#include <chrono>
 #include <mutex>
 #include <vector>
 
@@ -20,13 +21,16 @@ public:
     void reset();
     bool sendFrame(const OSCFrameData& frame);
     OSCOutputSize lastSize() const;
-    void setRouting(const OSCRouting& routing);
+    void setRouting(const OSCRouting& routing, bool smoothBandMagnitudes);
 
 private:
     mutable std::mutex mutex_;
     OSCOutputSize lastSize_;
     OSCConfig config_;
     std::unique_ptr<Utilities::DatagramSocket> socket_;
+    std::chrono::steady_clock::time_point nextBandFrequencies_{};
+    uint64_t previousSession_ = 0;
+    uint64_t previousSource_ = 0;
 };
 
 }

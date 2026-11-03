@@ -21,3 +21,4 @@ struct SmoothingSignalFeatures {
 
 float manualResponseTime(float amount);
 float manualSmoothingAmount(float seconds);
+double smoothingRetention(double responseSeconds, double elapsedSeconds);

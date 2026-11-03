@@ -75,6 +75,8 @@ void sendOSCFrame(UIState& state, const RSYNPresentationSettings& settings,
     update.sampleRate = frame.sampleRate;
     update.colourResult = colourResult;
     update.displayColour = ColourCore::RGB{displayR, displayG, displayB};
+    update.colourSpace = settings.colourSpace;
+    update.applyGamutMapping = settings.applyGamutMapping;
     update.analysisSignals = analysisSignals;
     update.sourceContributions = std::move(sourceContributions);
     update.presentedContributions = std::move(presentedContributions);
@@ -105,6 +107,8 @@ void sendOSCStatus(UIState& state, bool liveInput) {
     update.status = Synesthesia::OSC::playbackStatus(recorder.importPhase != 0, recorder.isRecording,
         recorder.audioOutput && recorder.audioOutput->getTotalFrames() > 0 ? recorder.audioOutput->isPlaying() : liveInput);
     update.sourceAvailable = false;
+    update.colourSpace = state.visualSettings.colourSpace;
+    update.applyGamutMapping = state.visualSettings.gamutMappingEnabled;
     update.smoothing = {state.visualSettings.smoothingEnabled, state.visualSettings.manualSmoothing,
         state.visualSettings.colourSmoothingSpeed};
     update.displayColour = {state.resyneState.displayColour[0], state.resyneState.displayColour[1], state.resyneState.displayColour[2]};
