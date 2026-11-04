@@ -1,4 +1,5 @@
 #include "file_drop_manager.h"
+#include "renderer/render_utils.h"
 
 #include <mutex>
 #include <vector>
@@ -26,7 +27,8 @@ void dropCallback(GLFWwindow* window, int pathCount, const char** paths) {
         glfwGetCursorPos(window, &cursorX, &cursorY);
     }
 
-    FileDropManager::enqueue(std::move(collected), cursorX, cursorY);
+    const double scale = static_cast<double>(Renderer::uiDpiScale(window));
+    FileDropManager::enqueue(std::move(collected), cursorX / scale, cursorY / scale);
 }
 
 }

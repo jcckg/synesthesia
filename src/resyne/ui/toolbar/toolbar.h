@@ -44,6 +44,7 @@ bool drawToolButton(const char* label,
                     bool destructive = false);
 
 void drawToolbarSeparator(float height, float spacing = kToolbarGroupSpacing);
+bool drawToolbarTextButton(const char* label, bool active, bool enabled, const ImVec2& size);
 
 ToolbarRenderResult renderToolbar(ToolState& state, const ToolbarRenderContext& context);
 float recorderToolbarHeight(const RecorderState& state, float width);

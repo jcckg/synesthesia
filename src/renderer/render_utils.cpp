@@ -1,6 +1,7 @@
 #include "renderer/render_utils.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "imgui_impl_glfw.h"
 #include "renderer/window.h"
@@ -21,12 +22,13 @@ uint32_t packRgba8(const float red, const float green, const float blue, const f
 }
 
 float uiDpiScale(const Window& window) {
-    const float rawScale = std::max(1.0f, ImGui_ImplGlfw_GetContentScaleForWindow(window.handle()));
-#if defined(_WIN32)
-    return 1.0f + (rawScale - 1.0f) * 0.65f;
-#else
-    return rawScale;
-#endif
+    return uiDpiScale(window.handle());
+}
+
+float uiDpiScale(GLFWwindow* window) {
+    if (window == nullptr) return 1.0f;
+    const float scale = ImGui_ImplGlfw_GetContentScaleForWindow(window);
+    return std::isfinite(scale) && scale > 0.0f ? scale : 1.0f;
 }
 
 }

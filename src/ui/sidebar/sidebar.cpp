@@ -13,6 +13,7 @@
 #include "renderer/presentation_resources.h"
 #include "resyne/recorder/recorder.h"
 #include "resyne/ui/recorder/recorder_constants.h"
+#include "resyne/ui/toolbar/toolbar.h"
 
 namespace Sidebar {
 namespace {
@@ -51,11 +52,10 @@ void renderFooter(const RenderArgs& args, bool showHideHint) {
 }
 
 void renderViewTabs(RenderArgs& args) {
-    constexpr float TAB_HEIGHT = ReSyne::Timeline::RULER_HEIGHT;
-    const ImGuiStyle& style = ImGui::GetStyle();
+    constexpr float tabHeight = ReSyne::Timeline::RULER_HEIGHT;
     const float horizontalPadding = args.layout.padding;
     const float availableWidth = args.layout.width - horizontalPadding * 2.0f;
-    const float buttonSpacing = style.ItemSpacing.x;
+    const float buttonSpacing = ReSyne::UI::Utilities::kToolbarButtonSpacing;
     const float buttonWidth = std::max(0.0f, (availableWidth - buttonSpacing) * 0.5f);
 
     constexpr float WINDOW_PADDING = 9.0f;
@@ -63,10 +63,6 @@ void renderViewTabs(RenderArgs& args) {
     ImGui::SetCursorPosY(timelineStartY);
 
     ImGui::SetCursorPosX(horizontalPadding);
-
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(buttonSpacing, style.ItemSpacing.y));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, UIStyler::cornerRadius);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(14.0f, 4.0f));
 
     struct TabDefinition {
         const char* label;
@@ -84,36 +80,20 @@ void renderViewTabs(RenderArgs& args) {
         const bool detachedVisualisationOpen = args.recorderState.detachedVisualisation.isOpen;
         const bool tabEnabled =
             !(detachedVisualisationOpen && tabs[i].view == UIState::View::Visualisation);
-        const ImVec4 baseColour = ImGui::GetStyleColorVec4(isActive ? ImGuiCol_ButtonActive : ImGuiCol_Button);
-        const ImVec4 hoverColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonHovered);
-        const ImVec4 activeColour = ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive);
-        const ImVec4 textColour = ImGui::GetStyleColorVec4(ImGuiCol_Text);
-
-        ImGui::PushStyleColor(ImGuiCol_Button, baseColour);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, hoverColour);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, activeColour);
-        ImGui::PushStyleColor(ImGuiCol_Text, textColour);
-
-        ImGui::BeginDisabled(!tabEnabled);
-        if (ImGui::Button(tabs[i].label, ImVec2(buttonWidth, TAB_HEIGHT))) {
+        if (ReSyne::UI::Utilities::drawToolbarTextButton(tabs[i].label, isActive, tabEnabled, ImVec2(buttonWidth, tabHeight))) {
             args.uiState.visualSettings.activeView = tabs[i].view;
         }
-        ImGui::EndDisabled();
         if (!tabEnabled &&
             tabs[i].view == UIState::View::Visualisation &&
             ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
             ImGui::SetTooltip("%s", ReSyne::UI::kDetachedVisualisationAlreadyOpenTooltip);
         }
 
-        ImGui::PopStyleColor(4);
-
         if (i + 1 < 2) {
-            ImGui::SameLine();
+            ImGui::SameLine(0.0f, buttonSpacing);
         }
     }
     ImGui::PopID();
-
-    ImGui::PopStyleVar(3);
 
     ImGui::Spacing();
     ImGui::Spacing();

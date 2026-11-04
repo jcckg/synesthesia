@@ -111,6 +111,12 @@ void DetachedVisualisationWindow::renderFrame(UIState& state, const AudioInput& 
     }
 
     uiContext_.beginFrame(!state.nativeMenuTracking);
+    if (!state.nativeMenuTracking && window_.isFocused() &&
+        ImGui::IsKeyPressed(ImGuiKey_Escape, false)) {
+        uiContext_.endFrame();
+        close(recorderState);
+        return;
+    }
     if (!state.helpState.showKeyboardShortcuts && !state.nativeMenuTracking) {
         UI::Input::handlePlaybackShortcut(recorderState, window_.isFocused());
     }

@@ -1,6 +1,7 @@
 #include "renderer/imgui_window_context.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "imgui_impl_glfw.h"
 #include "implot.h"
 
@@ -39,11 +40,9 @@ bool ImGuiWindowContext::initialise(const Window& window, const bgfx::ViewId vie
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
-    const float dpiScale = uiDpiScale(window);
-    loadFonts(io, dpiScale);
+    loadFonts(io, 1.0f);
 
     ImGui::StyleColorsDark();
-    ImGui::GetStyle().ScaleAllSizes(dpiScale);
 
     if (!ImGui_ImplGlfw_InitForOther(window.handle(), true)) {
         destroyContexts();
@@ -96,12 +95,27 @@ void ImGuiWindowContext::beginFrame(bool acceptInput) const {
         io.ClearInputMouse();
     }
     ImGui_Implbgfx_NewFrame();
+    const float scale = window_ != nullptr ? uiDpiScale(*window_) : 1.0f;
+    const bool repositioning = io.WantSetMousePos;
+    const auto logicalMousePosition = io.MousePos;
+    if (repositioning) io.MousePos = ImVec2(io.MousePos.x * scale, io.MousePos.y * scale);
     ImGui_ImplGlfw_NewFrame();
+    if (repositioning) io.MousePos = logicalMousePosition;
+    io.DisplaySize = ImVec2(io.DisplaySize.x / scale, io.DisplaySize.y / scale);
+    io.DisplayFramebufferScale = ImVec2(io.DisplayFramebufferScale.x * scale, io.DisplayFramebufferScale.y * scale);
     if (acceptInput && window_ != nullptr && glfwGetWindowAttrib(window_->handle(), GLFW_HOVERED) &&
         glfwGetInputMode(window_->handle(), GLFW_CURSOR) != GLFW_CURSOR_DISABLED) {
         double x = 0.0, y = 0.0;
         glfwGetCursorPos(window_->handle(), &x, &y);
         io.AddMousePosEvent(static_cast<float>(x), static_cast<float>(y));
+    }
+    for (auto& event : ImGui::GetCurrentContext()->InputEventsQueue) {
+        if (static_cast<int32_t>(event.EventId - lastScaledInputEvent_) <= 0) continue;
+        if (event.Type == ImGuiInputEventType_MousePos) {
+            if (event.MousePos.PosX != -FLT_MAX) event.MousePos.PosX /= scale;
+            if (event.MousePos.PosY != -FLT_MAX) event.MousePos.PosY /= scale;
+        }
+        lastScaledInputEvent_ = event.EventId;
     }
     ImGui::NewFrame();
 }
@@ -126,6 +140,7 @@ bool ImGuiWindowContext::isInitialised() const {
 
 void ImGuiWindowContext::destroyContexts() {
     window_ = nullptr;
+    lastScaledInputEvent_ = 0;
     if (implotContext_ != nullptr) {
         ImPlot::DestroyContext(implotContext_);
         implotContext_ = nullptr;

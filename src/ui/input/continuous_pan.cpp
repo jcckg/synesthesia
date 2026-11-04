@@ -5,6 +5,7 @@
 
 #include "resyne/ui/timeline/timeline.h"
 #include "resyne/ui/timeline/timeline_viewport.h"
+#include "renderer/render_utils.h"
 
 namespace UI::Input {
 
@@ -40,7 +41,8 @@ void ContinuousPan::synchronise(ReSyne::Timeline::TimelineState& timeline,
 
     double x = 0.0, y = 0.0;
     glfwGetCursorPos(window_, &x, &y);
-    timeline.grabGestureStart = ImVec2(static_cast<float>(x), static_cast<float>(y));
+    const float scale = Renderer::uiDpiScale(window_);
+    timeline.grabGestureStart = ImVec2(static_cast<float>(x) / scale, static_cast<float>(y) / scale);
     timeline.grabStartViewCentre = timeline.viewCentreNormalised;
     glfwSetInputMode(window_, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     active_ = true;

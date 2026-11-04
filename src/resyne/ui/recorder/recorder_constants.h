@@ -10,7 +10,9 @@ inline constexpr float kToolbarVerticalPadding = kToolbarEdgePadding;
 inline constexpr float kToolbarHorizontalPadding = kToolbarEdgePadding;
 
 inline constexpr const char* kDetachedVisualisationTooltip =
-    "Open Visualisation Mode in another window";
+    "Open detached visualiser";
+inline constexpr const char* kCloseDetachedVisualisationTooltip =
+    "Close detached visualiser";
 inline constexpr const char* kDetachedVisualisationAlreadyOpenTooltip =
     "Visualisation Mode is already open in another window";
 inline constexpr const char* kDetachedVisualisationUnsupportedTooltip =

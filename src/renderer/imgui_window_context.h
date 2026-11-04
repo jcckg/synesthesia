@@ -1,6 +1,7 @@
 #pragma once
 
 #include <bgfx/bgfx.h>
+#include <cstdint>
 
 struct ImGuiContext;
 struct ImPlotContext;
@@ -36,6 +37,7 @@ private:
     bool initialised_ = false;
     mutable bool inputSuppressed_ = false;
     mutable int frameConfigFlags_ = 0;
+    mutable uint32_t lastScaledInputEvent_ = 0;
 };
 
 }

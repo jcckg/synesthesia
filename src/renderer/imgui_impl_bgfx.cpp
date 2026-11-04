@@ -394,8 +394,8 @@ void ImGui_Implbgfx_RenderDrawData(ImDrawData* drawData) {
         }
     }
 
-    const int framebufferWidth = static_cast<int>(drawData->DisplaySize.x * drawData->FramebufferScale.x);
-    const int framebufferHeight = static_cast<int>(drawData->DisplaySize.y * drawData->FramebufferScale.y);
+    const int framebufferWidth = static_cast<int>(std::round(drawData->DisplaySize.x * drawData->FramebufferScale.x));
+    const int framebufferHeight = static_cast<int>(std::round(drawData->DisplaySize.y * drawData->FramebufferScale.y));
     if (framebufferWidth <= 0 || framebufferHeight <= 0) {
         return;
     }

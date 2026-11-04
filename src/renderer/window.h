@@ -47,6 +47,7 @@ public:
     [[nodiscard]] bgfx::SwapChain swapChain() const;
 
 private:
+    void updateContentScale();
     GLFWwindow* window_ = nullptr;
     int minimumWidth_ = 0;
     int minimumHeight_ = 0;
@@ -54,6 +55,7 @@ private:
     int sidePanelMaximumGrowth_ = 0;
     float sidePanelProgress_ = 0.0f;
     bool sidePanelVisible_ = false;
+    float coordinateScale_ = 1.0f;
 };
 
 }

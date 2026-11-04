@@ -309,7 +309,7 @@ void renderAdvancedSettingsPanel(UIState& state
             std::snprintf(
                 debugText.data(),
                 debugText.size(),
-                "Textures: %s\nDisplay: %s\nBackground: %s",
+                "Textures: %s\nSurface: %s\nBackground: %s",
                 texturePrecisionLabel(state.presentationDiagnostics),
                 displaySurfacePrecisionLabel(state.presentationDiagnostics.displaySurfacePrecision),
                 backgroundPresentationLabel(state.presentationDiagnostics));

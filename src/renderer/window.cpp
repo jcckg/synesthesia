@@ -1,5 +1,6 @@
 #include "renderer/window.h"
 #include "renderer/styling/platform_styling.h"
+#include "renderer/render_utils.h"
 
 #include <algorithm>
 #include <chrono>
@@ -53,16 +54,36 @@ bool Window::create(const WindowOptions& options) {
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     glfwWindowHint(GLFW_VISIBLE, GLFW_TRUE);
     glfwWindowHint(GLFW_FOCUS_ON_SHOW, GLFW_TRUE);
+    glfwWindowHint(GLFW_SCALE_TO_MONITOR, GLFW_TRUE);
 
     window_ = glfwCreateWindow(options.width, options.height, options.title, nullptr, nullptr);
     if (window_ == nullptr) return false;
+    coordinateScale_ = uiDpiScale(*this);
+    glfwSetWindowUserPointer(window_, this);
+    glfwSetWindowContentScaleCallback(window_, [](GLFWwindow* handle, float, float) {
+        if (auto* window = static_cast<Window*>(glfwGetWindowUserPointer(handle))) window->updateContentScale();
+    });
     if (options.minimumWidth > 0 || options.minimumHeight > 0) {
         glfwSetWindowSizeLimits(window_,
-            options.minimumWidth > 0 ? options.minimumWidth : GLFW_DONT_CARE,
-            options.minimumHeight > 0 ? options.minimumHeight : GLFW_DONT_CARE,
+            options.minimumWidth > 0 ? static_cast<int>(std::round(static_cast<float>(options.minimumWidth) * coordinateScale_)) : GLFW_DONT_CARE,
+            options.minimumHeight > 0 ? static_cast<int>(std::round(static_cast<float>(options.minimumHeight) * coordinateScale_)) : GLFW_DONT_CARE,
             GLFW_DONT_CARE, GLFW_DONT_CARE);
     }
     return true;
+}
+
+void Window::updateContentScale() {
+    const float scale = uiDpiScale(*this);
+    if (scale == coordinateScale_) return;
+    const float ratio = scale / coordinateScale_;
+    sidePanelGrowth_ = static_cast<int>(std::round(static_cast<float>(sidePanelGrowth_) * ratio));
+    sidePanelMaximumGrowth_ = static_cast<int>(std::round(static_cast<float>(sidePanelMaximumGrowth_) * ratio));
+    coordinateScale_ = scale;
+    sidePanelProgress_ = -1.0f;
+    glfwSetWindowSizeLimits(window_,
+        minimumWidth_ > 0 ? static_cast<int>(std::round(static_cast<float>(minimumWidth_) * scale)) : GLFW_DONT_CARE,
+        minimumHeight_ > 0 ? static_cast<int>(std::round(static_cast<float>(minimumHeight_) * scale)) : GLFW_DONT_CARE,
+        GLFW_DONT_CARE, GLFW_DONT_CARE);
 }
 
 void Window::destroy() {
@@ -102,9 +123,12 @@ void Window::setSidePanelVisible(bool visible, bool onLeft, int width, float pro
     const bool opening = visible && !sidePanelVisible_;
     sidePanelVisible_ = visible;
     sidePanelProgress_ = progress;
+    const int minimumWidth = static_cast<int>(std::round(static_cast<float>(minimumWidth_) * coordinateScale_));
+    const int minimumHeight = static_cast<int>(std::round(static_cast<float>(minimumHeight_) * coordinateScale_));
+    width = static_cast<int>(std::round(static_cast<float>(width) * coordinateScale_));
     const auto restoreLimits = [&] {
-        glfwSetWindowSizeLimits(window_, minimumWidth_ > 0 ? minimumWidth_ : GLFW_DONT_CARE,
-            minimumHeight_ > 0 ? minimumHeight_ : GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
+        glfwSetWindowSizeLimits(window_, minimumWidth > 0 ? minimumWidth : GLFW_DONT_CARE,
+            minimumHeight > 0 ? minimumHeight : GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
     };
     if (glfwGetWindowMonitor(window_) != nullptr || glfwGetWindowAttrib(window_, GLFW_MAXIMIZED)) {
         sidePanelGrowth_ = sidePanelMaximumGrowth_ = 0;
@@ -147,12 +171,12 @@ void Window::setSidePanelVisible(bool visible, bool onLeft, int width, float pro
     const int baseWidth = currentWidth - sidePanelGrowth_;
     if (opening && sidePanelGrowth_ == 0) sidePanelMaximumGrowth_ = std::max(0, std::min(width, maximumWidth - baseWidth));
     const int growth = static_cast<int>(std::round(static_cast<float>(sidePanelMaximumGrowth_) * progress));
-    const int targetWidth = std::max(minimumWidth_, baseWidth + growth);
+    const int targetWidth = std::max(minimumWidth, baseWidth + growth);
     if (progress > 0.0f) {
         const int panelMinimum = static_cast<int>(std::round(static_cast<float>(width) * progress));
-        const int minimum = std::max(minimumWidth_, std::min(minimumWidth_ + panelMinimum, maximumWidth));
+        const int minimum = std::max(minimumWidth, std::min(minimumWidth + panelMinimum, maximumWidth));
         glfwSetWindowSizeLimits(window_, minimum > 0 ? minimum : GLFW_DONT_CARE,
-            minimumHeight_ > 0 ? minimumHeight_ : GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
+            minimumHeight > 0 ? minimumHeight : GLFW_DONT_CARE, GLFW_DONT_CARE, GLFW_DONT_CARE);
     } else {
         restoreLimits();
         if (!visible) sidePanelMaximumGrowth_ = 0;
@@ -175,7 +199,7 @@ int Window::sidePanelExpandedWidth() const {
     if (window_ == nullptr) return 0;
     int width = 0;
     glfwGetWindowSize(window_, &width, nullptr);
-    return width + std::max(0, sidePanelMaximumGrowth_ - sidePanelGrowth_);
+    return static_cast<int>(std::round(static_cast<float>(width + std::max(0, sidePanelMaximumGrowth_ - sidePanelGrowth_)) / coordinateScale_));
 }
 
 bool Window::shouldClose() const {

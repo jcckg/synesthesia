@@ -118,7 +118,7 @@ bool drawButton(const char* id, const char* label, const char* tooltip, const Im
         drawList->AddText(ImVec2(std::floor(position.x + (size.x - textSize.x) * 0.5f),
             std::floor(position.y + (size.y - textSize.y) * 0.5f)), ImGui::GetColorU32(textColour), label);
     }
-    if (active && enabled && !inheritedDisabled && !ImGui::IsItemFocused()) {
+    if (active && enabled && !inheritedDisabled && (!ImGui::IsItemFocused() || !gui.NavCursorVisible)) {
         drawList->AddRect(ImVec2(position.x + 0.5f, position.y + 0.5f),
             ImVec2(position.x + size.x - 0.5f, position.y + size.y - 0.5f),
             ImGui::GetColorU32(ImGuiCol_NavCursor, 0.30f), UIStyler::cornerRadius);
@@ -174,6 +174,11 @@ RecorderLayout recorderLayout(const RecorderState& state, float width) {
 bool drawToolButton(const char* label, const char* tooltip, bool active, bool enabled, float height, bool destructive) {
     const std::string id = std::string("##ToolBtn_") + label;
     return drawButton(id.c_str(), label, tooltip, ImVec2(height, height), active, enabled, destructive, true, false, OuterCorner::None);
+}
+
+bool drawToolbarTextButton(const char* label, bool active, bool enabled, const ImVec2& size) {
+    const std::string id = std::string("##ToolbarText_") + label;
+    return drawButton(id.c_str(), label, nullptr, size, active, enabled, false, false, false, OuterCorner::None);
 }
 
 void drawToolbarSeparator(float height, float spacing) {
@@ -300,12 +305,15 @@ void renderRecorderToolbar(RecorderState& state, const RecorderToolbarContext& c
         }
     }
     drawToolbarSeparator(height, kToolbarIconGroupSpacing);
-    const bool detachedEnabled = timelineEnabled && state.detachedVisualisation.available && !state.detachedVisualisation.isOpen;
-    if (drawToolButton(ICON_FA_WINDOW_RESTORE, nullptr, state.detachedVisualisation.isOpen, detachedEnabled, height))
-        state.detachedVisualisation.openRequested = true;
+    const bool detachedEnabled = (state.detachedVisualisation.isOpen || (timelineEnabled && state.detachedVisualisation.available)) &&
+        !state.detachedVisualisation.openRequested && !state.detachedVisualisation.reattachRequested;
+    if (drawToolButton(ICON_FA_WINDOW_RESTORE, nullptr, state.detachedVisualisation.isOpen, detachedEnabled, height)) {
+        if (state.detachedVisualisation.isOpen) state.detachedVisualisation.reattachRequested = true;
+        else state.detachedVisualisation.openRequested = true;
+    }
     if (context.enabled && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
         ImGui::SetTooltip("%s", !state.detachedVisualisation.available ? kDetachedVisualisationUnsupportedTooltip
-            : state.detachedVisualisation.isOpen ? kDetachedVisualisationAlreadyOpenTooltip : kDetachedVisualisationTooltip);
+            : state.detachedVisualisation.isOpen ? kCloseDetachedVisualisationTooltip : kDetachedVisualisationTooltip);
     }
     ::UI::FileBrowser::drawToolbarButton(state.fileBrowser, height);
     drawToolbarSeparator(height, kToolbarIconGroupSpacing);
